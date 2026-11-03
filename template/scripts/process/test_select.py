@@ -52,6 +52,7 @@ from process_git import git_environment, path_captures, path_matches  # noqa: E4
 
 EX_TEMPFAIL = 75
 EX_CANNOT_JUDGE = 2
+HOST_UNSUITED = 3  # a stack's own preflight: this host cannot run this stack (#373)
 SELECT_TIMEOUT_S = 600
 
 
@@ -154,13 +155,19 @@ def _local_select(root: Path, stack: dict, paths: list[str]) -> list[str]:
     return [t for t in text.replace("\0", "\n").splitlines() if t.strip()]
 
 
-def plan(root: Path, cfg: dict, changed: set[str], klass: str) -> list[dict]:
-    """Per stack: {name, action (run/skip/full/none), targets, fallbacks, unmapped, pins}."""
+def plan(root: Path, cfg: dict, changed: set[str], klass: str,
+         owed: frozenset[str] = frozenset()) -> list[dict]:
+    """Per stack: {name, action (run/skip/full/none/owed), targets, fallbacks, unmapped, pins}.
+    An `owed` stack is not selected at all — its own selector may not run on this host."""
     tracked = _tracked(root)
     stacks = cfg["stacks"]
     pins = _pinned(stacks, changed)
     result = []
     for stack in stacks:
+        if stack["name"] in owed:
+            result.append({"name": stack["name"], "action": "owed", "targets": [], "fallbacks": [],
+                           "unmapped": [], "pins": [], "missing_pins": []})
+            continue
         mine = sorted(p for p in changed if _stack_of(stacks, p) is stack)
         targets: list[str] = []
         fallbacks: list[str] = []
@@ -260,6 +267,76 @@ def _preflight_problem(root: Path, cfg: dict) -> str | None:
     return f"the preflight exited {rc}" if rc else None
 
 
+def _stack_preflight(root: Path, cfg: dict, stack: dict) -> int | str:
+    """The exit of the stack's own preflight, or why it could not run."""
+    argv, timeout = stack["preflight"], cfg["preflight_timeout"]
+    print(f"test_select: $ {shlex.join(argv)}   # preflight of {stack['name']}", flush=True)
+    try:
+        return subprocess.run(argv, cwd=root, timeout=timeout, env=git_environment()).returncode
+    except subprocess.TimeoutExpired:
+        return f"the preflight of {stack['name']} did not finish in {timeout:g} s"
+    except OSError as exc:
+        return f"the preflight of {stack['name']} cannot start ({exc})"
+
+
+def _not_deferrable(root: Path, stack: dict, changed: set[str]) -> str | None:
+    """Why this branch may not defer the stack, or None. Only a host check the
+    integration branch already has, unchanged here, may say "not on this host":
+    a branch never declares its own stack unsuited (`inert` is read the same way)."""
+    try:
+        from check_review import integration_ref  # noqa: PLC0415
+
+        ref = integration_ref(root)
+    except GitReadError as exc:
+        return f"the integration branch cannot be read ({exc})"
+    if not ref:
+        return "there is no integration branch to read the host check from"
+    base = testing_config.config_at(root, ref)
+    there = next((s for s in (base or {}).get("stacks", []) if s["name"] == stack["name"]), None)
+    if not there or there.get("preflight") != stack["preflight"]:
+        return "its preflight is not on the integration branch as it is here"
+    if "-m" in stack["preflight"]:
+        return "it runs a module (`-m`): name the host check's file, so it can be compared"
+    top = root.resolve()
+    for arg in stack["preflight"]:
+        # the repository's own files only: an interpreter or a system tool is no host check
+        target = (root / arg).resolve()
+        if Path(arg).is_absolute() or top not in target.parents or not target.is_file():
+            continue
+        if arg in changed:
+            return f"this branch changes its host check ({arg})"
+        shown = _git_bytes(root, "show", f"{ref}:{arg}")
+        if shown is None or shown != (root / arg).read_bytes():
+            return f"its host check {arg} differs from the integration branch's"
+    return None
+
+
+def merge_environment_problem(root: Path, cfg: dict) -> str | None:
+    """What stops a merge-class run here: the global preflight, then every stack's
+    own — a merge runs every stack, so any non-zero exit (3 included) is the host's."""
+    problem = _preflight_problem(root, cfg)
+    if problem:
+        return problem
+    for stack in (s for s in cfg["stacks"] if s.get("preflight")):
+        rc = _stack_preflight(root, cfg, stack)
+        if rc:
+            return rc if isinstance(rc, str) else f"the preflight of {stack['name']} exited {rc}"
+    return None
+
+
+def _stacks_with_work(root: Path, cfg: dict, changed: set[str]) -> list[dict]:
+    """The stacks this change gives work — their host check runs only then (v2.65 D3).
+    A stack with its own selector counts when the change touches it: the selector
+    itself may need the host, so it never runs before the check."""
+    with_select = frozenset(s["name"] for s in cfg["stacks"] if s["select"])
+    preview = {st["name"]: st["action"] for st in plan(root, cfg, changed, "branch", with_select)}
+    pins = _pinned(cfg["stacks"], changed)
+    return [s for s in cfg["stacks"]
+            if (s["name"] in with_select and (s["name"] in pins or any(
+                _stack_of(cfg["stacks"], p) is s for p in changed)))
+            or preview.get(s["name"]) in ("run", "full")]
+
+
 def _report(steps: list[dict]) -> None:
     for s in steps:
         for note in s["fallbacks"]:
@@ -278,9 +355,20 @@ def merge_certificate_evidence(root: Path, cfg: dict) -> str | None:
     return certificate.merge_evidence(root, cfg["merge_suite"], cfg.get("merge_scope"))
 
 
-def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool) -> int:
+def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool,
+        owed: list[str] | None = None) -> int:
+    """`owed`, when given, receives the stacks this branch push left to the gate host."""
     import lane  # noqa: PLC0415 — fcntl only where tests run
 
+    if klass == "merge":
+        # before any certificate: a merge runs every stack, here or not at all (#373)
+        for stack in (s for s in cfg["stacks"] if s.get("preflight")):
+            rc = _stack_preflight(root, cfg, stack)
+            if rc:
+                why = rc if isinstance(rc, str) else f"the preflight of {stack['name']} exited {rc}"
+                print(f"test_select: environment — {why}; a merge runs every stack, so this host "
+                      f"cannot merge (fix it, or merge on the gate host)", file=sys.stderr)
+                return EX_CANNOT_JUDGE
     evidence = {"push": push_evidence(cfg)}
     wanted = merge_certificate_evidence(root, cfg) if cfg["merge_suite"] else None
     if wanted:  # an unknown scope names no evidence: no hit is possible
@@ -296,8 +384,27 @@ def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool) 
         before = certificate.evidence_tree(root) if not problem else None
         if problem:
             print(f"test_select: no certificate will be written — {problem}")
+    # a stack's own host check runs before its selection: its selector may not run here
+    deferred: list[str] = []
+    checked = [] if klass == "merge" else _stacks_with_work(root, cfg, changed)
+    for stack in (s for s in checked if s.get("preflight")):
+        rc = _stack_preflight(root, cfg, stack)
+        if rc == 0:
+            continue
+        if isinstance(rc, str):
+            print(f"test_select: environment — {rc}; no test ran (fix the host)", file=sys.stderr)
+            return EX_CANNOT_JUDGE
+        why = _not_deferrable(root, stack, changed) if rc == HOST_UNSUITED else None
+        if rc != HOST_UNSUITED or why:
+            print(f"test_select: environment — the preflight of {stack['name']} exited {rc}"
+                  + (f", and it cannot be deferred: {why}" if why else "")
+                  + "; no test ran (fix the host)", file=sys.stderr)
+            return EX_CANNOT_JUDGE
+        deferred.append(stack["name"])
+    if owed is not None:
+        owed[:] = deferred
     # a merge push runs its whole suite: no selection, no local selector
-    steps = [] if klass == "merge" else plan(root, cfg, changed, klass)
+    steps = [] if klass == "merge" else plan(root, cfg, changed, klass, frozenset(deferred))
     _report(steps)
     work: list[tuple[list[str], str, float, str]] = []
     if klass == "merge":
@@ -320,9 +427,13 @@ def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool) 
             elif step["action"] == "run":
                 work.append((_argv(stack, step["targets"]), stack["cwd"], stack["timeout"],
                              f"{stack['name']} selected"))
+    for name in deferred:
+        # never a silent pass: named here, no certificate, no stamp (pre_push)
+        print(f"test_select: owed on the gate host — {name} (this host cannot run it; the train runs it)")
     if not work:
-        print("test_select: nothing to test for this change")
-        return _certify(root, cfg, certify, before)
+        print("test_select: nothing to test for this change" if not deferred
+              else "test_select: nothing else to test here")
+        return _certify(root, cfg, certify and not deferred, before)
     # a run under `make -n` proves nothing: make exits 0 having run no recipe, and the
     # push was accepted on it (#265). Other altering flags and variables (a `make X=1`
     # wrapper) still run the tests — they only deny the certificate, as before
@@ -350,8 +461,9 @@ def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool) 
     except lane.LaneBusy as busy:
         print(lane.tempfail_message(busy, settings["lanes"][name]["wait"]), file=sys.stderr)
         return EX_TEMPFAIL
-    print(f"test_select: green in {int(time.monotonic() - started)} s")
-    return _certify(root, cfg, certify, before)
+    print(f"test_select: green in {int(time.monotonic() - started)} s"
+          + (f" — owed on the gate host: {', '.join(deferred)}" if deferred else ""))
+    return _certify(root, cfg, certify and not deferred, before)
 
 
 class _no_hold:

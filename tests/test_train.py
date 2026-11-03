@@ -2542,3 +2542,22 @@ def test_red_gates_then_green_are_a_gate_flake_not_a_flaky_suite(render, tmp_pat
         pass
     log = (tmp_path / "t.log").read_text()
     assert "gate flake" in log and "flaky suite" not in log, log
+
+
+def test_every_stack_preflight_is_the_trains_too(render, tmp_path, tmp_path_factory):
+    """#373: a merge runs every stack — a stack's own host check red, 3 included, is the environment."""
+    logs = tmp_path_factory.mktemp("suite")
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps(
+        {"merge_suite": f"echo run >> {logs}/suite.log",
+         "stacks": {"backend": {"paths": ["backend/"], "runner": ["true", "{paths}"], "unmapped": "skip",
+                                "preflight": ["sh", "-c", "exit 3"]}}}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force")
+    assert r.returncode == 1 and "exit 3" in r.stderr and "nobody is blamed" in r.stderr, r.stderr
+    assert not (logs / "suite.log").exists()
+    # `--preflight ""` replaces the global check only: the stacks' own still run
+    r = _train(out, "run", "--force", "--preflight", "")
+    assert r.returncode == 1 and "exit 3" in r.stderr, r.stderr
+    assert not (logs / "suite.log").exists()

@@ -263,8 +263,11 @@ def check(root: Path, targets: list[str], env: dict[str, str], *, bypass: str = 
                               f"`{phase}`) — skipping the gates is the owner's emergency exit, "
                               f"not a route for the agent; the owner sets it in their own run")
     if bypass:
+        reason = skip_reason(env)
+        if not reason:
+            return Verdict(False, f"merge_route: {no_reason_message(bypass)}")
         return Verdict(True, f"merge_route: WARNING push to main with {bypass} — gates skipped, "
-                             f"bypass logged ({LEDGER_NAME})", (bypass, ""))
+                             f"bypass logged ({LEDGER_NAME}): {reason}", (bypass, reason))
     if env.get(ROUTE_ENV, "") in ROUTES:
         return Verdict(True)
     override = env.get(OVERRIDE_ENV)
@@ -306,6 +309,17 @@ def append_ledger(root: Path, kind: str, reason: str, targets: list[str]) -> Non
 
 PROCESS_SKIP_ENV = "PROCESS_SKIP"
 SKIPPABLE = ("gates", "tests")
+# every skip carries the owner's reason into the ledger (#373), as the override does
+SKIP_REASON_ENV = "PROCESS_SKIP_REASON"
+
+
+def skip_reason(env: dict[str, str]) -> str:
+    return " ".join(env.get(SKIP_REASON_ENV, "").split())
+
+
+def no_reason_message(what: str) -> str:
+    return (f"{what} carries no reason — a skip is logged with the owner's sentence: "
+            f"{SKIP_REASON_ENV}=\"<why>\"")
 
 
 def process_skips(env: dict[str, str]) -> set[str]:

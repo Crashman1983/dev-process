@@ -267,15 +267,20 @@ def test_a_malformed_ref_line_on_stdin_refuses(render, tmp_path):
 def test_a_bypass_on_main_passes_and_is_logged(render, tmp_path):
     root = _repo(render, tmp_path)
     r = _run(root, "--bypass", "SKIP_PUSH_GATE", MAIN)
+    assert r.returncode == 1 and "PROCESS_SKIP_REASON" in r.stderr and not _ledger(root), r.stderr  # #373
+    r = _run(root, "--bypass", "SKIP_PUSH_GATE", MAIN, env={"PROCESS_SKIP_REASON": "owner: host down"})
     assert r.returncode == 0, r.stderr
     lines = _ledger(root)
     assert len(lines) == 1 and lines[0].split("\t")[5] == "SKIP_PUSH_GATE", lines
+    assert lines[0].split("\t")[6] == "owner: host down", lines
 
 
 def test_skipping_the_gate_hook_is_a_logged_bypass(render, tmp_path):
     # pre-commit's own switch: SKIP=process-gates skips the gate runner, not this guard
     root = _repo(render, tmp_path)
     r = _run(root, env={"PRE_COMMIT_REMOTE_BRANCH": MAIN, "SKIP": "foo,process-gates"})
+    assert r.returncode == 1 and "PROCESS_SKIP_REASON" in r.stderr, r.stderr  # #373
+    r = _run(root, env={"PRE_COMMIT_REMOTE_BRANCH": MAIN, "SKIP": "foo,process-gates", "PROCESS_SKIP_REASON": "owner: host down"})
     assert r.returncode == 0, r.stderr
     assert [line.split("\t")[5] for line in _ledger(root)] == ["SKIP=process-gates"]
 

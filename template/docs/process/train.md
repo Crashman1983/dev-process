@@ -20,9 +20,12 @@ Without either the train runs the process gates only and says so.
 
 `--preflight "<cmd>"` checks the environment — tools, logins, disk — on the
 first combined tree, before any gate; without it the train takes the
-`preflight` of `testing.local.json`, the same check a push and `--certify`
-run before their tests, limited by its `preflight_timeout` (600 s without
-one); `--preflight ""` runs none for this train. Red there is the host's, not a
+`preflight` of `testing.local.json` followed by every stack's own
+`preflight` — the same checks a push and `--certify` run before their tests;
+a merge runs every stack, so a stack's exit 3 ("not this host") is red here
+too — limited by its `preflight_timeout` (600 s without
+one); `--preflight ""` replaces the global check with none for this train —
+the stacks' own still run. Red there is the host's, not a
 passenger's: the run stops, nobody is blamed, nothing is retried or bisected,
 and no branch is reported blocked. Downstream, an expired login and a full
 disk each cost a whole release run that read as a red train.
@@ -241,7 +244,8 @@ session reset its branch onto main and published 16 commits past a `block`.
 - **Skipped gates** (`SKIP=process-gates`, or `--bypass NAME` from a
   project's own hook switch) on a push to main keep the phase bar, need no
   route, skip the standing-block check with the gates, are refused from a
-  dispatched session, and land in the same ledger.
+  dispatched session, need the owner's reason (`PROCESS_SKIP_REASON`), and
+  land in the same ledger with it.
 
 The review gate adds the verdict: on the merge push, a work whose latest
 REVIEW (highest round; a tie goes to the block) is `verdict=block` stops the
