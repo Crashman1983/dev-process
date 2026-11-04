@@ -3837,6 +3837,10 @@ def test_a_blocked_with_another_hosts_old_clock_still_counts(render, tmp_path):
     now = int(time.time())
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"worker": "beta", "epoch": now, "state": "pushed", "note": "", "host": "h"}) + "\n")
+        # the skewed host was read at boarding: its news counts, whatever its clock says
+        # (a host first read during the run brings history, not news — refute v2.90)
+        fh.write(json.dumps({"worker": "gamma", "epoch": now - 20 * 86400, "state": "idle", "note": "",
+                             "host": "skewed"}) + "\n")
     old = json.dumps({"worker": "beta", "epoch": now - 10 * 86400, "state": "blocked",
                       "note": "steward: hold", "host": "skewed"})
     r, row, _log = _held_run(out, _suite_reporting(out, tmp_path, f"echo '{old}' >> {path}"))

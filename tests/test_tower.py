@@ -1066,3 +1066,30 @@ def test_a_merged_or_deleted_branch_shows_no_train_hold(render, tmp_path):
         _report(out, "idle", "--worker", worker)
     t = json.loads(_tower(out, "--json").stdout)
     assert t["holds"] == [] and _hold_kinds(t) == [], (t["holds"], t["findings"])
+
+
+def test_a_record_with_an_unhashable_note_never_crashes_the_hold_read(render, tmp_path):
+    """Refute v2.90: another host's ref is data — a list as note must not crash the train."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    tower = _load_tower(out)
+    rec = {"worker": "alpha", "epoch": 1, "state": "idle", "note": ["x"], "host": "other"}
+    assert tower.report_identity(rec)[3] == "['x']"
+    assert isinstance(hash(tower.report_identity(rec)), int)
+
+
+def test_a_host_first_read_during_the_run_brings_no_news(render, tmp_path, monkeypatch):
+    """Refute v2.90: boarding could not fetch host `other`; its week-old blocked, released
+    since, arrives before the push — it is history, not a hold of this run."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    tower = _load_tower(out)
+    local = [{"worker": "alpha", "epoch": 10, "state": "pushed", "note": "", "host": "me"}]
+    monkeypatch.setattr(tower._report, "read_reports", lambda root, **kw: list(local))
+    seen = tower.report_ids(out)
+    local += [{"worker": "alpha", "epoch": 1, "state": "blocked", "note": "old", "host": "other"},
+              {"worker": "alpha", "epoch": 2, "state": "review-pass", "note": "", "host": "other"}]
+    assert tower.held_since(out, seen) == {}
+    # the same blocked from a host boarding did read is news of this run
+    local.append({"worker": "alpha", "epoch": 3, "state": "blocked", "note": "new", "host": "me"})
+    assert tower.held_since(out, seen)["alpha"]["note"] == "new"

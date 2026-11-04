@@ -252,7 +252,7 @@ REVIEW work=42 tier=2 reviewer=fresh-agent model=same independence=bundle,non-im
 | `model` | reviewing model-family slug, or `same` if the producer's family; a plan-review pass names the concrete model id (`attest.py` compares its class with the plan session's, `verification-independence.md`) |
 | `independence` | comma set ⊆ `bundle,non-implementing,cross-model,single-family` |
 | `verdict` | `pass` \| `block` |
-| `round` | 1 + the distinct blocked rounds already recorded for this `work` (further reviewers of the round that just blocked attest that round) — counted by `attest.py`, not claimed: a re-check after a pass or a rebase keeps the round; plan reviews count apart as `work=<id>-plan` |
+| `round` | the highest blocked round already recorded for this `work` + 1, gaps included (#397) (further reviewers of the round that just blocked attest that round) — counted by `attest.py`, not claimed: a re-check after a pass or a rebase keeps the round; plan reviews count apart as `work=<id>-plan` |
 | `base` | the head's fork point from the integration branch (with `head`; optional only on older, headless records) |
 | `head` | the reviewed branch head — code after it is unreviewed |
 | `diff`, `mode` | legacy, written until v2.53: a digest of `base...head` and `full`/`delta` — read and ignored |

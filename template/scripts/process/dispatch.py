@@ -2331,10 +2331,19 @@ def say(root: Path, branch: str, text: str) -> int:
         return 7
     r = _tmux("send-keys", "-t", window, "-l", text)
     _sleep(SAY_TYPE_SETTLE_S)
-    if _input_line(_screen(window), pattern) is None:
-        # the typed text is out of sight: an Enter now would send it unchecked
+    typed_screen = _screen(window)
+    if _dialog_open(typed_screen, pattern):
+        # a dialog opened while typing: Enter would answer it (refute v2.90) — nothing pressed
+        print(f"dispatch: {branch} shows a dialog — typed, not sent; answer it first: {text[:80]}",
+              file=sys.stderr)
+        return 5
+    typed = _input_line(typed_screen, pattern)
+    if typed is None or not _still_typed(typed, text):
+        # the typed text is out of sight, or never arrived: an Enter now would send unchecked
+        # or report a delivery that never happened (refute v2.90)
         _tmux("send-keys", "-t", window, "C-u")
-        print(f"dispatch: {branch} — input line unreadable after typing — not sent; cleared: {text[:80]}",
+        why = "unreadable" if typed is None else "does not show the typed text"
+        print(f"dispatch: {branch} — input line {why} after typing — not sent; cleared: {text[:80]}",
               file=sys.stderr)
         return 6
     r2 = _tmux("send-keys", "-t", window, "Enter")

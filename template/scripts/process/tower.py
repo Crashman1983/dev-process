@@ -509,24 +509,36 @@ def train_holds(root: Path) -> dict[str, dict]:
 def report_identity(rec: dict) -> tuple:
     """A report as the train remembers it at boarding: who, when (as written, never
     compared with a clock), what, why."""
-    return (rec.get("worker"), rec.get("epoch"), rec.get("state"), rec.get("note") or "")
+    # strings only: another host's ref is data, and an unhashable field must not crash the
+    # train (refute v2.90)
+    return (str(rec.get("worker")), str(rec.get("epoch")), str(rec.get("state")), str(rec.get("note") or ""),
+            str(rec.get("host") or ""))
 
 
 def report_ids(root: Path) -> frozenset:
-    """The identities of every report the hold reads (`train_holds`'s sources)."""
-    return frozenset(report_identity(r) for r in _report.read_reports(root, remote=True))
+    """The identities of every report the hold reads (`train_holds`'s sources), plus a
+    marker per host whose reports were read — a host first seen later brings its whole
+    history, which is no news of this run (refute v2.90)."""
+    recs = _report.read_reports(root, remote=True)
+    return frozenset([report_identity(r) for r in recs] + [("@host", str(r.get("host") or "")) for r in recs])
 
 
 def held_since(root: Path, seen: frozenset) -> dict[str, dict]:
     """Who must leave a train before its push (#335), as {worker: the record that
     holds it}: an effective hold now (`train_holds`), or a `blocked` that was not
-    among `seen` (`report_ids` at boarding) — even when a release followed: that
-    release is for the worker's new tip, not for the one the train boarded. The
+    among `seen` (`report_ids` at boarding), from a host whose reports boarding read —
+    even when a release followed: that release is for the worker's new tip, not for
+    the one the train boarded; a host first read now counts by its effective holds
+    only. The
     sets are compared, never another host's clock. The train's own `blocked`
     holds nothing."""
     held = dict(train_holds(root))
     for rec in sorted(_report.read_reports(root, remote=True), key=lambda r: r.get("epoch", 0)):
-        if rec.get("state") == "blocked" and not _train_written(rec) and report_identity(rec) not in seen:
+        host = str(rec.get("host") or "")
+        # this host's own file is always read: its records are never "first seen"
+        known_host = host == _report.host_name() or ("@host", host) in seen
+        if (rec.get("state") == "blocked" and not _train_written(rec) and known_host
+                and report_identity(rec) not in seen):
             held.setdefault(rec["worker"], rec)
     return held
 

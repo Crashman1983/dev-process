@@ -279,7 +279,7 @@ ref) and whose base is not that head's one fork point is a malformed
 `REVIEW` line: it clears no plan, lifts no block and boards no train. Once
 a valid full round of the same work follows it — its head descending from
 the old one, its round higher, or the same with verdict pass (attest counts
-1 + the blocking rounds, so the round after a pass keeps its number) — the
+the highest blocking round + 1, so the round after a pass keeps its number) — the
 line is a note, no longer a refusal:
 that round reviewed everything from the fork point on (downstream, a delta
 line from before v2.53 refused every push of two branches after their merge

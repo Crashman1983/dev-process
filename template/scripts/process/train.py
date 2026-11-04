@@ -2377,6 +2377,13 @@ def _delete_branch(root: Path, b: str, sha: str | None, *, push: bool, log) -> N
         return
     r = _git(root, "push", f"--force-with-lease=refs/heads/{b}:{sha}", "origin", f":refs/heads/{b}")
     if r.returncode != 0 and ("stale info" in r.stderr or "rejected" in r.stderr):
+        # origin's copy may only lag: the worker never pushed its last commits — an
+        # ancestor of what merged loses nothing (refute v2.90)
+        theirs = (_out(root, "ls-remote", "origin", f"refs/heads/{b}") or "").split()
+        older = theirs and _git(root, "merge-base", "--is-ancestor", theirs[0], sha).returncode == 0
+        if older:
+            r = _git(root, "push", f"--force-with-lease=refs/heads/{b}:{theirs[0]}", "origin", f":refs/heads/{b}")
+    if r.returncode != 0 and ("stale info" in r.stderr or "rejected" in r.stderr):
         print(f"train: origin's {b} kept — it moved since boarding (a push from elsewhere); "
               f"its new commits need their own review and train", file=sys.stderr)
         log(f"origin's {b} kept — moved since boarding")

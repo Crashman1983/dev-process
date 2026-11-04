@@ -660,7 +660,9 @@ def test_say_fails_naming_the_branch_when_the_text_never_leaves(render, tmp_path
 def test_say_counts_a_queued_message_as_delivered(render, tmp_path, monkeypatch):
     # mid-turn: the harness shows the message above an empty input line
     screen = "> decision text\n  (queued)\n" + BOX.format("")
-    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [screen])
+    # before typing, typed before Enter (refute v2.90: the text must show), then queued
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch,
+                                [BOX.format(""), BOX.format("decision text"), screen])
     assert mod.say(out, "w1", "decision text") == 0
     assert pane.keys == ["decision text", "Enter"]
 
@@ -1023,7 +1025,7 @@ def test_say_finds_a_long_wrapped_input_and_a_pasted_placeholder(render, tmp_pat
 
 
 def test_a_say_prompt_without_a_group_falls_back(render, tmp_path, monkeypatch):
-    out, mod, _pane = _say_setup(render, tmp_path, monkeypatch, ["> \n"])
+    out, mod, _pane = _say_setup(render, tmp_path, monkeypatch, ["> \n", "> hello\n", "> \n"])
     monkeypatch.setattr(mod, "load_policy", lambda root, **_k: {"say_prompt": "^>"})
     assert mod.say(out, "w1", "hello") == 0
 
@@ -1119,7 +1121,8 @@ def test_a_bulleted_review_line_is_an_attestation(render, tmp_path):
 
 def test_say_answers_a_question_asked_in_prose(render, tmp_path, monkeypatch):
     question = "● Do you want to keep the old API or drop it?\n" + BOX.format("")
-    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [question, question])
+    typed = "● Do you want to keep the old API or drop it?\n" + BOX.format("keep it")
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [question, typed, question])
     assert mod.say(out, "w1", "keep it") == 0 and pane.keys == ["keep it", "Enter"]
 
 
@@ -2940,3 +2943,22 @@ def test_a_tier_1_start_refuses_in_a_clone_without_the_fork(render, tmp_path, mo
     mod = _load_dispatch(src)
     quick, why = mod.quick_start(out, "b")
     assert not quick and why and "no fork point" in why and "--unshallow" in why, why
+
+
+def test_say_presses_no_enter_into_a_dialog_that_opened_while_typing(render, tmp_path, monkeypatch, capsys):
+    """Refute v2.90: an empty line before typing, a permission dialog after — Enter would
+    have picked option 1 and approved the command."""
+    dialog = ("❯ go on\nBash command\n  rm -rf build\n"
+              "Do you want to proceed?\n❯ 1. Yes\n  2. No\n")
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [_tui(), dialog])
+    assert mod.say(out, "w1", "go on") == 5
+    assert "Enter" not in pane.keys and "typed, not sent" in capsys.readouterr().err
+
+
+def test_say_reports_nothing_delivered_when_the_typed_text_never_showed(render, tmp_path, monkeypatch, capsys):
+    """Refute v2.90: the keys went nowhere (copy mode) — the line stays empty; no Enter,
+    no "said"."""
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [_tui(), _tui(), _tui()])
+    assert mod.say(out, "w1", "the lane is free") == 6
+    assert pane.keys == ["the lane is free", "C-u"]
+    assert "does not show the typed text" in capsys.readouterr().err
