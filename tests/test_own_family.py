@@ -217,6 +217,49 @@ def test_the_train_asks_the_same_owner(render, tmp_path):
     assert train._covers(r.root, review.review_passes(r.root, journal), {"77"}, 3, "HEAD")
 
 
+@pytest.mark.parametrize("model,boards", [(CODEX, False), (CLAUDE, True)])
+def test_the_train_reads_the_rule_at_the_snapshot_base(render, tmp_path, model, boards):
+    """v2.91 (#398, S7): boarding reads `own_family_from_tier` at the base SHA it judges
+    by (#391), not at the checkout's integration ref — here the local main, behind
+    origin/main, which alone carries the rule."""
+    r = Repo(render, tmp_path, own_from=None)
+    plan = ".process-work/plans/2026-10-15-77-widget.md"
+    (r.root / ".process-work/plans/archive").mkdir(parents=True, exist_ok=True)
+    _git(r.root, "mv", plan, plan.replace("plans/", "plans/archive/"))
+    r.passes((model, r.neu))
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "chore: archive and attest")
+    _git(r.root, "checkout", "-q", "main")
+    r.policy({"review_evidence": {"own_family_from_tier": 3}})
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "the rule, on origin only")
+    _git(r.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(r.root, "reset", "-q", "--hard", r.base)  # the local main lags behind
+    train, _review = _process_modules(r.root)
+    by = {c["branch"]: c for c in train.candidates(r.root, "main", "origin/main")}
+    assert by["feature"]["eligible"] is boards, by["feature"]["reasons"]
+
+
+@pytest.mark.parametrize("model,archives", [(CODEX, False), (CLAUDE, True)])
+def test_settling_reads_the_rule_at_the_base_not_at_the_train_head(render, tmp_path, model, archives):
+    """Guard (v2.91, S7): a wagon that lifts `own_family_from_tier` lifts it for no later
+    wagon — `_settle_plans` reads the rule at the integration base, not at the train's HEAD."""
+    r = Repo(render, tmp_path)
+    r.passes((model, r.neu))
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "chore: attest")
+    tip = _git(r.root, "rev-parse", "HEAD")
+    _git(r.root, "checkout", "-q", "-b", "train/x", "main")
+    r.policy({"review_evidence": {"own_family_from_tier": 4}})
+    _git(r.root, "add", "-A")
+    _git(r.root, "commit", "-q", "-m", "an earlier wagon lifts the rule")
+    _git(r.root, "merge", "-q", "--no-ff", "--no-commit", "feature")
+    train, review = _process_modules(r.root)
+    assert review.own_family_rule(r.root, "HEAD")[0] == 4
+    archived, _issues = train._settle_plans(r.root, r.base, "feature", lambda _line: None, tip=tip)
+    assert bool(archived) is archives, archived
+
+
 def test_archiving_onto_another_plans_file_still_needs_the_own_family(render, tmp_path):
     """Delta review v2.74: `git mv -f` onto a file name the base has skipped the archive arm."""
     r = Repo(render, tmp_path, claim="")
