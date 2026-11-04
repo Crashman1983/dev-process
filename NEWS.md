@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.89.0 — A fast check per candidate before the train boards
+
+A project can now name a check that takes seconds, and the merge train runs it on each waiting branch before the long combined test run. A branch that fails it twice stays behind with a note to its worker, instead of turning a fifty-minute run red. If the check fails on the main branch itself, or the machine cannot run it, nobody is held back. The cockpit counts how often the check ran, held a branch back or could not run.
+
 ## v2.88.0 — The train's red path, measured
 
 When the merge train goes red, it now records what it spent on finding out why: each retry, base check and search step, with its time. For projects that name their pytest results, it also records which tests were red and whether they already existed before the change. The cockpit turns that into a number: in how many red trains running only the red tests could have saved time. The train itself runs exactly as before. The idea of running only the red tests waits for that number, because four planning rounds could not show that it would save anything.

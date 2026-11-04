@@ -10,6 +10,28 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.89.0 — A fast check per candidate before the train boards · 2026-11-04
+
+**Why.** Downstream, a mixed train ran its 50-minute merge suite, went red on a test that takes seconds (an anchor budget), and then paid a retry and a full restart. Nothing checked a candidate cheaply before it boarded (#386).
+
+**What changes.**
+- **`preboard` in `testing.local.json`** is an argv of seconds (`preboard_timeout`, default 120 s). `train.py run --preboard ""` switches it off for one run. The train runs it before the combined build:
+  - **On the base first.** If it is red or cannot run there — a broken host, or main itself failing it — nobody is checked and the train goes on as without it. The preflight stays where it was, on the first combined tree.
+  - **Then per candidate,** on the base merged with that candidate. The tree is built by `build_train` itself, in a second worktree, so plans are settled as in the real merge.
+  - **Red twice** — the second time on a freshly rebuilt tree — means the candidate does not board and is reported `blocked`. A candidate that conflicts, times out or cannot run the check boards and is logged "not pre-checked".
+  - When every candidate is dropped, nothing is built, and the run ends with result `preboard`.
+- **Times and counts:** `phases.jsonl` carries the phase `preboard` (seconds) and `preboard_checks` (checked, dropped, not checked, reason). `train-phases` prints both, so a check that never runs is visible.
+
+**Effect.** A candidate that fails a seconds-long guard leaves before the full suite, not after it. A broken guard, or main failing it, blames nobody.
+
+**Changed sections.**
+- `train.md` (The merge train — one full suite per batch; The run)
+- `testing.md` (Test economy — scoped inner loop, full merge boundary)
+
+**Update.** A pure update. Without `preboard` nothing changes. A guard that needs a project environment (`uv sync`, `npm install`) does not belong here; a fast test belongs first in its stack's `pins`.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.89.md) #386
+
 ## v2.88.0 — The train's red path, measured · 2026-11-04
 
 **Why.** #378 proposed re-running only the red tests after a red train: the retry, the base and every bisection probe. Four plan rounds blocked that subset run. Its safety kept growing harder, and the last round found its saving unproven. When the offender adds the red test itself, the test does not exist on the base, so the subset falls back to the full suite. How often that happens had never been measured. The owner decided to measure first.
