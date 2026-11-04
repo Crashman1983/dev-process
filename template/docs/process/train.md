@@ -156,6 +156,21 @@ a day downstream, with five reviewed candidates waiting.
 `--force` departs with whatever boarded. Environment:
 `PROCESS_TRAIN_MIN`, `PROCESS_TRAIN_MAX_WAIT_H`.
 
+**Who stays behind, and why (#399).** Every `run` prints, for each candidate
+that does not board, its reasons in the words `plan` uses, and one line
+counting the branches with nothing ahead of the base. It does so whether
+the run departs, holds or finds nothing to do. A departing run writes the
+lines into its train log before the first build. A holding run and one
+with nothing to do overwrite `<git-common-dir>/process-train/last-hold.log`
+with the time, the outcome and the reasons, so a run that is asked often
+leaves one file, not a growing log.
+
+**Planning cost (#398).** Branches already merged into the base are sorted
+out with one `for-each-ref --merged`, before any diff; `plan --json` counts
+them in `no_lead`. Record texts are read once per blob, the conflict notes
+of `plan` come from one `merge-tree --stdin` for all pairs, and two
+candidates that share no commit beyond the base cost no `merge-base`.
+
 ## The run
 
 1. A staging branch `train/<stamp>` from the integration branch, in its own
@@ -272,10 +287,11 @@ a day downstream, with five reviewed candidates waiting.
 
 Run from the root worktree on the integration branch with a clean tree.
 The log lives in the clone's git common dir (`process-train/<stamp>.log`).
-Each run ends with its phase times — preboard, preflight, gates, suite,
+Each run ends with its phase times — plan, preboard, preflight, gates, suite,
 retry, bisect, push, deploy — in the log and as one line of
 `<git-common-dir>/process-train/phases.jsonl`; `process_kpis.py train-phases` reads the
-median and maximum per phase, so a slow merge names its slow phase.
+median and maximum per phase, so a slow merge names its slow phase. A run
+that holds or has nothing to do writes no line; it prints its planning time.
 
 **The red path, measured (#378).** The line also carries `rounds`, one entry
 per round: the first, and one more after each drop. Each entry has:
