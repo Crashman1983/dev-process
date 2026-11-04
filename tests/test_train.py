@@ -3912,3 +3912,82 @@ def test_the_plan_bench_builds_a_repo_and_reports_the_time(tmp_path):
     assert result["branches"] == 20 and result["ahead"] + result["merged"] == 20
     assert len(result["seconds"]) == 1 and result["median_seconds"] > 0
     assert result["candidates"] == result["ahead"] == result["eligible"], result
+
+
+def _git_calls(monkeypatch) -> list[list[str]]:
+    """Jeder git-Aufruf des Prozesses, als argv hinter `git -C <root>` — gezählt, nicht verändert."""
+    calls: list[list[str]] = []
+    real = subprocess.run
+
+    def spy(argv, *a, **k):
+        if isinstance(argv, list) and argv[:1] == ["git"]:
+            calls.append(argv[3:] if argv[1:2] == ["-C"] else argv[1:])
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(subprocess, "run", spy)
+    return calls
+
+
+def _merged_branches(out: Path, n: int) -> dict[str, str]:
+    """`n` Branches ohne Vorsprung auf drei älteren main-Commits; main zieht danach weiter."""
+    for i in range(3):
+        _main_commit(out, {f"src/old{i}.py": f"{i}\n"}, f"old {i}")
+    for i in range(n):
+        _git(out, "branch", f"m{i:02}", f"main~{i % 3 + 1}")
+    return {f"m{i:02}": _git(out, "rev-parse", f"m{i:02}").stdout.strip() for i in range(n)}
+
+
+def test_merged_branches_are_sorted_out_before_any_diff(render, tmp_path, monkeypatch):
+    """#398 AC-1/2 (S1): ein `for-each-ref --merged` sortiert die gemergten Branches aus —
+    kein Diff nennt ihre Spitze, `plan` zählt sie in `no_lead`; ein Branch mit Vorsprung
+    boardet wie bisher."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    merged = _merged_branches(out, 30)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    train = _load_train(out)
+    calls = _git_calls(monkeypatch)
+    p = train.plan(out, min_candidates=1, max_wait_hours=0)
+    diffs = [c for c in calls if c[:1] == ["diff"]]
+    assert diffs, "der Zähler sah keinen Diff"
+    named = [c for c in diffs if any(sha in arg for sha in merged.values() for arg in c)]
+    assert named == [], named[:3]
+    assert p["no_lead"] == 30
+    assert [c["branch"] for c in p["candidates"]] == ["alpha"] and p["candidates"][0]["eligible"]
+
+
+def test_an_unreadable_plan_diff_of_a_merged_branch_blocks_nobody(render, tmp_path, monkeypatch):
+    """S1, bewusste Urteilsänderung: der Plan-Diff eines gemergten Branches wird nicht mehr
+    gelesen — unlesbar blockierte er bisher jeden Kandidaten (die globale `unreadable`-Liste)."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    merged = _merged_branches(out, 1)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    train = _load_train(out)
+    real = train._git_bytes
+    monkeypatch.setattr(train, "_git_bytes", lambda root, *a: None if a[0] == "diff" and any(
+        merged["m00"] in x for x in a) else real(root, *a))
+    alpha = next(c for c in train.candidates(out, "main", "main") if c["branch"] == "alpha")
+    assert alpha["eligible"], alpha["reasons"]
+
+
+def test_a_branch_moved_after_the_snapshot_takes_the_normal_way(render, tmp_path, monkeypatch):
+    """S1 (Wächter): aussortiert wird nur, wessen gelistete SHA die des Snapshots ist — ein
+    Branch, der nach dem Snapshot auf einen gemergten Commit zurückgesetzt wurde, wird am
+    festgehaltenen SHA beurteilt (#391)."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _main_commit(out, {"src/old.py": "old\n"}, "old")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    boarded = _git(out, "rev-parse", "alpha").stdout.strip()
+    train = _load_train(out)
+    real = train._snapshot
+
+    def snapshot_then_move(root, base):
+        taken = real(root, base)
+        _git(out, "update-ref", "refs/heads/alpha", "main~1")  # now merged, after the snapshot
+        return taken
+
+    monkeypatch.setattr(train, "_snapshot", snapshot_then_move)
+    alpha = next(c for c in train.candidates(out, "main", "main") if c["branch"] == "alpha")
+    assert alpha["sha"] == boarded and alpha["ahead"] == 1 and alpha["eligible"], alpha

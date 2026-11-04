@@ -291,16 +291,32 @@ def _snapshot(root: Path, base: str) -> tuple[dict[str, str], str]:
     boarding judges is what the train merges — a commit after it, a fetch that moves
     the base, rides no run of this train. As ({branch: sha}, base sha); the base by
     `rev-parse` only where the listing does not name it."""
-    refs: dict[str, str] = {}
-    for line in _out(root, "for-each-ref", "--format=%(refname) %(objectname)",
-                     "refs/heads/", "refs/remotes/").splitlines():
-        name, _, sha = line.rpartition(" ")
-        if name and sha:
-            refs[name] = sha
+    refs = _listed_refs(root, "refs/heads/", "refs/remotes/")
     heads = {name.removeprefix("refs/heads/"): sha for name, sha in refs.items() if name.startswith("refs/heads/")}
     base_sha = (refs.get(f"refs/heads/{base}") or refs.get(f"refs/remotes/{base}")
                 or _out(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}") or base)
     return heads, base_sha
+
+
+def _listed_refs(root: Path, *args: str) -> dict[str, str]:
+    """{full refname: sha} of one `for-each-ref`; {} when git failed."""
+    refs: dict[str, str] = {}
+    for line in _out(root, "for-each-ref", "--format=%(refname) %(objectname)", *args).splitlines():
+        name, _, sha = line.rpartition(" ")
+        if name and sha:
+            refs[name] = sha
+    return refs
+
+
+def _without_lead(root: Path, base_sha: str, tips: dict[str, str]) -> set[str]:
+    """The local branches the base already contains, from ONE `for-each-ref --merged`
+    (#398: two diffs and a `rev-list` each, for hundreds of merged branches) — only
+    where the listed SHA is the snapshot's: a branch moved since is read the normal
+    way. An unreadable listing sorts nothing out."""
+    merged = {name.removeprefix("refs/heads/"): sha
+              for name, sha in _listed_refs(root, f"--merged={base_sha}", "refs/heads/").items()
+              if name.startswith("refs/heads/")}
+    return {branch for branch, sha in merged.items() if tips.get(branch) == sha}
 
 
 def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) -> list[dict]:
@@ -308,7 +324,8 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
     snapshot and the base at its SHA (#391) — each candidate carries its `sha`;
     identity (the branch's issues, its work ids, its reports) is read by name.
     `snapshot`, when given, receives `base_sha` and `reports_seen` — the report
-    identities at boarding, which the run compares before its push (#335)."""
+    identities at boarding, which the run compares before its push (#335) — and
+    `no_lead`, how many branches the base already contains (no candidates)."""
     tips, base_sha = _snapshot(root, base)
     # the reports first: a hold written after this read is new to the run's check,
     # one written before it is in the hold read below
@@ -316,6 +333,10 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
     if snapshot is not None:
         snapshot.update(base_sha=base_sha, reports_seen=seen)
     branches = [b for b in tips if b and b not in (local,) and not b.startswith("train/")]
+    # already merged (or empty) — residue for tidy.py, not a candidate: read no further
+    merged = _without_lead(root, base_sha, tips)
+    no_lead = len([b for b in branches if b in merged])
+    branches = [b for b in branches if b not in merged]
     # the train's own `blocked` (TRAIN_DROP_NOTE) describes a run: it neither holds nor hides
     # the report before it from the arms (review round 2: it shadowed a `review-pass`)
     reports = {r["worker"]: r for r in _tower.latest_reports(root, skip=_tower._train_written)}
@@ -378,7 +399,8 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         c: dict = {"branch": b, "sha": tip, "ahead": int(ahead), "behind": int(behind), "eligible": False,
                    "reasons": [], "plans": [], "by": None}
         if int(ahead) == 0:
-            continue  # already merged (or empty) — residue for tidy.py, not a candidate
+            no_lead += 1  # contained after all: an unreadable listing, a branch moved since the snapshot
+            continue
         listed = _paths(root, "diff", "--name-only", "-z", f"{base_sha}...{tip}")
         files = set(listed or ())
         c["files"] = len(files)
@@ -550,6 +572,8 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         if c["by"] and not open_q and not branch_unreadable and not template_blocked and not report_blocked:
             c["eligible"] = True
         out.append(c)
+    if snapshot is not None:
+        snapshot["no_lead"] = no_lead
     return out
 
 
