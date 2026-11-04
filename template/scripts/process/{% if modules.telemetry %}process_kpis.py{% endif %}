@@ -3072,6 +3072,8 @@ def size_table(root: Path, lo: datetime = _ALL_TIME[0], hi: datetime = _ALL_TIME
         buckets = {label: dict.fromkeys(("works", "rounds_median", "share_3plus", "rounds_per_100_lines",
                                          "process_per_product_line")) for label in SIZE_STEPS}
     stacks = _stacks(root)
+    if got["events"] is None:
+        stacks = "unknown — git not read"  # the same rule for the stack spread (#346)
     spread: dict | str = stacks if isinstance(stacks, str) else {}
     if not isinstance(stacks, str):
         import test_select  # noqa: PLC0415 — the one stack-of-a-path rule
@@ -3130,7 +3132,8 @@ def size(root: Path | None = None, window: tuple[datetime, datetime] | None = No
     if t["unknown_lines"]:
         print(f"  {t['unknown_lines']} work(s) with unknown product lines (a range without a lower bound)")
     if isinstance(t["stacks"], str):
-        print(f"  stacks: {t['stacks']} (no usable docs/process/testing.local.json)")
+        print(f"  stacks: {t['stacks']}" + ("" if t["stacks"].startswith("unknown")
+                                            else " (no usable docs/process/testing.local.json)"))
     else:
         print("  stacks: " + "; ".join(f"{name}: {_cell_text(c)}" for name, c in t["stacks"].items()))
     if t["top_files"]:
