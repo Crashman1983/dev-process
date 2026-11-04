@@ -46,7 +46,8 @@ branch, is ahead of it, and
     host's and the ones other hosts published — is not `blocked`: a newer
     `pushed` or `review-pass` releases it, `idle` and `planned` do not (#326);
     the train's own `blocked` (a conflict, red with it aboard) describes a
-    run and holds nothing;
+    run and holds nothing — the tower's rule (`tower.train_holds`), the one
+    the tower shows (#336);
 
 Departure: at least `--min-candidates` aboard, or the oldest candidate
 has waited longer than `--max-wait-hours`; no lane but `scoped` is held
@@ -61,11 +62,19 @@ ONCE on the combined tree. If they fail, the base itself is checked once
 (a red main blames nobody; the suite is skipped on a tree an earlier train
 saw green), then a bisection over boarding-order prefixes
 names the first offender, drops it, and the rest is rebuilt.
+Every tree of a run — first, retry, base, probe, rebuild, preboard — is
+the SHAs boarding judged on the base's SHA, from one snapshot (#391): a
+commit after boarding rides a later train, a fetch moves no run. After
+the last green verdict and before the push the holds are read again
+(#335): a passenger held now, or reported `blocked` since boarding, leaves
+with everyone stacked on it, and the smaller board runs as a new round.
 On green: a suite run that left the tree as it found it writes the
 `merge` certificate of that tree (`certificate.py`) — the push to main then
 runs no suite again; the integration branch fast-forwards to the train, `--push`
 pushes it, merged branches are deleted (unless `--keep-branches`), each
-worker gets a `done` report, and `--deploy` runs once. The combination
+worker gets a `done` report, and `--deploy` runs once. A branch that moved
+since boarding merged at its boarded SHA and stays: no delete, no `done`,
+its dispatch records kept — its new commits need their own review. The combination
 is new — that is why the batch, not the branch, earns the full run
 (`docs/process/testing.md`). Each run logs its phase times (preflight,
 gates, suite, retry, bisect, push, deploy) and appends them, with the
@@ -114,16 +123,9 @@ PLANS = ".process-work/plans"
 PROCESS_PATHS = ("scripts/process/", ".githooks/")
 JOURNAL = ".process-work/journal"
 TRAIN_DIR = "process-train"
-# the report states that hold a branch (`blocked`) or release it (#326)
-HOLD_STATES = ("blocked", "pushed", "review-pass")
-# the note the train's own `blocked` starts with (a conflict, red with it aboard):
-# it describes a run, not the branch — a conflict with a passenger that never
-# landed would hold for nothing — so the hold reads past it. Writer and reader.
-TRAIN_DROP_NOTE = "dropped from train"
-
-
-def _train_written(rec: dict) -> bool:
-    return rec.get("state") == "blocked" and str(rec.get("note") or "").startswith(TRAIN_DROP_NOTE)
+# the hold rule (#326) has one owner, the tower (#336): `HOLD_STATES`, the train's own
+# `blocked` it reads past (`_train_written`) and the note that marks it
+# (`TRAIN_DROP_NOTE`, which the train writes) live there
 
 
 # The route marker the pre-push guard reads to tell the train's push to main
@@ -235,31 +237,33 @@ def _names_branch(branch: str, ids: set[str], issues: set[str]) -> bool:
 
 
 def _stacked_renames(root: Path, base: str, branches: list[str], new_by: dict[str, set[str]],
-                     unreadable: list[str]) -> dict[str, str]:
+                     unreadable: list[str], tips: dict[str, str] | None = None) -> dict[str, str]:
     """One plan under two names (#201): a candidate stacked on another renames a
     plan the other adds — measured from their own fork, as git's merge of the
     two pairs them. As {path: representative}; only renames (R) from a path
     one candidate brings to a path another brings, each measured against the
     base. Two candidates that share no commit beyond the base are no stack
     and cost no diff. A rewrite git no longer calls a rename stays two plans
-    (fail closed)."""
+    (fail closed). `tips` names each branch's SHA as boarded (#391); without
+    one, the branch's name."""
     parent: dict[str, str] = {}
+    tip = (tips or {}).get
 
     def find(p: str) -> str:
         while parent.get(p, p) != p:
             p = parent[p]
         return p
 
-    forks = {b: _out(root, "merge-base", base, b) for b in branches if new_by.get(b)}
+    forks = {b: _out(root, "merge-base", base, tip(b, b)) for b in branches if new_by.get(b)}
     for o in branches:
         for b in branches:
             if o == b or not new_by.get(o) or not new_by.get(b):
                 continue
-            fork = _out(root, "merge-base", o, b)
+            fork = _out(root, "merge-base", tip(o, o), tip(b, b))
             if not fork or fork in (forks.get(o), forks.get(b)):
                 continue  # no commit of o's below b (or the other way round): no stack
             pairs = _review.name_status(_git_bytes(root, "diff", "--name-status", "-M", "-z",
-                                                   f"{fork}..{b}", "--", PLANS))
+                                                   f"{fork}..{tip(b, b)}", "--", PLANS))
             if pairs is None:
                 unreadable.append(f"the plan renames between {o} and {b}")
                 continue
@@ -282,20 +286,43 @@ def _identity_slugs(paths: set[str], same_plan: dict[str, str]) -> Counter:
     return counts
 
 
-def candidates(root: Path, local: str, base: str) -> list[dict]:
-    branches = [b.strip().lstrip("* ").strip() for b in _out(root, "branch", "--list", "--format=%(refname:short)").splitlines()]
-    branches = [b for b in branches if b and b not in (local,) and not b.startswith("train/")]
+def _snapshot(root: Path, base: str) -> tuple[dict[str, str], str]:
+    """Every local branch's SHA, and the base's, from ONE `for-each-ref` (#391): what
+    boarding judges is what the train merges — a commit after it, a fetch that moves
+    the base, rides no run of this train. As ({branch: sha}, base sha); the base by
+    `rev-parse` only where the listing does not name it."""
+    refs: dict[str, str] = {}
+    for line in _out(root, "for-each-ref", "--format=%(refname) %(objectname)",
+                     "refs/heads/", "refs/remotes/").splitlines():
+        name, _, sha = line.rpartition(" ")
+        if name and sha:
+            refs[name] = sha
+    heads = {name.removeprefix("refs/heads/"): sha for name, sha in refs.items() if name.startswith("refs/heads/")}
+    base_sha = (refs.get(f"refs/heads/{base}") or refs.get(f"refs/remotes/{base}")
+                or _out(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}") or base)
+    return heads, base_sha
+
+
+def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) -> list[dict]:
+    """Who may board, and why not. Content is read at each branch's SHA of one
+    snapshot and the base at its SHA (#391) — each candidate carries its `sha`;
+    identity (the branch's issues, its work ids, its reports) is read by name.
+    `snapshot`, when given, receives `base_sha` and `reports_seen` — the report
+    identities at boarding, which the run compares before its push (#335)."""
+    tips, base_sha = _snapshot(root, base)
+    # the reports first: a hold written after this read is new to the run's check,
+    # one written before it is in the hold read below
+    seen = _tower.report_ids(root)
+    if snapshot is not None:
+        snapshot.update(base_sha=base_sha, reports_seen=seen)
+    branches = [b for b in tips if b and b not in (local,) and not b.startswith("train/")]
     # the train's own `blocked` (TRAIN_DROP_NOTE) describes a run: it neither holds nor hides
     # the report before it from the arms (review round 2: it shadowed a `review-pass`)
-    reports = {r["worker"]: r for r in _tower.latest_reports(root, skip=_train_written)}
-    # the hold (#326): a branch whose latest word among `blocked`, `pushed` and
-    # `review-pass` is `blocked` does not board — this host's reports and the
-    # ones other hosts published (a steward's `blocked --sync`). `idle` (what
-    # `dispatch stop` writes) and `planned` neither hold nor release, nor does
-    # the train's own `blocked` (TRAIN_DROP_NOTE)
-    holds = {r["worker"]: r for r in _tower.latest_reports(root, remote=True, states=HOLD_STATES,
-                                                            skip=_train_written)}
-    passes_root = _journal_passes_tree(root, local)
+    reports = {r["worker"]: r for r in _tower.latest_reports(root, skip=_tower._train_written)}
+    # the hold (#326): the tower's rule, the one the tower shows (#336)
+    holds = _tower.train_holds(root)
+    local_sha = tips.get(local, local)
+    passes_root = _journal_passes_tree(root, local_sha)
     # the review gate's rule: a de-dated slug may act as a work id only when it
     # is unique across the archive — count them over main's archive and every
     # candidate's additions, so one old pass cannot clear a same-named new plan
@@ -303,20 +330,21 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     # a name list git could not produce is no empty list: without it the
     # uniqueness count and the base's plans are unknown, and nothing boards
     unreadable: list[str] = []
-    listed = _paths(root, "ls-tree", "-r", "-z", "--name-only", local, "--", ARCHIVE)
+    listed = _paths(root, "ls-tree", "-r", "-z", "--name-only", local_sha, "--", ARCHIVE)
     if listed is None:
         unreadable.append(f"the archive on {local}")
     archived_stems = [Path(r).stem for r in listed or ()]
     added_by: dict[str, list[str] | None] = {}
     for b in branches:
-        added_by[b] = _paths(root, "diff", "--name-only", "-z", "--diff-filter=A", f"{base}...{b}", "--", ARCHIVE)
+        added_by[b] = _paths(root, "diff", "--name-only", "-z", "--diff-filter=A", f"{base_sha}...{tips[b]}",
+                             "--", ARCHIVE)
         archived_stems += [Path(r).stem for r in added_by[b] or ()]
     for st in archived_stems:
         key = _review.DATE_PREFIX.sub("", st)
         dedated[key] = dedated.get(key, 0) + 1
     # a plan the base already carries (active or archived) is another work's —
     # archiving it on a branch is housekeeping, not this branch's clearance
-    listed = _paths(root, "ls-tree", "-r", "-z", "--name-only", base, "--", PLANS)
+    listed = _paths(root, "ls-tree", "-r", "-z", "--name-only", base_sha, "--", PLANS)
     if listed is None:
         unreadable.append(f"the plans on {base}")
     base_plan_stems = {Path(r).stem for r in listed or ()}
@@ -335,30 +363,31 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
     merged_paths = set(listed or ())
     for b in branches:
         changes = _review.name_status(_git_bytes(root, "diff", "--name-status", "-M", "-z",
-                                                 f"{base}...{b}", "--", PLANS))
+                                                 f"{base_sha}...{tips[b]}", "--", PLANS))
         if changes is None:
             unreadable.append(f"the plan changes of {b}")
         gone_by[b] = {source or rel for letter, source, rel in changes or () if letter in ("D", "R")}
         new_by[b] = {rel for letter, _source, rel in changes or () if letter != "D"}
         merged_paths |= new_by[b]
-    same_plan = _stacked_renames(root, base, branches, new_by, unreadable)
+    same_plan = _stacked_renames(root, base_sha, branches, new_by, unreadable, tips)
     out: list[dict] = []
     for b in sorted(branches):
-        counts = _out(root, "rev-list", "--left-right", "--count", f"{base}...{b}")
+        tip = tips[b]  # its content, as boarded; `b` stays its identity
+        counts = _out(root, "rev-list", "--left-right", "--count", f"{base_sha}...{tip}")
         behind, ahead = (counts.split() + ["0", "0"])[:2] if counts else ("0", "0")
-        c: dict = {"branch": b, "ahead": int(ahead), "behind": int(behind), "eligible": False,
+        c: dict = {"branch": b, "sha": tip, "ahead": int(ahead), "behind": int(behind), "eligible": False,
                    "reasons": [], "plans": [], "by": None}
         if int(ahead) == 0:
             continue  # already merged (or empty) — residue for tidy.py, not a candidate
-        listed = _paths(root, "diff", "--name-only", "-z", f"{base}...{b}")
+        listed = _paths(root, "diff", "--name-only", "-z", f"{base_sha}...{tip}")
         files = set(listed or ())
         c["files"] = len(files)
-        last = _out(root, "log", "-1", "--format=%ct", b)
+        last = _out(root, "log", "-1", "--format=%ct", tip)
         c["hours_waiting"] = round((time.time() - int(last)) / 3600, 1) if last.isdigit() else None
         archived = [p for p in added_by[b] or () if p.endswith(".md")]
         branch_unreadable = unreadable + [what for what, names in (
             (f"the files of {b}", listed), (f"the plans {b} archives", added_by[b])) if names is None]
-        branch_passes = _journal_passes_branch(root, base, b)
+        branch_passes = _journal_passes_branch(root, base_sha, tip)
         passes = passes_root + branch_passes
         touches_process = sorted(f for f in files if f.startswith(PROCESS_PATHS))
         # the branch's name and its issues: a REVIEW line of any other work
@@ -368,7 +397,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         housekeeping: list[str] = []
         own_archived: list[str] = []
         for rel in archived:
-            shown = _git(root, "show", f"{b}:{rel}")
+            shown = _git(root, "show", f"{tip}:{rel}")
             if shown.returncode != 0:
                 branch_unreadable.append(f"{rel} on {b}")  # an unread plan is no Tier 0 plan
                 continue
@@ -383,22 +412,22 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             own_archived.append(rel)
             own_ids |= ids
             waived = _review.review_waived(text)
-            pure_template = _review.verified_template_plan(root, rel, text, tip=b)
-            ok = tier < 2 or waived or pure_template or _covers(root, passes, ids, tier, b, branch_passes)
-            if touches_process and not _covers(root, passes, ids, 2, b, branch_passes):
+            pure_template = _review.verified_template_plan(root, rel, text, tip=tip)
+            ok = tier < 2 or waived or pure_template or _covers(root, passes, ids, tier, tip, branch_passes)
+            if touches_process and not _covers(root, passes, ids, 2, tip, branch_passes):
                 ok = False
             c["plans"].append({"path": rel, "tier": tier, "cleared": ok, "waived": waived,
                                **({"verified_template": True} if pure_template else {})})
         archived = own_archived
         # its own active plans name its work too: the merge archives them
         # (`_settle_plans`), and their REVIEW says `work=<stem>` or `<slug>`
-        def read(rel: str, b: str = b) -> str | None:
-            shown = _git(root, "show", f"{b}:{rel}")
+        def read(rel: str, b: str = b, tip: str = tip) -> str | None:
+            shown = _git(root, "show", f"{tip}:{rel}")
             if shown.returncode != 0:
                 branch_unreadable.append(f"{rel} on {b}")
                 return None
             return shown.stdout
-        own_active = _own_plans(root, base, b, read, specs=True)
+        own_active = _own_plans(root, base_sha, b, read, specs=True, tip=tip)
         if own_active is None:
             branch_unreadable.append(f"the plans of {b}")
         merged_slugs = _identity_slugs(merged_paths - gone_by.get(b, set()), same_plan)
@@ -418,9 +447,9 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
                 own_ids |= ids
                 tier = _review.plan_tier(plain) or 0
                 if tier >= 2 and not _review.review_waived(plain) \
-                        and not _covers(root, passes, ids, tier, b, branch_passes):
+                        and not _covers(root, passes, ids, tier, tip, branch_passes):
                     spec_uncleared.append((rel, ids))
-        found = _deviations(root, base, b)  # what rides into its merge commit
+        found = _deviations(root, base_sha, b, tip=tip)  # what rides into its merge commit
         if found is None:
             branch_unreadable.append(f"the DoD deviations of {b}")  # an unread hold would close the issue
         deviations, held = found or ([], set())
@@ -433,13 +462,13 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         # was built on an assumption — answer it (DECISION line) first
         # a plan the branch deletes holds no question and cannot be read at its
         # tip (#201: it refused the branch as unreadable)
-        active = _paths(root, "diff", "--name-only", "-z", "--diff-filter=d", f"{base}...{b}", "--",
+        active = _paths(root, "diff", "--name-only", "-z", "--diff-filter=d", f"{base_sha}...{tip}", "--",
                         _tower.PLANS_ACTIVE, _tower.SPECS_DIR)
         if active is None:
             branch_unreadable.append(f"the active plans of {b}")
         open_q = []
         for rel in (r for r in active or () if r.endswith(".md")):
-            shown = _git(root, "show", f"{b}:{rel}")
+            shown = _git(root, "show", f"{tip}:{rel}")
             if shown.returncode != 0:
                 branch_unreadable.append(f"{rel} on {b}")  # an unread plan hides its open question
             elif questions := _review.open_questions(shown.stdout):
@@ -458,21 +487,21 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
         from template_verify import verify
         template_blocked = False
         try:
-            update = verify(root, base, b)
-            template_findings = _review.template_review_findings(root, update, passes, tip=b)
+            update = verify(root, base_sha, tip)
+            template_findings = _review.template_review_findings(root, update, passes, tip=tip)
             template_blocked = bool(template_findings)
             c["reasons"].extend(template_findings)
         except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
             template_blocked = True
             c["reasons"].append(f'template verification failed: {exc}')
         hold = holds.get(b)
-        report_blocked = bool(hold) and hold["state"] == "blocked"
+        report_blocked = bool(hold)
         if report_blocked:
             note = f": {hold['note']}" if hold.get("note") else ""
             c["reasons"].append(f"latest report `blocked` ({hold['minutes_ago']} min ago{note}) — "
                                 f"`report.py pushed` after the fix, or `review-pass`, releases it")
         rep = reports.get(b)
-        process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, b, branch_passes)
+        process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, tip, branch_passes)
         if process_unreviewed:
             more = f" and {len(touches_process) - 1} more" if len(touches_process) > 1 else ""
             c["reasons"].append(f"changes the gates' code ({touches_process[0]}{more}) without a REVIEW pass "
@@ -494,7 +523,7 @@ def candidates(root: Path, local: str, base: str) -> list[dict]:
             if archived and not cleared_all:
                 c["reasons"].append("archived Tier 2+ plan without a REVIEW pass covering the branch head "
                                     "— the report is not the record")
-            elif _covers(root, passes, own_ids, 0, b, branch_passes) and any(r["work"] in own_ids for r in passes):
+            elif _covers(root, passes, own_ids, 0, tip, branch_passes) and any(r["work"] in own_ids for r in passes):
                 c["by"] = f"worker report review-pass ({rep['minutes_ago']} min ago) + REVIEW pass covering the head"
             else:
                 c["reasons"].append("report review-pass, but no REVIEW pass for its own work covers the branch "
@@ -604,9 +633,12 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
               "boarding reads the reports this clone has; another host's unfetched `blocked` holds nothing",
               file=sys.stderr)
     base = base_ref(root, local)
-    cands = candidates(root, local, base)
+    # what boarding saw (#391, #335): the base's SHA and every report's identity —
+    # each candidate carries its own `sha`
+    snapshot: dict = {}
+    cands = candidates(root, local, base, snapshot)
     ready, why = departure(cands, root, min_candidates=min_candidates, max_wait_hours=max_wait_hours)
-    return {"integration": local, "base": base, "candidates": cands, "ready": ready, "why": why}
+    return {"integration": local, "base": base, **snapshot, "candidates": cands, "ready": ready, "why": why}
 
 
 # --- the run -------------------------------------------------------------------------------
@@ -1091,11 +1123,16 @@ def _train_worktree(root: Path) -> Path:
 
 
 def build_train(root: Path, base: str, aboard: list[str], stamp: str, log, *,
-                worktree: Path | None = None) -> tuple[Path, str, list[str], list[str]]:
+                worktree: Path | None = None,
+                shas: dict[str, str] | None = None) -> tuple[Path, str, list[str], list[str]]:
     """Merge candidates onto a fresh staging branch in its own worktree
     (`worktree`, default the staging worktree `<root>-train`; the preboard
     check builds its probe trees here too — one owner of the merge, #386).
-    Returns (worktree, branch, merged, dropped_for_conflict)."""
+    `shas` names the SHA each candidate boarded with: that is what merges, on
+    `base` as the caller pinned it (#391) — a branch that moves after boarding
+    changes no run; without one, its name. Names stay the identity (messages,
+    issues, the merged list). Returns (worktree, branch, merged,
+    dropped_for_conflict)."""
     wt = worktree if worktree is not None else _train_worktree(root)
     branch = f"train/{stamp}"
     if wt.exists():
@@ -1108,14 +1145,15 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log, *,
     for b in aboard:
         issues: set[int] = set()
         archived: list[str] = []
-        r = _git(wt, "merge", "--no-ff", "--no-commit", b)
+        tip = (shas or {}).get(b) or b
+        r = _git(wt, "merge", "--no-ff", "--no-commit", tip)
         if r.returncode == 0 and _git(wt, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode != 0:
             merged.append(b)  # already contained (a stacked passenger merged before it)
             log(f"merged {b} — already contained")
             continue
         if r.returncode == 0:
             # read before settling: settling moves plans the deviations live in
-            found = _deviations(wt, base, b)
+            found = _deviations(wt, base, b, tip=tip)
             if found is None:
                 # an unread hold would close an issue the plan keeps open
                 _git(wt, "merge", "--abort")
@@ -1123,7 +1161,7 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log, *,
                 log(f"{b} dropped (git could not read its plans' DoD deviations)")
                 continue
             deviations, held = found
-            archived, issues = _settle_plans(wt, base, b, log)
+            archived, issues = _settle_plans(wt, base, b, log, tip=tip)
             kept = issues & held
             issues -= held
             message = f"train: merge {b}"
@@ -1157,7 +1195,7 @@ _OPEN_TASK = _review.OPEN_TASK  # the one open-task grammar
 
 
 def _own_plans(root: Path, base: str, branch: str, read, *,
-               specs: bool = False) -> list[tuple[str, str]] | None:
+               specs: bool = False, tip: str | None = None) -> list[tuple[str, str]] | None:
     """The plans under PLANS — with `specs`, also the Spec Kit plans
     (`specs/<slug>/plan.md`, #218) — that are `branch`'s own, as (path, unfenced text):
     added by the branch (git's rename detection: a plan the branch only
@@ -1167,9 +1205,11 @@ def _own_plans(root: Path, base: str, branch: str, read, *,
     through a slug in a branch name). Boarding and the merge's settling ask
     this one rule (#199: an active plan's ids counted only once archived, and
     a `work=<slug>` pass did not board). `read(rel)` gives the text, None when
-    there is none; None when git cannot list the plans."""
+    there is none; None when git cannot list the plans. `tip` is the content to
+    read (the SHA the branch boarded with, #391), `branch` the identity — its
+    issues decide what is its own; without `tip`, the branch's name."""
     pathspec = (PLANS, _review.SPECS_DIR) if specs else (PLANS,)
-    own = _review.own_plans(root, base, branch, _branch_issues(root, branch), read, pathspec,
+    own = _review.own_plans(root, base, tip or branch, _branch_issues(root, branch), read, pathspec,
                             lambda rel: rel.endswith(".md") and (rel.startswith(PLANS + "/")
                                                                  or _review.record_kind(rel) == "spec-plan"))
     return None if own is None else [(rel, plain) for rel, plain, _added in own]
@@ -1187,7 +1227,8 @@ _HOLDS = re.compile(r"\s*[*_]*\s*(?:open\s+AC-[\w.]+(?:\s*,\s*AC-[\w.]+)*(?:\s+o
                     r"(?P<refs>(?:[\s,]*#\d+)*)(?![\w-])", re.IGNORECASE)
 
 
-def _deviations(root: Path, base: str, branch: str) -> tuple[list[str], set[int]] | None:
+def _deviations(root: Path, base: str, branch: str, *,
+                tip: str | None = None) -> tuple[list[str], set[int]] | None:
     """The `DoD-deviation:` lines of `branch`'s own plans and spec plans
     (`check_review.own_plans`, the one rule), each stripped but otherwise
     verbatim, in order and without repeats — and the issues they keep open:
@@ -1196,12 +1237,15 @@ def _deviations(root: Path, base: str, branch: str) -> tuple[list[str], set[int]
     its plan's own issues. A fenced example is no declaration. A closing
     keyword before an issue (`fixes #12`) is copied as `fixes issue 12`, so
     GitHub closes nothing the train did not close. None when git cannot
-    list the plans."""
+    list the plans. Content at `tip` (the boarded SHA, #391), identity by
+    `branch`; without `tip`, the branch's name."""
+    tip = tip or branch
+
     def read(rel: str) -> str | None:
-        shown = _git(root, "show", f"{branch}:{rel}")
+        shown = _git(root, "show", f"{tip}:{rel}")
         return shown.stdout if shown.returncode == 0 else None
 
-    own = _review.own_plans(root, base, branch, _branch_issues(root, branch), read,
+    own = _review.own_plans(root, base, tip, _branch_issues(root, branch), read,
                             (PLANS, _review.SPECS_DIR),
                             lambda rel: _review.record_kind(rel) in ("plan", "plan-archive", "spec-plan"))
     if own is None:
@@ -1220,7 +1264,8 @@ def _deviations(root: Path, base: str, branch: str) -> tuple[list[str], set[int]
     return lines, held
 
 
-def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set[int]]:
+def _settle_plans(wt: Path, base: str, branch: str, log, *,
+                  tip: str | None = None) -> tuple[list[str], set[int]]:
     """What merging `branch` finishes: its own active plans that are done —
     a declared tier, no open task, a clearing review (or none required) —
     move to the archive in the merge itself, and the issues of its own
@@ -1236,9 +1281,11 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
     only renamed or moved is not new), or already on the base with the
     branch's issue number among its issues — another work's plan the branch
     touched, renamed or archived is never the branch's to finish (a
-    refutation closed issues through a slug in a branch name)."""
+    refutation closed issues through a slug in a branch name). `tip` is the
+    merged SHA (#391): which plans changed is read there, whose they are by
+    `branch`."""
     records = _review.record_texts(wt, ("journal",)) or []
-    passes = _review.review_passes(wt, (text for _rel, text in records), branch)
+    passes = _review.review_passes(wt, (text for _rel, text in records), tip or branch)
     listed = _paths(wt, "ls-files", "-z", "--", PLANS)
     stems = [Path(n).stem for n in listed or () if n.endswith(".md")]
     dedated: dict[str, int] = {}
@@ -1252,7 +1299,7 @@ def _settle_plans(wt: Path, base: str, branch: str, log) -> tuple[list[str], set
 
     archived: list[str] = []
     issues: set[int] = set()
-    for rel, plain in _own_plans(wt, base, branch, read) or []:
+    for rel, plain in _own_plans(wt, base, branch, read, tip=tip) or []:
         stem = Path(rel).stem
         # without the listing no de-dated slug is known to be unique
         unique = listed is not None and dedated.get(_review.DATE_PREFIX.sub("", stem), 0) <= 1
@@ -1534,13 +1581,15 @@ def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str
     stage times (`_collect_stage_times`), `{}` when none were collected. `rounds`: the
     red path's runs per kind and round (`docs/process/train.md`), `[]` when none ran.
     `preboard_checks`: what the preboard check decided (`pre_board`) — only when it was
-    configured, so a row without it reads as before."""
+    configured, so a row without it reads as before. `held`: who left before the push
+    on a hold set during the run (#335), `[]` when nobody did."""
     spent = {k: round(phases.get(k, 0.0), 1) for k in PHASES}
     log(f"phases ({result}): " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
     outcome = outcome or {}
     row = {"stamp": stamp, "result": result, "aboard": len(aboard), **spent,
            "stages": stages or {},
-           "branches": list(outcome.get("branches") or []), "deployed": outcome.get("deployed"),
+           "branches": list(outcome.get("branches") or []), "held": list(outcome.get("held") or []),
+           "deployed": outcome.get("deployed"),
            "ended": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
            "rounds": _rounded_rounds((measure or {}).get("rounds") or [])}
     if "preboard_checks" in outcome:
@@ -1623,7 +1672,7 @@ def _clear_worktree(root: Path, wt: Path) -> None:
 
 def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, timeout: float | None,
               log, preflight: str | None = None, preflight_timeout: float | None = None,
-              checks: dict | None = None) -> tuple[list[str], dict]:
+              checks: dict | None = None, shas: dict[str, str] | None = None) -> tuple[list[str], dict]:
     """The preboard check (#386): `cmd`, a check of seconds, on base+candidate before the
     candidate boards — `(still aboard, checks)`, a new list in boarding order. The probe
     trees are `build_train`'s, in `<root>-train-preboard` on `train/<stamp>-preboard`: the
@@ -1636,7 +1685,8 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
     on the base's tree (refute v2.89: a broken part of the host the base never exercised,
     or a host that broke mid-check, blocked candidates before the preflight ran) — the
     base no longer green: nobody dropped; the preflight red: `EnvironmentRed`, nobody
-    blamed."""
+    blamed. `shas`: the SHAs the candidates boarded with, merged as `build_train`
+    merges them (#391)."""
     wt = _preboard_worktree(root)
     probe_stamp = f"{stamp}{PREBOARD_SUFFIX}"
     checks = {} if checks is None else checks  # the caller's: it reaches the row on any exit
@@ -1660,7 +1710,8 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
         """green, red, undefined — or "conflict", "not built": not judged."""
         _clear_worktree(root, wt)  # a fresh tree per check: no residue of the run before counts
         try:
-            built, _br, merged, _dropped = build_train(root, base, subset, probe_stamp, log, worktree=wt)
+            built, _br, merged, _dropped = build_train(root, base, subset, probe_stamp, log, worktree=wt,
+                                                       shas=shas)
         except (Exception, SystemExit) as exc:  # noqa: BLE001 — `_git(check=True)` exits
             # a probe that cannot be built checks nothing, and never aborts the train
             log(f"preboard: probe tree not built — {type(exc).__name__}: {exc}")
@@ -1717,7 +1768,7 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
             for b in checks["dropped"]:
                 print(f"train: {b} did not board — the preboard check `{cmd}` is red on {base}+{b} twice; "
                       "its worker owes a fix (report: blocked)", file=sys.stderr)
-                _write(root, "blocked", f"{TRAIN_DROP_NOTE} {stamp}: preboard red — {cmd}", b)
+                _write(root, "blocked", f"{_tower.TRAIN_DROP_NOTE} {stamp}: preboard red — {cmd}", b)
         return kept, checks
     finally:
         _clear_worktree(root, wt)
@@ -1887,7 +1938,11 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             _certify_merge(wt, suite, before, certificate_env or [], log, merge_scope)
         return state
 
-    base = p["base"]
+    # what boarding judged (#391): every run builds the SHAs on the base's SHA, so a
+    # commit or a fetch after it changes no tree of this train. Without them (a caller
+    # from outside, an old plan), the names, as before
+    base = p.get("base_sha") or p["base"]
+    shas = {c["branch"]: c["sha"] for c in p["candidates"] if c.get("sha")}
     # oldest first: boarding order is waiting order, and the bisection below
     # blames by position, so the order must mean something
     waiting = {c["branch"]: c.get("hours_waiting") or 0 for c in p["candidates"]}
@@ -1898,8 +1953,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         # reports a candidate
         checks: dict = {}
         try:
-            kept, _c = timed("preboard", pre_board, root, base, aboard, stamp, preboard,
-                             preboard_timeout, log, preflight, preflight_timeout, checks)
+            kept, _c = timed("preboard", lambda *a: pre_board(*a, shas=shas), root, base, aboard, stamp,
+                             preboard, preboard_timeout, log, preflight, preflight_timeout, checks)
         except EnvironmentRed:
             # the preflight on the base's tree stopped it: an environment round, counts kept
             rounds.append({"red_path": "environment", "runs": {}})
@@ -1961,7 +2016,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     def attempt(subset: list[str], *, memo: bool = True, kind: str) -> tuple[str, list[str], str]:
         nonlocal last_wt
         with counted(kind):
-            wt, br, merged, dropped = build_train(root, base, subset, stamp, log)
+            wt, br, merged, dropped = build_train(root, base, subset, stamp, log, shas=shas)
             last_wt = wt
             for d in dropped:
                 if d not in conflicted:
@@ -1973,13 +2028,49 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     def _report_dropped() -> None:
         for b in conflicted:
             print(f"train: {b} did not board — merge conflict with the batch; its worker rebases (report: blocked)")
-            _write(root, "blocked", f"{TRAIN_DROP_NOTE} {stamp}: merge conflict — rebase onto {local}", b)
+            _write(root, "blocked", f"{_tower.TRAIN_DROP_NOTE} {stamp}: merge conflict — rebase onto {local}", b)
         for b in blamed:
             print(f"train: {b} was dropped as the offender — its worker owes a fix (report: blocked)")
-            _write(root, "blocked", f"{TRAIN_DROP_NOTE} {stamp}: red with it aboard", b)
+            _write(root, "blocked", f"{_tower.TRAIN_DROP_NOTE} {stamp}: red with it aboard", b)
 
     base_state = ""  # the base's verdict, checked once ("": not yet)
     retried = told = False
+    # who left before the push: a hold set during the run (#335) — on the row as `held`
+    held: list[str] = outcome.setdefault("held", []) if outcome is not None else []
+    seen = p.get("reports_seen")  # the report identities at boarding; None: no check
+
+    def held_during_run() -> bool:
+        """After the last green verdict, before the push (#335): a passenger whose
+        worker holds it now, or reported a `blocked` since boarding — released or
+        not, the release is for its new tip —, leaves, and so does a passenger
+        stacked on it (its SHA contains the held one's). The worker's own report
+        is the record: the train writes no `blocked`. True when somebody left: the
+        smaller board is a new combination and runs as a new round. Known rest: a
+        hold that arrives while the push's own pre-push gates run."""
+        nonlocal aboard, retried
+        if seen is None:
+            return False
+        if not _report.fetch_reports(root):
+            log("hold check: could not fetch the published reports — reading the ones this clone has")
+        found = _tower.held_since(root, seen)
+        direct = [b for b in aboard if b in found]
+        if not direct:
+            return False
+        why = {b: f"`{found[b]['state']}` ({found[b].get('note') or 'no reason given'})" for b in direct}
+        for b in aboard:
+            if b in why:
+                continue
+            under = next((h for h in direct if _git(root, "merge-base", "--is-ancestor", shas.get(h, h),
+                                                    shas.get(b, b)).returncode == 0), None)
+            if under:
+                why[b] = f"it contains {under}"
+        for b in (b for b in aboard if b in why):
+            held.append(b)
+            log(f"{b} held during the run — {why[b]}; the rest is rebuilt without it")
+            print(f"train: {b} held during the run — {why[b]}; rebuilding without it", file=sys.stderr)
+        aboard = [b for b in aboard if b not in why]
+        retried = False  # a new combination earns its own flake re-run
+        return True
 
     def check_base() -> str:
         nonlocal base_state
@@ -2004,6 +2095,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         aboard = merged
         if state == "green" or not aboard:
             _end_round(measure, "green" if state == "green" else "conflicts")
+            if state == "green" and held_during_run():
+                continue
             break
         if red_ids and state == "red":
             # read only, before any other run rebuilds the worktree: the board tree is this one
@@ -2100,6 +2193,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                     print("train: FLAKY — the combined tree was red, then green on the identical tree; "
                           f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
                     log("red then green on the identical tree — flaky suite, merging")
+                if held_during_run():
+                    continue
                 break
         # before blaming anybody: is the base itself red (a broken main)?
         # Then no candidate is the offender.
@@ -2152,12 +2247,13 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     if not aboard:
         if rounds and str(rounds[-1]["red_path"]).startswith("dropped:"):
             _end_round(measure, "none-survived")  # the last drop left nobody aboard
-        print("train: nothing survived — see " + str(logfile), file=sys.stderr)
+        print("train: nothing survived" + (f" — held during the run: {', '.join(held)}" if held else "")
+              + " — see " + str(logfile), file=sys.stderr)
         _report_dropped()
         _cleanup(root, stamp)
         return 1
     if _git(root, "merge-base", "--is-ancestor", local, base).returncode != 0:
-        print(f"train: local {local} carries commits that are not on {base} — push or drop them first; "
+        print(f"train: local {local} carries commits that are not on {p['base']} — push or drop them first; "
               f"a fast-forward is impossible and the train would publish a {local} without them",
               file=sys.stderr)
         _cleanup(root, stamp)
@@ -2191,22 +2287,38 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     print(f"train: {local} → {_out(root, 'rev-parse', '--short', 'HEAD')} with {', '.join(aboard)}"
           + (" (pushed)" if push else ""))
     import dispatch as _dispatch  # lazily, as tower does
+    # a branch that moved since boarding merged at its boarded SHA (#391): its new
+    # commits are unreviewed and unmerged — it stays, with its records and worktree
+    moved = {b: shas[b] for b in aboard
+             if b in shas and _out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}") != shas[b]}
     try:
         # merged now: their worktrees (each with its own venv/node_modules) are
         # residue — dispatch says which may go; asked before forget_branch drops records
-        worktrees = {wt["branch"]: (wt, why) for wt, why in _dispatch.merged_worktrees(root, local, aboard)}
+        worktrees = {wt["branch"]: (wt, why) for wt, why in
+                     _dispatch.merged_worktrees(root, local, [b for b in aboard if b not in moved])}
     except Exception as exc:  # noqa: BLE001 — cleanup after the merge: say so, never abort a landed train
         print(f"train: merged worktrees not checked — {exc}", file=sys.stderr)
         worktrees = {}
     for b in aboard:
+        tip = shas.get(b) or b
         # a `Regression-of: #N` trailer names the issue a fix repairs, not one this
-        # branch works on — it must neither file the merge under #N nor ask to close it
-        bodies = REGRESSION_LINE.sub("", _out(root, "log", "--format=%B", f"{base}..{b}"))
+        # branch works on — it must neither file the merge under #N nor ask to close it.
+        # What merged, against the base it merged on: after the push `origin/main`
+        # contains the branch, and `origin/main..b` read nothing
+        bodies = REGRESSION_LINE.sub("", _out(root, "log", "--format=%B", f"{base}..{tip}"))
         refs = sorted({int(n) for n in re.findall(r"(?<![\w/])#(\d+)\b", bodies)})
         if refs:
             print(f"train: {b} references issue(s) {', '.join('#' + str(n) for n in refs)} — "
                   "closed by GitHub where a commit says Closes; the steward closes the rest with the merge ref")
             log(f"{b} issues: {refs}")
+        if b in moved:
+            # no `done`, no forget: its worker is still at it, and its issues with it.
+            # Known rest: a `Closes #N` of the boarded commits closes N all the same
+            said = (f"{b} moved since boarding — merged at {moved[b][:12]}; its new commits need their own "
+                    "review and train")
+            print(f"train: {said}")
+            log(said)
+            continue
         try:
             _report.write_report(root, "done", issue=refs[0] if refs else None,
                                  note=f"merged by train {stamp}" + (f"; issues {refs}" if refs else ""), worker=b)
@@ -2229,12 +2341,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 print(f"train: worktree {wt['path']} of {b} " + (f"not removed — {failed}" if failed else "removed"))
                 log(f"worktree {wt['path']} of {b}: {failed or 'removed'}")
         if not keep_branches:
-            d = _git(root, "branch", "-d", b)
-            if d.returncode != 0:
-                print(f"train: local branch {b} kept — {d.stderr.strip().splitlines()[-1] if d.stderr.strip() else 'delete refused'} "
-                      "(checked out in a worktree?); origin copy kept too", file=sys.stderr)
-            elif push:
-                _git(root, "push", "origin", "--delete", b)
+            _delete_branch(root, b, shas.get(b), push=push, log=log)
     _cleanup(root, stamp)
     _report_dropped()
     if deploy:
@@ -2245,6 +2352,40 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             print("train: deploy failed — the merge stands, the deploy does not; see " + str(logfile), file=sys.stderr)
             return 1
     return 0
+
+
+def _delete_branch(root: Path, b: str, sha: str | None, *, push: bool, log) -> None:
+    """A merged passenger's branch goes — only as it boarded (#391): locally
+    `update-ref -d` with the boarded SHA (a commit in the meantime keeps it), on
+    origin a delete under `--force-with-lease` of that SHA (a worker's push from
+    elsewhere keeps the copy). Without a SHA, `branch -d` as before. A branch
+    checked out in a worktree stays, and so does its origin copy."""
+    if sha is None:
+        d = _git(root, "branch", "-d", b)
+    elif _checked_out(root, b):
+        d = subprocess.CompletedProcess([], 1, "", "checked out in a worktree")
+    else:
+        d = _git(root, "update-ref", "-d", f"refs/heads/{b}", sha)
+    if d.returncode != 0:
+        print(f"train: local branch {b} kept — {d.stderr.strip().splitlines()[-1] if d.stderr.strip() else 'delete refused'} "
+              "(checked out in a worktree, or moved?); origin copy kept too", file=sys.stderr)
+        return
+    if not push:
+        return
+    if sha is None:
+        _git(root, "push", "origin", "--delete", b)
+        return
+    r = _git(root, "push", f"--force-with-lease=refs/heads/{b}:{sha}", "origin", f":refs/heads/{b}")
+    if r.returncode != 0 and ("stale info" in r.stderr or "rejected" in r.stderr):
+        print(f"train: origin's {b} kept — it moved since boarding (a push from elsewhere); "
+              f"its new commits need their own review and train", file=sys.stderr)
+        log(f"origin's {b} kept — moved since boarding")
+
+
+def _checked_out(root: Path, b: str) -> bool:
+    """Is `b` the branch of a worktree of this clone? None readable counts as yes."""
+    r = _git(root, "worktree", "list", "--porcelain")
+    return r.returncode != 0 or f"branch refs/heads/{b}" in r.stdout.splitlines()
 
 
 def _write(root: Path, state: str, note: str, worker: str) -> None:
@@ -2272,10 +2413,11 @@ def conflict_hints(root: Path, cands: list[dict]) -> list[dict]:
     wrong branch)."""
     aboard = [c["branch"] for c in sorted((c for c in cands if c["eligible"]),
                                           key=lambda c: -(c.get("hours_waiting") or 0))]
+    tip = {c["branch"]: c.get("sha") or c["branch"] for c in cands}  # as boarding judged them (#391)
     hints: list[dict] = []
     for i, first in enumerate(aboard):
         for second in aboard[i + 1:]:
-            merged = _review._auto_merge(root, first, second)
+            merged = _review._auto_merge(root, tip[first], tip[second])
             if merged is None or merged[1]:
                 hints.append({"branches": [first, second],
                               "paths": sorted(merged[1]) if merged is not None else None})
@@ -2366,6 +2508,7 @@ def main(argv: list[str]) -> int:
         result = plan(root, min_candidates=a.min_candidates, max_wait_hours=a.max_wait_hours)
         # computed here, not in plan(): `run` calls plan() and must not pay for the hint (#379)
         result["conflicts"] = conflict_hints(root, result["candidates"])
+        result.pop("reports_seen", None)  # the run's comparison set, not the plan's word
         print(json.dumps(result, indent=2) if a.json else render_plan(result))
         return 0
     import testing_config  # noqa: PLC0415

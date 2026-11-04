@@ -306,7 +306,7 @@ def test_the_memo_names_the_scope_that_ran(process, repo, monkeypatch, tmp_path)
     monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
-    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log:
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw:
                         (repo, "train/x", list(subset), []))
     p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
     # a wider `stages` an earlier run left, a suite that writes none: the train clears it

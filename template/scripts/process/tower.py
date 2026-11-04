@@ -24,11 +24,13 @@ What it assembles (all from state the process already keeps):
   gates      — the runner's red ledger with age (a chronic red is wallpaper)
   lanes      — `lane.py status` where the project has lanes (`testing_config.lane_script`)
   reports    — the latest state each worker reported (`report.py`)
+  holds      — the branches the train holds (`train_holds`, the train's own
+               rule), for live local branches ahead of the integration branch
   findings   — deterministic, each with a because: overlaps, a Tier 2+ plan
                without an issue, a plan without a Decisions ledger, a gate
                red for days, a worker with no report and no commit for an
                hour, a tmux worker at a permission prompt, a branch far
-               behind the integration branch
+               behind the integration branch, a train hold a later report hides
 
 The tower decides nothing. It is the input an orchestrating agent reads
 instead of the sessions themselves — compact, testable, and the same on
@@ -478,6 +480,75 @@ def latest_reports(root: Path, *, remote: bool = False, states: tuple[str, ...] 
     return out
 
 
+# --- the train's hold (#326): one owner, read by the train and shown here (#336) -----------
+
+# the report states that hold a branch (`blocked`) or release it (#326)
+HOLD_STATES = ("blocked", "pushed", "review-pass")
+# the note the train's own `blocked` starts with (a conflict, red with it aboard):
+# it describes a run, not the branch — a conflict with a passenger that never
+# landed would hold for nothing — so the hold reads past it. Writer and reader.
+TRAIN_DROP_NOTE = "dropped from train"
+
+
+def _train_written(rec: dict) -> bool:
+    return rec.get("state") == "blocked" and str(rec.get("note") or "").startswith(TRAIN_DROP_NOTE)
+
+
+def train_holds(root: Path) -> dict[str, dict]:
+    """The branches the train holds, as {worker: its `blocked` record}: the latest
+    word among `blocked`, `pushed` and `review-pass` is `blocked` — this host's
+    reports and the ones other hosts published (`refs/process/reports/*`, local
+    refs: no network; `fetch_reports` brings them). `idle` (what `dispatch stop`
+    writes) and `planned` neither hold nor release, nor does the train's own
+    `blocked` (TRAIN_DROP_NOTE). Always with the published refs: a tower without
+    `--remote` showed `idle` where the train held (#336)."""
+    return {r["worker"]: r for r in latest_reports(root, remote=True, states=HOLD_STATES, skip=_train_written)
+            if r["state"] == "blocked"}
+
+
+def report_identity(rec: dict) -> tuple:
+    """A report as the train remembers it at boarding: who, when (as written, never
+    compared with a clock), what, why."""
+    return (rec.get("worker"), rec.get("epoch"), rec.get("state"), rec.get("note") or "")
+
+
+def report_ids(root: Path) -> frozenset:
+    """The identities of every report the hold reads (`train_holds`'s sources)."""
+    return frozenset(report_identity(r) for r in _report.read_reports(root, remote=True))
+
+
+def held_since(root: Path, seen: frozenset) -> dict[str, dict]:
+    """Who must leave a train before its push (#335), as {worker: the record that
+    holds it}: an effective hold now (`train_holds`), or a `blocked` that was not
+    among `seen` (`report_ids` at boarding) — even when a release followed: that
+    release is for the worker's new tip, not for the one the train boarded. The
+    sets are compared, never another host's clock. The train's own `blocked`
+    holds nothing."""
+    held = dict(train_holds(root))
+    for rec in sorted(_report.read_reports(root, remote=True), key=lambda r: r.get("epoch", 0)):
+        if rec.get("state") == "blocked" and not _train_written(rec) and report_identity(rec) not in seen:
+            held.setdefault(rec["worker"], rec)
+    return held
+
+
+def live_holds(root: Path, ref: str | None) -> list[dict]:
+    """`train_holds` for the branches the train would consider — local, not the
+    integration branch, not a train's own, ahead of `ref`. A merged or deleted
+    branch's hold is history."""
+    if not ref:
+        return []
+    names = set((_git(root, "for-each-ref", "--format=%(refname)", "refs/heads/") or "").split())
+    integration = set(INTEGRATION_NAMES) | {ref.removeprefix("origin/")}
+    out = []
+    for worker, rec in sorted(train_holds(root).items()):
+        if f"refs/heads/{worker}" not in names or worker in integration or worker.startswith("train/"):
+            continue
+        counts = (_git(root, "rev-list", "--left-right", "--count", f"{ref}...refs/heads/{worker}") or "").split()
+        if len(counts) == 2 and counts[1].isdigit() and int(counts[1]) > 0:
+            out.append(rec)
+    return out
+
+
 ELSEWHERE_DAYS = 14
 
 
@@ -880,6 +951,20 @@ def findings(table: dict, stale_minutes: int, prompt_minutes: int = PROMPT_MINUT
             out.append({"kind": "blocked", "severity": "high",
                         "what": f"{rep['worker']} blocked for {rep['minutes_ago']} min: {rep.get('note') or 'no reason given'}",
                         "because": "a blocked worker burns nothing but delivers nothing — unblock or reassign"})
+    # a hold the reports above hide (#336): an `idle` or `planned` after the `blocked`, or
+    # another host's `blocked` a table without --remote does not list — the train holds the
+    # branch all the same. A `blocked` latest report is the finding above, not this one
+    shown = {r["worker"]: r["state"] for r in table["reports"]}
+    for rec in table.get("holds", []):
+        latest = shown.get(rec["worker"])
+        if latest == "blocked":
+            continue
+        out.append({"kind": "train-hold", "severity": "medium",
+                    "what": f"{rec['worker']}: the train holds it — `blocked` {rec['minutes_ago']} min ago"
+                            f"{' on ' + rec['host'] if rec.get('host') else ''} "
+                            f"({rec.get('note') or 'no reason given'}); latest report here: {latest or 'none'}",
+                    "because": "`idle` and `planned` release nothing: the branch boards again on a newer "
+                               "`pushed` (after the fix) or `review-pass`"})
     order = {"high": 0, "medium": 1, "low": 2}
     return sorted(out, key=lambda f: order[f["severity"]])
 
@@ -1001,6 +1086,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False,
         "lanes": lanes(root),
         "balance": balance(root, ref),
         "reports": latest_reports(root, remote=remote),
+        "holds": live_holds(root, ref),
         "remote_fetched": fetch_ok if remote else None,
     }
     table["findings"] = findings(table, stale_minutes, prompt_minutes) + local_findings(root)
@@ -1061,6 +1147,8 @@ def render(table: dict) -> str:
         lines.append("reports: " + "; ".join(
             f"{r['worker']}@{r.get('host', '?')} {r['state']}{' #' + str(r['issue']) if r.get('issue') else ''} ({r['minutes_ago']} min)"
             for r in table["reports"][:12]))
+    if table.get("holds"):
+        lines.append("train holds: " + "; ".join(f"{r['worker']} ({r['minutes_ago']} min)" for r in table["holds"]))
     if table["findings"]:
         lines.append(f"findings ({len(table['findings'])}):")
         for f in table["findings"]:
