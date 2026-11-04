@@ -3258,8 +3258,9 @@ def test_a_candidate_red_twice_on_the_preboard_is_blocked_and_never_built_into_t
     assert rc == 0, err
     row = _phases(out)[-1]
     probe = out.parent / f"{out.name}-train-preboard"
-    # the base, each candidate on base+it, the red one once more on a rebuilt tree
-    assert sorted(s for s, w in builds if w == probe) == [[], ["alpha"], ["bad"], ["bad"]]
+    # the base, each candidate on base+it, the red one once more on a rebuilt tree, and the
+    # base once more before anybody is reported (refute v2.89)
+    assert sorted(s for s, w in builds if w == probe) == [[], [], ["alpha"], ["bad"], ["bad"]]
     trained = [s for s, w in builds if w is None]
     assert trained and all("bad" not in s for s in trained), builds
     assert writes == [("blocked", f"dropped from train {row['stamp']}: preboard red — test ! -e src/BROKEN", "bad")]
@@ -3483,3 +3484,46 @@ def test_train_phases_prints_the_preboard_time_and_counts(render, tmp_path):
             "last reason: preboard on the base: red)") in out, out
     assert "1/6 runs ended red, 0 stopped by the preflight" in out, out
     assert "1 ended at the preboard check (every candidate dropped)" in out, out
+
+
+def test_a_host_that_breaks_after_the_base_check_holds_nobody_back(render, tmp_path, tmp_path_factory):
+    """Refute v2.89: the check is green on the base, then the host breaks (token,
+    network, disk) — the base checked once more is red too, so nobody is reported."""
+    count = tmp_path_factory.mktemp("c") / "n"
+    out = render(tmp_path / "w", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    check = f'n=$(cat {count} 2>/dev/null || echo 0); echo $((n+1)) > {count}; [ "$n" = 0 ]'
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", check)
+    row = _phases(out)[-1]
+    assert row["preboard_checks"]["dropped"] == [], row
+    assert "turned red" in row["preboard_checks"]["reason"] and "did not board" not in r.stderr, r.stderr
+
+
+def test_a_tool_missing_on_the_host_stops_as_environment_blaming_nobody(render, tmp_path):
+    """Refute v2.89: the candidate's check needs a tool the host lacks; the base never
+    used it — the preflight decides before anybody is reported blocked."""
+    out = render(tmp_path / "w", {"project_name": "d", "modules": {}})
+    (out / "check.sh").write_text("exit 0\n")
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "usestool", {"check.sh": "jqx-missing-386 --version\n"})
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "sh check.sh",
+               "--preflight", "command -v jqx-missing-386")
+    row = _phases(out)[-1]
+    assert row["result"] == "environment", row
+    assert "did not board" not in r.stderr, r.stderr
+
+
+def test_a_killed_runs_probe_branch_is_removed(render, tmp_path):
+    out = render(tmp_path / "w", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    wt = out.parent / f"{out.name}-train-preboard"
+    _git(out, "worktree", "add", "-q", "-b", "train/20260101-0000-preboard", str(wt), "main")
+    train = _load_train(out)
+    kept, _checks = train.pre_board(out, "main", ["alpha"], "20261104-1200", "true", 60, lambda s: None)
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert kept == ["alpha"] and not wt.exists()
+    assert not [b for b in branches if b.endswith("-preboard")], branches

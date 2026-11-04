@@ -55,6 +55,12 @@ seen. It is no second suite and needs no project environment: no `uv sync`
 or `npm install` in the fresh worktree. A fast test belongs first in its
 stack's `pins`, so the branch push already runs it. A candidate stacked on
 one that was dropped carries the dropped one's commits, as with any drop.
+Before a candidate is reported, the train checks the base once more and
+runs the preflight on the base's tree: a host that broke during the check,
+or lacks what only the candidates' check uses, holds nobody back. The probe
+worktree's path is `<root>-train-preboard`, like `<root>-train` for the
+staging tree; a dispatched branch named `train-preboard` (or `train`) would
+share it and lose its worktree, so do not name work branches that way.
 
 ## Boarding — computed, never claimed
 
