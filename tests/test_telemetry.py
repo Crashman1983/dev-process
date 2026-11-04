@@ -2569,6 +2569,7 @@ def test_size_bands_are_unknown_when_git_is_not_read(render, tmp_path, monkeypat
     assert "git not read" in text, text
     rows = [line.split() for line in text.splitlines() if line.split()[:1] and line.split()[0] in m.SIZE_STEPS]
     assert len(rows) == 4 and all(r[1] == "unknown" for r in rows), text
+    assert "n=0" not in text and "stacks: unknown" in text, text  # the stack spread too (code review)
 
 
 def test_size_follows_a_rename_of_a_file_first_merged_before_the_window(render, tmp_path):
