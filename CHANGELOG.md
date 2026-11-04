@@ -10,6 +10,23 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.87.0 — Less idle time and double work in the train · 2026-11-04
+
+**Why.** The downstream steward reviewed a week of trains (28 October to 3 November): 42 runs, 39 % of the train minutes red. Four causes had a lever in the template. A tier-1 start ran the full execute flow. A session waited at a permission prompt for up to 155 minutes without anyone being told. A conflict with main showed up only in the train, after the last review. And a train called with its own `--suite` ran the suite a second time, because the hook did not accept that run (#376 #377 #379 #381).
+
+**What changes.**
+- **A tier-0/1 start without a plan of its own runs the quick flow** (#376). `dispatch.py start --phase execute --tier 0|1` sends `/quick` only when the branch carries no plan of its own, Spec Kit plans included, neither on origin nor at a local session's HEAD. An unreachable origin refuses instead of counting as "no plan". A branch with a plan runs that plan. The quick prompt ends with a tier-1 self-check through `attest.py`, a push and `report.py review-pass`, so the chain frees the session and the train takes the branch. When the scope grows, the session reports `blocked` with "needs /plan".
+- **A tmux worker at a permission prompt wakes the steward** (#377). After 10 silent minutes (`--prompt-minutes`, `PROCESS_PROMPT_MINUTES` or the policy's `prompt_minutes`; an invalid value is refused), the tower raises `permission-prompt` (high). The finding names the session, the minutes and the dialog line. `tower.py --wait --states prompt` wakes on it. The recogniser is the one `dispatch say` already used, now also for `Allow …?` and `(y/n)`, read over the last 15 screen lines. A detached `claude -p` run never shows a prompt and never gets the finding. The shell-form block of every worker prompt adds: a wait is a background job or one check per call, never an `until …; do sleep …; done` loop.
+- **A code review starts only on a branch that merges into main** (#379). `make_review_bundle.py` refuses before the gate preflight when the branch conflicts with the integration ref. The refusal names the paths and the fix. On a stacked branch whose parent already conflicts, it names the parent and its rebase. `dispatch.py start --phase review` and the chain's pushed → review step ask the same before a session starts. A check that cannot run says "could not check" with the base SHA and never counts as clean. A plan review is not checked.
+- **`train.py plan` names pairwise conflicts between candidates** as a hint (#379). It does this only for candidates that may ride, in text and additively in `--json`. `train.py run` does not compute them.
+- **`train.py run --suite X` is refused when `merge_suite` is set and `X.strip()` differs from it** (#381), by the same rule as `finish.py`. Equal after `strip` runs `merge_suite` itself. `--suite-differs-ok` allows the exception for a passenger that changes `merge_suite`, and the train log records it.
+
+**Effect.** Shorter red minutes: small fixes skip the plan cycle, a stuck session is reported within minutes, a conflict is found before the last review, and a train no longer pays for its suite twice.
+
+**Update.** A pure update. Anyone who calls the train with their own `--suite` drops it or sets it equal to `merge_suite`. A start with `--tier 0|1` on a branch without a plan now runs `/quick` instead of `/execute`.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.87.md) #376 #377 #379 #381
+
 ## v2.86.0 — Maintenance: nothing missing counts as passed · 2026-11-04
 
 **Why.** Eight open defects, each a check that passed on a failure, a number that measured wrong, or a lookup that took the wrong thing — against the rule that a missing check never counts as passed.

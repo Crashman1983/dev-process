@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.87.0 — Weniger Leerlauf und Doppelarbeit im Zug
+
+Vier Änderungen gegen Warten und doppelte Läufe. Ein kleiner Fix ohne eigenen Plan geht jetzt den kurzen statt des vollen Wegs und kommt trotzdem in den Merge-Zug. Eine Sitzung, die an einer Freigabe-Frage hängt, wird nach zehn Minuten gemeldet, statt stundenlang zu warten. Ein Branch, der nicht mehr auf den Hauptbranch passt, erfährt das vor seinem letzten Review und nicht erst danach im Zug. Und ein Zug mit eigenem Testbefehl lässt die Tests nicht mehr zweimal laufen.
+
 ## v2.86.0 — Wartung: nichts Fehlendes gilt als bestanden
 
 Acht kleine Korrekturen, alle in dieselbe Richtung: Eine Prüfung, die nicht hinsehen konnte, lässt nicht mehr durch. Eine Kopie des Repositorys mit abgeschnittener Historie wird aufgefordert, den Rest zu holen, statt durchgewinkt zu werden; ein Test, den der Runner überspringt, gilt nicht mehr als Beleg; Zahlen, die das Cockpit nicht messen kann, heißen „unbekannt“ statt null; und eine Review-Runde übernimmt nicht mehr die Befunde einer Nachbar-Phase.
