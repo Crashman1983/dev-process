@@ -3897,3 +3897,18 @@ def test_every_passenger_held_during_the_run_merges_nothing(render, tmp_path):
     assert _git(out, "rev-parse", "main").stdout == head
     assert not [b for b in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
                 if b.startswith("train/")]
+
+
+# --- v2.91 (#398, #399): the train plans faster and says who stays behind, and why ---------
+
+def test_the_plan_bench_builds_a_repo_and_reports_the_time(tmp_path):
+    """M0: das Messwerkzeug baut das synthetische Repo und misst `plan` — geprüft wird das
+    Werkzeug, nicht die Zahl (die Laufzeit des Runners schwankt)."""
+    tool = Path(__file__).resolve().parents[1] / "tools/bench_train_plan.py"
+    r = subprocess.run([sys.executable, str(tool), "--branches", "20", "--plans", "20", "--runs", "1",
+                        "--workdir", str(tmp_path / "bench")], capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    result = json.loads(r.stdout)
+    assert result["branches"] == 20 and result["ahead"] + result["merged"] == 20
+    assert len(result["seconds"]) == 1 and result["median_seconds"] > 0
+    assert result["candidates"] == result["ahead"] == result["eligible"], result
