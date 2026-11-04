@@ -3991,3 +3991,27 @@ def test_a_branch_moved_after_the_snapshot_takes_the_normal_way(render, tmp_path
     monkeypatch.setattr(train, "_snapshot", snapshot_then_move)
     alpha = next(c for c in train.candidates(out, "main", "main") if c["branch"] == "alpha")
     assert alpha["sha"] == boarded and alpha["ahead"] == 1 and alpha["eligible"], alpha
+
+
+def test_the_dispatch_records_are_read_once_per_planning(render, tmp_path, monkeypatch):
+    """#398 (S3): `candidates()` liest die Zuordnung der Dispatch-Records einmal und reicht sie
+    an `dispatch.branch_issues` durch; ohne sie antwortet `branch_issues` wie bisher."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    for name in ("alpha", "beta", "gamma"):
+        _branch(out, name, {f"src/{name}.py": "x\n"})
+    _package_branch(out, "70-p1-slice", "71")
+    _report(out, "70-p1-slice")
+    _dispatched(out, 71, "70-p1-slice")
+    train = _load_train(out)
+    import dispatch  # the module train imports lazily
+    real = dispatch._placed
+    reads: list[int] = []
+    monkeypatch.setattr(dispatch, "_placed", lambda root: reads.append(1) or real(root))
+    by = {c["branch"]: c for c in train.candidates(out, "main", "main")}
+    assert len(reads) == 1, len(reads)
+    assert by["70-p1-slice"]["eligible"] and all(by[b]["eligible"] for b in ("alpha", "beta", "gamma")), by
+    placed = real(out)
+    for branch in ("70-p1-slice", "alpha"):
+        assert dispatch.branch_issues(out, branch) == dispatch.branch_issues(out, branch, placed)
+    assert dispatch.branch_issues(out, "70-p1-slice") == {"70", "71"}

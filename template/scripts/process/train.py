@@ -215,10 +215,17 @@ def _branch_work_ids(branch: str) -> set[str]:
     return {branch, leaf} | ({issue} if issue else set())
 
 
-def _branch_issues(root: Path, branch: str) -> set[str]:
-    """`dispatch.branch_issues` — the one owner (#204)."""
+def _branch_issues(root: Path, branch: str, placed: dict[int, str] | None = None) -> set[str]:
+    """`dispatch.branch_issues` — the one owner (#204). `placed`: `_placed_issues`,
+    read once per planning (#398); without it, dispatch reads its records."""
     import dispatch as _dispatch  # lazily, as tower does
-    return _dispatch.branch_issues(root, branch)
+    return _dispatch.branch_issues(root, branch, placed)
+
+
+def _placed_issues(root: Path) -> dict[int, str]:
+    """Where dispatch placed each issue (`dispatch._placed`), for one planning."""
+    import dispatch as _dispatch
+    return _dispatch._placed(root)
 
 
 def _names_branch(branch: str, ids: set[str], issues: set[str]) -> bool:
@@ -342,6 +349,7 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
     reports = {r["worker"]: r for r in _tower.latest_reports(root, skip=_tower._train_written)}
     # the hold (#326): the tower's rule, the one the tower shows (#336)
     holds = _tower.train_holds(root)
+    placed = _placed_issues(root)  # dispatch's records, once for every branch (#398)
     local_sha = tips.get(local, local)
     passes_root = _journal_passes_tree(root, local_sha)
     # the review gate's rule: a de-dated slug may act as a work id only when it
@@ -414,7 +422,7 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         touches_process = sorted(f for f in files if f.startswith(PROCESS_PATHS))
         # the branch's name and its issues: a REVIEW line of any other work
         # is not this branch's
-        issues = _branch_issues(root, b)
+        issues = _branch_issues(root, b, placed)
         own_ids = _branch_work_ids(b) | issues
         housekeeping: list[str] = []
         own_archived: list[str] = []
@@ -449,7 +457,7 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
                 branch_unreadable.append(f"{rel} on {b}")
                 return None
             return shown.stdout
-        own_active = _own_plans(root, base_sha, b, read, specs=True, tip=tip)
+        own_active = _own_plans(root, base_sha, b, read, specs=True, tip=tip, placed=placed)
         if own_active is None:
             branch_unreadable.append(f"the plans of {b}")
         merged_slugs = _identity_slugs(merged_paths - gone_by.get(b, set()), same_plan)
@@ -471,7 +479,7 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
                 if tier >= 2 and not _review.review_waived(plain) \
                         and not _covers(root, passes, ids, tier, tip, branch_passes):
                     spec_uncleared.append((rel, ids))
-        found = _deviations(root, base_sha, b, tip=tip)  # what rides into its merge commit
+        found = _deviations(root, base_sha, b, tip=tip, placed=placed)  # what rides into its merge commit
         if found is None:
             branch_unreadable.append(f"the DoD deviations of {b}")  # an unread hold would close the issue
         deviations, held = found or ([], set())
@@ -1218,8 +1226,8 @@ STAYS_ACTIVE = re.compile(_review._LEAD + r"plan-stays-active[*_]*\s*:\s*[*_]*\s
 _OPEN_TASK = _review.OPEN_TASK  # the one open-task grammar
 
 
-def _own_plans(root: Path, base: str, branch: str, read, *,
-               specs: bool = False, tip: str | None = None) -> list[tuple[str, str]] | None:
+def _own_plans(root: Path, base: str, branch: str, read, *, specs: bool = False, tip: str | None = None,
+               placed: dict[int, str] | None = None) -> list[tuple[str, str]] | None:
     """The plans under PLANS — with `specs`, also the Spec Kit plans
     (`specs/<slug>/plan.md`, #218) — that are `branch`'s own, as (path, unfenced text):
     added by the branch (git's rename detection: a plan the branch only
@@ -1231,9 +1239,10 @@ def _own_plans(root: Path, base: str, branch: str, read, *,
     a `work=<slug>` pass did not board). `read(rel)` gives the text, None when
     there is none; None when git cannot list the plans. `tip` is the content to
     read (the SHA the branch boarded with, #391), `branch` the identity — its
-    issues decide what is its own; without `tip`, the branch's name."""
+    issues decide what is its own; without `tip`, the branch's name. `placed`: as
+    `_branch_issues`."""
     pathspec = (PLANS, _review.SPECS_DIR) if specs else (PLANS,)
-    own = _review.own_plans(root, base, tip or branch, _branch_issues(root, branch), read, pathspec,
+    own = _review.own_plans(root, base, tip or branch, _branch_issues(root, branch, placed), read, pathspec,
                             lambda rel: rel.endswith(".md") and (rel.startswith(PLANS + "/")
                                                                  or _review.record_kind(rel) == "spec-plan"))
     return None if own is None else [(rel, plain) for rel, plain, _added in own]
@@ -1251,8 +1260,8 @@ _HOLDS = re.compile(r"\s*[*_]*\s*(?:open\s+AC-[\w.]+(?:\s*,\s*AC-[\w.]+)*(?:\s+o
                     r"(?P<refs>(?:[\s,]*#\d+)*)(?![\w-])", re.IGNORECASE)
 
 
-def _deviations(root: Path, base: str, branch: str, *,
-                tip: str | None = None) -> tuple[list[str], set[int]] | None:
+def _deviations(root: Path, base: str, branch: str, *, tip: str | None = None,
+                placed: dict[int, str] | None = None) -> tuple[list[str], set[int]] | None:
     """The `DoD-deviation:` lines of `branch`'s own plans and spec plans
     (`check_review.own_plans`, the one rule), each stripped but otherwise
     verbatim, in order and without repeats — and the issues they keep open:
@@ -1262,14 +1271,14 @@ def _deviations(root: Path, base: str, branch: str, *,
     keyword before an issue (`fixes #12`) is copied as `fixes issue 12`, so
     GitHub closes nothing the train did not close. None when git cannot
     list the plans. Content at `tip` (the boarded SHA, #391), identity by
-    `branch`; without `tip`, the branch's name."""
+    `branch`; without `tip`, the branch's name. `placed`: as `_branch_issues`."""
     tip = tip or branch
 
     def read(rel: str) -> str | None:
         shown = _git(root, "show", f"{tip}:{rel}")
         return shown.stdout if shown.returncode == 0 else None
 
-    own = _review.own_plans(root, base, tip, _branch_issues(root, branch), read,
+    own = _review.own_plans(root, base, tip, _branch_issues(root, branch, placed), read,
                             (PLANS, _review.SPECS_DIR),
                             lambda rel: _review.record_kind(rel) in ("plan", "plan-archive", "spec-plan"))
     if own is None:
