@@ -4026,6 +4026,9 @@ def test_the_plan_bench_builds_a_repo_and_reports_the_time(tmp_path):
     assert result["branches"] == 20 and result["ahead"] + result["merged"] == 20
     assert len(result["seconds"]) == 1 and result["median_seconds"] > 0
     assert result["candidates"] == result["ahead"] == result["eligible"], result
+    again = subprocess.run([sys.executable, str(tool), "--branches", "20", "--workdir", str(tmp_path / "bench")],
+                           capture_output=True, text=True, timeout=60)
+    assert again.returncode == 2 and "not empty" in again.stderr, again.stderr  # DeepSeek v2.91: kein FileExistsError
 
 
 def _git_calls(monkeypatch) -> list[list[str]]:
