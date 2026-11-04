@@ -338,6 +338,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         ref = integration_ref(root)
     except GitReadError as exc:
         return [f"cannot read the integration ref: {exc}"], soft
+    if ref is None and not ((root / PLANS_ACTIVE).is_dir() or (root / SPECS_DIR).is_dir()):
+        return hard, soft  # no plan anywhere: nothing a fork point could decide
     if ref is None:
         from check_review import forkless_refs, is_shallow  # noqa: PLC0415
 
