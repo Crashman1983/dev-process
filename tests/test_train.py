@@ -3105,7 +3105,9 @@ def test_an_unreadable_lastfailed_costs_a_field_never_the_run(render, tmp_path, 
     m, calls, _l, rc = run([{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}], "red")
     assert calls == plain_calls and rc == plain_rc and _shape(m) == _shape(plain)
     source = m["rounds"][0]["red_tests"]["sources"][0]
-    assert source.get("reason") == reason and "ids" not in source, source
+    # deep nesting: Python ≤3.13 raises RecursionError, 3.14's decoder a ValueError — a reason either way
+    allowed = {reason, "not JSON"} if kind == "deep" else {reason}
+    assert source.get("reason") in allowed and "ids" not in source, source
 
 
 def test_the_red_ids_of_the_first_run_are_read_before_any_other_run(render, tmp_path, monkeypatch):
