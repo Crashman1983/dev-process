@@ -2413,6 +2413,17 @@ def integration_conflict(root: Path, tip: str = "HEAD", branch: str = "",
     who = f"{branch} ({head[:12]})" if branch else f"{tip} ({head[:12]})"
     if found:
         cause, fork = found
+        tip_merges = _auto_merge(root, base, commit(cause))
+        if tip_merges is not None and not tip_merges[1] & set(conflicted):
+            # the parent already merged main and resolved these paths (refute v2.87 r2):
+            # rebasing onto it is the whole remedy — no rebase of the parent
+            lead = (f"they come from its parent branch {cause}" if cause == parent else
+                    f"the commits up to {fork[:12]}, which {cause} carries too, conflict")
+            return (f"{who} does not merge into {ref} ({base[:12]}): conflicts in {shown} — {lead}; "
+                    f"{cause} already resolves them: "
+                    + (f"rebase this branch onto {cause}, then review" if cause == parent else
+                       f"if this branch is stacked on {cause}, rebase it onto {cause}; otherwise merge "
+                       f"{ref} into the branch and resolve them; then review")), None
         if cause == parent:
             return (f"{who} does not merge into {ref} ({base[:12]}): conflicts in {shown} — they come from "
                     f"its parent branch {cause}, which conflicts with {ref} itself; rebase {cause} onto "
