@@ -26,6 +26,10 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 
 **Wirkung.** Der Zug läuft wie bisher. Nach einigen Wochen Zügen sagen die Zahlen, ob ein Teillauf Suite-Zeit sparen würde und in wie vielen roten Runden.
 
+**Geänderte Abschnitte.**
+- `testing.md` (Testing — how to shape a suite; Test economy — scoped inner loop, full merge boundary)
+- `train.md` (The merge train — one full suite per batch; The run)
+
 **Update.** Reines Update. Wer die Zahlen beitragen will, setzt `red_ids` für die pytest-Stages. Die Merge-Suite muss den pytest-Cache anlassen (kein `-p no:cacheprovider`), und zwei pytest-Stages mit gemeinsamem rootdir brauchen je ein eigenes `cache_dir`.
 
 Details: [Plan](docs/analysis/2026-11-04-v2.88.md) #378

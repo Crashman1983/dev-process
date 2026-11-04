@@ -27,6 +27,10 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 
 **Effect.** The train runs as before. After some weeks of trains, the numbers say whether a subset run would save suite time, and in how many red rounds.
 
+**Changed sections.**
+- `testing.md` (Testing — how to shape a suite; Test economy — scoped inner loop, full merge boundary)
+- `train.md` (The merge train — one full suite per batch; The run)
+
 **Update.** A pure update. To contribute the numbers, set `red_ids` for the pytest stages. The merge suite must keep pytest's cache on (no `-p no:cacheprovider`), and two pytest stages that share a rootdir each need their own `cache_dir`.
 
 Details: [Plan](docs/analysis/2026-11-04-v2.88.md) #378
