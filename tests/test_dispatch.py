@@ -644,13 +644,14 @@ BOX = "╭──────╮\n│ > {} │\n╰──────╯\n"
 
 def test_say_presses_enter_again_until_the_text_left_the_input_line(render, tmp_path, monkeypatch):
     stuck, empty = BOX.format("Lane a is free for you"), BOX.format("")
-    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [empty, stuck, stuck, empty])  # first: before typing
+    # before typing, typed before Enter, then the loop: two stuck screens, one empty
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [empty, stuck, stuck, stuck, empty])
     assert mod.say(out, "w1", "Lane a is free for you") == 0
     assert pane.keys == ["Lane a is free for you", "Enter", "Enter", "Enter"]
 
 
 def test_say_fails_naming_the_branch_when_the_text_never_leaves(render, tmp_path, monkeypatch, capsys):
-    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [BOX.format("the train is through")])
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [BOX.format(""), BOX.format("the train is through")])
     assert mod.say(out, "w1", "the train is through") == 4
     assert pane.keys.count("Enter") == 1 + mod.SAY_RETRIES
     assert "w1" in capsys.readouterr().err
@@ -665,12 +666,87 @@ def test_say_counts_a_queued_message_as_delivered(render, tmp_path, monkeypatch)
 
 
 def test_say_fails_naming_the_branch_when_the_input_line_is_unreadable(render, tmp_path, monkeypatch, capsys):
-    """Kenni #2405: a screen without a prompt line was "said" (exit 0)."""
-    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, ["some output\nno prompt here\n"])
+    """Kenni #2405: a screen without a prompt line was "said" (exit 0) — here
+    it turns unreadable only after Enter."""
+    unreadable = "some output\nno prompt here\n"
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch,
+                                [BOX.format(""), BOX.format("decision text"), unreadable])
     assert mod.say(out, "w1", "decision text") == 6
     err = capsys.readouterr().err
     assert "w1" in err and "input line unreadable" in err and "say_prompt" in err, err
     assert pane.keys == ["decision text", "Enter"]
+
+
+def test_say_types_nothing_into_an_input_line_it_cannot_read(render, tmp_path, monkeypatch, capsys):
+    """#390: typed blind, the text could sit unsent in the line."""
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, ["some output\nno prompt here\n"])
+    assert mod.say(out, "w1", "decision text") == 6 and pane.keys == []
+    err = capsys.readouterr().err
+    assert "w1" in err and "input line unreadable — nothing typed" in err and "say_prompt" in err, err
+
+
+def test_say_types_nothing_into_an_input_line_that_holds_text(render, tmp_path, monkeypatch, capsys):
+    """#390: typed onto the owner's half-written line, Enter would send both."""
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [BOX.format("half a sentence")])
+    assert mod.say(out, "w1", "decision text") == 7 and pane.keys == []
+    err = capsys.readouterr().err
+    assert "w1" in err and "input line holds text — nothing typed" in err, err
+
+
+def test_say_clears_what_it_typed_when_the_line_turns_unreadable_before_enter(render, tmp_path, monkeypatch,
+                                                                              capsys):
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [BOX.format(""), "busy\nno prompt here\n"])
+    assert mod.say(out, "w1", "decision text") == 6
+    assert pane.keys == ["decision text", "C-u"]  # cleared, never Enter
+    err = capsys.readouterr().err
+    assert "w1" in err and "not sent; cleared" in err, err
+
+
+# #390 AC-2: the current Claude Code TUI, as a live worker's capture-pane shows
+# it (masked) — `❯` and a no-break space, no side borders, between two rules
+RULE = "─" * 58
+
+
+def _tui(typed=""):
+    return ("✻ xxxxxx xxx xx · xxxx x:xx xx\n"
+            "                    xxx xxxx? /xxxxx xx xxxx · ✔ xxxxxx xxxxxxxxx\n"
+            f"{RULE}\n❯\u00a0{typed}\n{RULE}\n"
+            "  xxxxx ? · xx ?\n  ⏵⏵ xxxxxx xxxxx xx (xxxxx+xxx xx xxxxx) · ← x xxxxx\n")
+
+
+def test_the_default_input_line_reads_the_current_tui(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    pattern = mod.prompt_pattern(out)
+
+    def lines(screen):
+        return [ln for ln in screen.splitlines() if ln.strip()]
+
+    assert mod._input_line(lines(_tui()), pattern) == ""  # readable and empty
+    assert mod._input_line(lines(_tui("half a sentence")), pattern) == "half a sentence"
+    assert mod._input_line(lines(_tui("trailing\u00a0 ")), pattern) == "trailing"
+    assert mod._input_line(lines(_tui().replace("\u00a0", " ")), pattern) == ""  # a plain space too
+    assert mod._input_line(["> old style"], pattern) == "old style"  # `>` stays
+    assert mod.dialog_line(lines(_tui()), pattern) is None  # the status lines are no dialog
+
+
+def test_a_numbered_dialog_option_is_never_the_input_line(render, tmp_path, monkeypatch):
+    dialog = ("❯\u00a0earlier message\nBash command\n  gh pr view 12\n"
+              "Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again\n  3. No\n")
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [dialog])
+    pattern = mod.prompt_pattern(out)
+    screen = [ln for ln in dialog.splitlines() if ln.strip()]
+    assert mod._input_line(screen, pattern) == "earlier message"  # not "1. Yes"
+    assert mod.dialog_line(screen, pattern) == "Do you want to proceed?"
+    assert mod.say(out, "w1", "go on") == 5 and pane.keys == []
+
+
+def test_say_delivers_on_the_current_tui(render, tmp_path, monkeypatch):
+    text = "DECISION owner: keep it"
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [_tui(), _tui(text), _tui()])
+    assert mod.say(out, "w1", text) == 0 and pane.keys == [text, "Enter"]
+    out2, mod2, pane2 = _say_setup(render, tmp_path / "b", monkeypatch, [_tui("owner typing")])
+    assert mod2.say(out2, "w1", text) == 7 and pane2.keys == []
 
 
 def test_drain_skips_a_refused_line_instead_of_waiting_on_it(render, tmp_path, monkeypatch):
@@ -939,9 +1015,10 @@ def test_say_finds_a_long_wrapped_input_and_a_pasted_placeholder(render, tmp_pat
     long = "x" * 900
     wrapped = "> earlier message\n" + "│ > " + long[:70] + " │\n" + "".join(f"│ {long[i:i + 70]} │\n"
                                                                      for i in range(70, 900, 70))
-    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [wrapped])
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [BOX.format(""), wrapped])
     assert mod.say(out, "w1", long) == 4
-    out2, mod2, _pane = _say_setup(render, tmp_path / "b", monkeypatch, [BOX.format("[Pasted text #1 +3 lines]")])
+    out2, mod2, _pane = _say_setup(render, tmp_path / "b", monkeypatch,
+                                   [BOX.format(""), BOX.format("[Pasted text #1 +3 lines]")])
     assert mod2.say(out2, "w1", "a\nb\nc") == 4
 
 
@@ -970,10 +1047,12 @@ def test_say_never_types_or_presses_enter_into_a_dialog(render, tmp_path, monkey
     out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [dialog])
     assert mod.say(out, "w1", "1 more thing: stop") == 5 and pane.keys == []  # open before: nothing typed
     typed_then_dialog = BOX.format("run it") + "Do you want to proceed?\n❯ 1. Yes\n"
-    out2, mod2, pane2 = _say_setup(render, tmp_path / "b", monkeypatch, [BOX.format(""), typed_then_dialog])
+    out2, mod2, pane2 = _say_setup(render, tmp_path / "b", monkeypatch,
+                                   [BOX.format(""), BOX.format("run it"), typed_then_dialog])
     assert mod2.say(out2, "w1", "run it") == 5 and pane2.keys == ["run it", "Enter"]  # no extra Enter
     delivered = "> Do you want to know more?\n" + BOX.format("")
-    out3, mod3, _p3 = _say_setup(render, tmp_path / "c", monkeypatch, [BOX.format(""), delivered])
+    out3, mod3, _p3 = _say_setup(render, tmp_path / "c", monkeypatch,
+                                 [BOX.format(""), BOX.format("Do you want to know more?"), delivered])
     assert mod3.say(out3, "w1", "Do you want to know more?") == 0  # delivered text is no dialog
 
 
@@ -2697,6 +2776,31 @@ def test_a_tier_1_start_refuses_when_origin_cannot_be_asked(render, tmp_path, mo
     prompt, rc = _start_prompt(mod, out, monkeypatch, tier=1)
     err = capsys.readouterr().err
     assert rc == 3 and prompt is None and "origin" in err and "plan" in err, err
+
+
+@pytest.mark.parametrize("branch,remote,refused", [("paket-b", True, True), ("26-fix", True, False),
+                                                    ("paket-b", False, False)])
+def test_a_remote_quick_start_needs_a_branch_leading_with_its_issue(render, tmp_path, monkeypatch, capsys,
+                                                                    branch, remote, refused):
+    """#384: the quick run attests its issue on the steward's host, which knows
+    a remote branch's issue by its name alone — a remote start elsewhere would
+    attest nothing; a local one keeps its placement."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _code_branch(out)
+    _with_origin(out, tmp_path)
+    _git(out, "branch", branch, "b")
+    _git(out, "push", "-q", "origin", branch)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    real_pp = mod.phase_policy
+    monkeypatch.setattr(mod, "phase_policy", lambda policy, phase: {**real_pp(policy, phase), "remote": remote})
+    prompt, rc = _start_prompt(mod, out, monkeypatch, tier=1, branch=branch, issue=26)
+    err = capsys.readouterr().err
+    if refused:
+        assert rc == 3 and prompt is None, (rc, err)
+        assert "a remote quick run attests its issue by the branch name" in err and "`26-…`" in err, err
+    else:
+        assert rc == 0 and prompt.startswith("/quick issue #26"), (rc, err, prompt)
 
 
 def test_a_quick_start_records_quick(render, tmp_path):
