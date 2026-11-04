@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.89.0 — Eine schnelle Prüfung je Kandidat, bevor der Zug boardet
+
+Ein Projekt kann jetzt eine Prüfung nennen, die Sekunden dauert. Der Merge-Zug führt sie an jedem wartenden Branch aus, bevor der lange gemeinsame Testlauf beginnt. Ein Branch, der zweimal durchfällt, bleibt mit einer Notiz an seinen Worker zurück, statt einen Lauf von fünfzig Minuten rot zu machen. Scheitert die Prüfung am Hauptbranch selbst oder kann der Rechner sie nicht ausführen, wird niemand zurückgehalten. Das Cockpit zählt, wie oft die Prüfung lief, einen Branch zurückhielt oder nicht laufen konnte.
+
 ## v2.88.0 — Der rote Pfad des Zuges, gemessen
 
 Wird der Merge-Zug rot, hält er jetzt fest, was ihn die Suche nach dem Grund kostet: jeden Retry, jede Basisprüfung und jeden Suchschritt, mit seiner Zeit. In Projekten, die ihre pytest-Ergebnisse benennen, hält er auch fest, welche Tests rot waren und ob es sie vor der Änderung schon gab. Das Cockpit macht daraus eine Zahl: in wie vielen roten Zügen es Zeit gespart hätte, nur die roten Tests zu wiederholen. Der Zug selbst läuft genau wie bisher. Die Idee, nur die roten Tests zu wiederholen, wartet auf diese Zahl, denn vier Planungsrunden konnten nicht zeigen, dass sie etwas spart.

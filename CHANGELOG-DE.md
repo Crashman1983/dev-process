@@ -9,6 +9,28 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.89.0 — Eine schnelle Prüfung je Kandidat, bevor der Zug boardet · 2026-11-04
+
+**Warum.** Downstream lief ein gemischter Zug 50 Minuten durch seine Merge-Suite und wurde an einem Test rot, der Sekunden braucht (ein Anker-Budget). Danach kamen Retry und voller Neustart. Nichts prüfte einen Kandidaten billig, bevor er einstieg (#386).
+
+**Was sich ändert.**
+- **`preboard` in `testing.local.json`** ist ein argv von Sekunden (`preboard_timeout`, Standard 120 s). `train.py run --preboard ""` schaltet die Prüfung für einen Lauf ab. Der Zug führt sie vor dem kombinierten Build aus:
+  - **Zuerst auf der Basis.** Ist sie dort rot oder nicht ausführbar — ein kaputter Host, oder main selbst fällt durch —, wird niemand geprüft, und der Zug läuft wie ohne sie. Der Preflight bleibt, wo er war: auf dem ersten kombinierten Baum.
+  - **Dann je Kandidat,** auf der Basis mit diesem Kandidaten gemergt. Den Baum baut `build_train` selbst, in einem zweiten Worktree; Pläne werden also wie im echten Merge archiviert.
+  - **Zweimal rot** — beim zweiten Mal auf einem neu gebauten Baum — heißt: Der Kandidat steigt nicht ein und wird `blocked` gemeldet. Ein Kandidat mit Konflikt, Timeout oder nicht ausführbarer Prüfung steigt ein, im Log steht „not pre-checked“.
+  - Steigen alle aus, wird nichts gebaut, und der Lauf endet mit dem Ergebnis `preboard`.
+- **Zeiten und Zahlen:** `phases.jsonl` trägt die Phase `preboard` (Sekunden) und `preboard_checks` (geprüft, ausgestiegen, nicht geprüft, Grund). `train-phases` druckt beides, damit eine Prüfung, die nie läuft, auffällt.
+
+**Wirkung.** Ein Kandidat, der an einem Wächter von Sekunden scheitert, steigt vor der vollen Suite aus statt danach. Ein kaputter Wächter oder ein main, das an ihm scheitert, beschuldigt niemanden.
+
+**Geänderte Abschnitte.**
+- `train.md` (The merge train — one full suite per batch; The run)
+- `testing.md` (Test economy — scoped inner loop, full merge boundary)
+
+**Update.** Reines Update. Ohne `preboard` ändert sich nichts. Ein Wächter, der eine Projektumgebung braucht (`uv sync`, `npm install`), gehört nicht hierher; ein schneller Test gehört zuerst in die `pins` seines Stacks.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.89.md) #386
+
 ## v2.88.0 — Der rote Pfad des Zuges, gemessen · 2026-11-04
 
 **Warum.** #378 schlug vor, nach einem roten Zug nur die roten Tests zu wiederholen: im Retry, auf der Basis und in jeder Bisect-Probe. Vier Plan-Runden haben diesen Teillauf blockiert. Seine Sicherheit wurde mit jeder Runde schwieriger, und die letzte Runde fand die Ersparnis unbelegt. Führt der Täter den roten Test selbst ein, fehlt dieser auf der Basis, und der Teillauf fällt auf die volle Suite zurück. Wie oft das so ist, hatte niemand gemessen. Der Owner hat entschieden: erst messen.
