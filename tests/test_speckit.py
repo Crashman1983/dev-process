@@ -362,6 +362,44 @@ else:
     assert _publish_module(out)._comment_bodies(str(binpath / "gh"), "12") == ["a", "b"]
 
 
+def _silent_gh(tmp_path, view_out):
+    """A gh stub whose REST comments read exits 0 with empty stdout; `issue view` prints
+    `view_out` (exit 0); every call is appended to gh.log."""
+    binpath = tmp_path / "bin"
+    binpath.mkdir()
+    log = tmp_path / "gh.log"
+    (binpath / "gh").write_text(f"""#!{sys.executable}
+import sys
+a = sys.argv[1:]
+open({str(log)!r}, "a").write(" ".join(a) + "\\n")
+if a[:2] == ["issue", "view"]:
+    sys.stdout.write({view_out!r})
+""")
+    (binpath / "gh").chmod(0o755)
+    return str(binpath / "gh"), log
+
+
+@pytest.mark.parametrize("view_out", ["", "{}", "[]"])
+def test_a_comments_read_without_an_inventory_refuses_before_posting(render, tmp_path,
+                                                                     view_out):
+    """#347: an empty stdout at exit 0 read as an empty inventory, so every part was posted
+    and only the verify failed — a double publication on the next run."""
+    out = _render(render, tmp_path)
+    gh, log = _silent_gh(tmp_path, view_out)
+    m = _publish_module(out)
+    assert m._comment_bodies(gh, "12") is None
+    assert not m._post_comment(gh, "12", "004-widget/plan.md", "the plan\n")
+    assert "issue comment" not in log.read_text()
+
+
+def test_an_issue_without_comments_is_still_an_empty_inventory(render, tmp_path):
+    """#347: `{"comments": []}` from `gh issue view` is zero comments, not an unreadable
+    read (REST's `[]` is covered by the re-run test above, which starts with none)."""
+    out = _render(render, tmp_path)
+    gh, _log = _silent_gh(tmp_path, '{"comments": []}\n')
+    assert _publish_module(out)._comment_bodies(gh, "12") == []
+
+
 def test_the_publish_verify_needs_this_runs_parts_not_any_marker(render, tmp_path):
     """#343 AC-4: an older marker comment made a post GitHub never kept read as verified."""
     out = _render(render, tmp_path)
