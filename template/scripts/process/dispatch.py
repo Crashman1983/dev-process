@@ -2226,6 +2226,9 @@ SAY_TYPE_SETTLE_S = 0.3  # the harness renders the typed text before Enter reach
 # the current Claude Code TUI's `❯` and a no-break space between two rules
 # (#390; `\s` covers U+00A0) — never a dialog's numbered option `❯ 1. Yes`
 _PROMPT_LINE = re.compile(r"^[\s│|╭╰─]*(?:>|❯(?!\s*\d+\.(?:\s|$)))\s?(.*?)[\s│|]*$")
+# the same line without the dialog guard: typed text that starts like `1. do this` is
+# the input line while no dialog is open (DeepSeek v2.90)
+_PROMPT_LINE_ANY = re.compile(r"^[\s│|╭╰─]*(?:>|❯)\s?(.*?)[\s│|]*$")
 _sleep = time.sleep
 
 
@@ -2242,6 +2245,12 @@ def _input_line(lines: list[str] | None, pattern: re.Pattern[str]) -> str | None
         m = pattern.match(ln)
         if m:
             return m.group(1)
+    if pattern is _PROMPT_LINE and not _DIALOG.search("\n".join(lines)):
+        # no dialog on screen: a `❯ 1. …` line is typed text, not an option
+        for ln in reversed(lines):
+            m = _PROMPT_LINE_ANY.match(ln)
+            if m:
+                return m.group(1)
     return None
 
 

@@ -126,8 +126,8 @@ Round economy — a failed round must not re-pay the whole chain:
 - **Rebase or merge main before the first review round.** A later rebase or
   merge of main that applies cleanly keeps the review (the gate judges
   content, not history); one that resolves a conflict is a new round.
-- **The round is counted, not claimed.** `attest.py` numbers it: 1 + the
-  distinct blocked rounds recorded for the work. Every blocking round gets
+- **The round is counted, not claimed.** `attest.py` numbers it: the
+  highest blocked round recorded for the work + 1, gaps included. Every blocking round gets
   its REVIEW line (`--verdict block`); several reviewers (lenses) of one
   round each attest it with `--round <that round>`; a re-check after a
   pass, a rebase or a short look is no new round. Plan reviews count apart

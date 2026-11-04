@@ -1189,7 +1189,7 @@ def superseded_records(root: Path, records: list[dict], invalid: dict[int, str])
     valid full round of the same work covers: its base is the fork point of
     its head (`full_round_base_problem`), its head descends from the invalid
     record's head, and its round is higher — or the same with verdict pass:
-    attest counts round = 1 + the blocking rounds, so the round after a pass
+    attest counts round = the highest blocking round + 1, so the round after a pass
     carries the pass's number (downstream #2396: a valid round 6 left the old
     round-6 delta line refusing every push). Such a round reviewed everything
     from the fork point on, the off-fork line included, so the line hides no

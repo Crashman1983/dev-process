@@ -2301,6 +2301,11 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         worktrees = {}
     for b in aboard:
         tip = shas.get(b) or b
+        if b in shas and b not in moved \
+                and _out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}") != shas[b]:
+            # it moved while the merged ones were reported: re-read right before its own
+            # report and cleanup (DeepSeek v2.90)
+            moved[b] = shas[b]
         # a `Regression-of: #N` trailer names the issue a fix repairs, not one this
         # branch works on — it must neither file the merge under #N nor ask to close it.
         # What merged, against the base it merged on: after the push `origin/main`
@@ -2380,7 +2385,9 @@ def _delete_branch(root: Path, b: str, sha: str | None, *, push: bool, log) -> N
         # origin's copy may only lag: the worker never pushed its last commits — an
         # ancestor of what merged loses nothing (refute v2.90)
         theirs = (_out(root, "ls-remote", "origin", f"refs/heads/{b}") or "").split()
-        older = theirs and _git(root, "merge-base", "--is-ancestor", theirs[0], sha).returncode == 0
+        if not theirs:
+            return  # origin never had it, or it is gone already: nothing moved, nothing to delete
+        older = _git(root, "merge-base", "--is-ancestor", theirs[0], sha).returncode == 0
         if older:
             r = _git(root, "push", f"--force-with-lease=refs/heads/{b}:{theirs[0]}", "origin", f":refs/heads/{b}")
     if r.returncode != 0 and ("stale info" in r.stderr or "rejected" in r.stderr):
