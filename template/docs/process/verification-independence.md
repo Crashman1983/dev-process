@@ -66,6 +66,15 @@ the `FINDING` line's owner is the github-issues report gate and its tokens are
 pinned to that gate by a template test. Sources it cannot read are named in
 place.
 
+A code-review bundle is refused before its gate preflight when the branch does
+not merge cleanly into the integration ref (`check_review.integration_conflict`,
+#379): the refusal names the conflicting paths and the fix — merge main, then
+review — and, on a stacked branch whose parent already conflicts, the parent
+and its rebase. A check that cannot run says "could not check" with the base
+SHA and never counts as clean. `dispatch.py start --phase review` and the
+chain's pushed → review step ask the same question before a session starts;
+a plan review (`--plan`) is not checked — it reads no code.
+
 The checklist can be scoped to the diff (#281):
 `docs/process/review-sections.local.json`, read at the base, maps path classes
 to globs (`{"classes": {"ui": ["frontend/**"], …}, "sections": {"Surfaces":

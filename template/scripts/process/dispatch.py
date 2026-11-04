@@ -1169,7 +1169,9 @@ SHELL_FORM = ("Shell form, so the permission allowlist can match every command a
               "stops you: one simple command per Bash call; no shell variables, `${…}`, `$(…)`, backticks, "
               "brace groups, subshells or `eval`; write files with the Write/Edit tools — never write "
               "files via output redirection, `tee` or a heredoc; read and search with the Read/Grep/Glob "
-              "tools.")
+              "tools. To wait on something, start it in the background and let its completion wake you, "
+              "or run one check per call — never an `until …; do sleep …; done` loop, which stops at a "
+              "confirmation (#377).")
 
 
 def shell_form(policy: dict) -> str:

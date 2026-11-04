@@ -1134,6 +1134,7 @@ def test_the_shell_form_block_names_what_the_allowlist_cannot_match(render, tmp_
         assert phrase in mod.SHELL_FORM, phrase
     # fix round 1: input redirection (`<`) writes nothing — the rule is about writing files
     assert "never write files via output redirection, `tee` or a heredoc" in mod.SHELL_FORM
+    assert "never an `until …; do sleep …; done` loop" in mod.SHELL_FORM  # #377: a wait is one command
 
 
 def test_a_codex_command_cell_of_the_claude_policy_gets_no_shell_form_block(render, tmp_path, monkeypatch):
