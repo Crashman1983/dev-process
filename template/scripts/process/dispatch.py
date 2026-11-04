@@ -1906,6 +1906,12 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         if why:
             print(f"dispatch: not starting — {why}", file=sys.stderr)
             return 3
+        if quick and remote and _review.branch_issue(branch) != str(issue):
+            # its attest learns the issue from the name alone: the placement
+            # (`attest._placed_issues`) lives on this host only (#384)
+            print(f"dispatch: not starting — a remote quick run attests its issue by the branch name — "
+                  f"name the branch `{issue}-…`", file=sys.stderr)
+            return 3
     drift_note = None
     if phase == "execute" and not quick:
         # a plan the base has moved far past costs the worker its first hour (plan_drift.py)
@@ -2216,8 +2222,10 @@ def show_log(root: Path, branch: str, lines: int) -> int:
 SAY_RETRIES = 3
 SAY_WAIT_S = 1.5
 SAY_TYPE_SETTLE_S = 0.3  # the harness renders the typed text before Enter reaches it
-# the input line of an interactive harness: a `>` prompt, maybe inside a box
-_PROMPT_LINE = re.compile(r"^[\s│|╭╰─]*>\s?(.*?)[\s│|]*$")
+# the input line of an interactive harness: a `>` prompt, maybe inside a box, or
+# the current Claude Code TUI's `❯` and a no-break space between two rules
+# (#390; `\s` covers U+00A0) — never a dialog's numbered option `❯ 1. Yes`
+_PROMPT_LINE = re.compile(r"^[\s│|╭╰─]*(?:>|❯(?!\s*\d+\.(?:\s|$)))\s?(.*?)[\s│|]*$")
 _sleep = time.sleep
 
 
@@ -2305,13 +2313,30 @@ def say(root: Path, branch: str, text: str) -> int:
         return 3
     pattern = prompt_pattern(root)
     window = rec["tmux_window"]
-    if _dialog_open(_screen(window), pattern):
+    before = _screen(window)  # one screen for the dialog and the input line
+    if _dialog_open(before, pattern):
         # typing now would answer the dialog, not reach the worker (refutation)
         print(f"dispatch: {branch} shows a dialog — nothing typed; answer it first: {text[:80]}",
               file=sys.stderr)
         return 5
+    held = _input_line(before, pattern)
+    if held is None:
+        # typed blind, the text could sit unsent in a line nobody can read (#390)
+        print(f"dispatch: {branch} — input line unreadable — nothing typed; set `say_prompt` in "
+              f"model-policy.local.json: {text[:80]}", file=sys.stderr)
+        return 6
+    if held.strip():
+        # Enter would send the text already there together with ours (#390)
+        print(f"dispatch: {branch} — input line holds text — nothing typed: {text[:80]}", file=sys.stderr)
+        return 7
     r = _tmux("send-keys", "-t", window, "-l", text)
     _sleep(SAY_TYPE_SETTLE_S)
+    if _input_line(_screen(window), pattern) is None:
+        # the typed text is out of sight: an Enter now would send it unchecked
+        _tmux("send-keys", "-t", window, "C-u")
+        print(f"dispatch: {branch} — input line unreadable after typing — not sent; cleared: {text[:80]}",
+              file=sys.stderr)
+        return 6
     r2 = _tmux("send-keys", "-t", window, "Enter")
     if r.returncode != 0 or r2.returncode != 0:
         print(f"dispatch: send-keys failed: {(r.stderr or r2.stderr).strip()}", file=sys.stderr)

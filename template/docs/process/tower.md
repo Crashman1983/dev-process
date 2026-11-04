@@ -139,7 +139,14 @@ redirect) and checks that it left the input line — a busy worker leaves
 typed text sitting there, so `say` presses Enter again and exits non-zero,
 naming the branch, when the text still has not gone; an input line it
 cannot read (no `say_prompt` match) is no success either — exit 6, the
-text may be unsent. `dispatch.py stop <branch>` stops only what dispatch started,
+text may be unsent. `say` types only into an input line it can read and
+that is empty: one screen before typing answers both — a dialog is exit 5,
+an unreadable line exit 6 (nothing typed; set `say_prompt`), a line that
+already holds text exit 7 (nothing typed). Before Enter it reads the line
+once more; unreadable there, it clears what it typed (`C-u`) and exits 6
+without Enter. Without `say_prompt` the input line is a `>` prompt, maybe
+boxed, or the Claude Code TUI's `❯` — never a dialog's numbered `❯ 1. Yes`.
+`dispatch.py stop <branch>` stops only what dispatch started,
 only when the recorded process is still the recorded one (pid and start
 time), and refuses while the worktree has uncommitted or untracked work
 (a plan not committed dies with the process). It reports the stopped

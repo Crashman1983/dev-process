@@ -894,6 +894,24 @@ def test_a_tmux_session_at_a_permission_prompt_is_a_high_finding(render, tmp_pat
         assert _prompt_kinds(tower, out) == [("permission-prompt", "high")], screen
 
 
+def test_a_permission_prompt_under_the_current_tuis_input_line(render, tmp_path, monkeypatch):
+    """#390 AC-2: the default input line reads `❯`; the dialog's own `❯ 1. Yes`
+    stays the dialog's option, not an input line above it."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    import dispatch as d
+    monkeypatch.setattr(tower._report, "read_reports", lambda _root: [])
+    screen = ("❯\u00a0earlier\nBash command\n  gh pr view 12\n"
+              "Do you want to proceed?\n❯ 1. Yes\n  2. No\n")
+    _tmux_session(d, monkeypatch, screen, 11)
+    assert tower.sessions(out)[0]["prompt"] == "Do you want to proceed?"
+    assert _prompt_kinds(tower, out) == [("permission-prompt", "high")]
+    rule = "─" * 40
+    idle = f"● Done. Do you want to keep the old API?\n{rule}\n❯\u00a0\n{rule}\n  ⏵⏵ x\n"
+    _tmux_session(d, monkeypatch, idle, 11)
+    assert tower.sessions(out)[0]["prompt"] is None  # a question in prose above `❯` is no dialog
+
+
 def test_no_dialog_a_short_wait_or_a_detached_run_is_no_permission_prompt(render, tmp_path, monkeypatch):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     tower = _load_tower(out)
