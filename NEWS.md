@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.91.0 — The train plans faster and says who stays behind
+
+Before it leaves, the merge train works out which branches may board. In a large repository with hundreds of old branches, that took over a quarter of an hour. It now reads only what it needs and asks git far fewer questions: on a test repository with 600 branches, planning drops from 44 to 9 seconds, with the same result. Every train run also says, for each branch that stays behind, why. Before, only the separate planning view did.
+
 ## v2.90.0 — The train keeps what it checked
 
 The merge train now remembers exactly which commits it checked when it started, and merges those. A fix that a worker pushes during the run waits for the next train, instead of confusing the search for the branch that broke the tests and getting the wrong branch blamed. If a worker stops their branch while the train is running, the train leaves it out before it pushes. The cockpit now also shows a branch that is held back even when a later note covers that up. Messages to running sessions are only typed when the input field can be read and is empty.

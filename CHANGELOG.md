@@ -10,6 +10,40 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.91.0 — The train plans faster and says who stays behind · 2026-11-04
+
+**Why.** Downstream, with 603 branches and 247 journal shards:
+- `train plan` and every train start took more than 16 minutes (#398).
+- Branches stayed behind without a reason in `run`'s output (#399).
+
+On a synthetic repository of the same shape (600 branches, 250 plans), `plan` took 44 s. 94 % of that was starting 14,625 git processes.
+
+**What changes.**
+- **Planning reads less.**
+  - Branches already merged into the base are sorted out with one `for-each-ref --merged` before any diff; `plan --json` counts them in `no_lead`.
+  - Record texts are read once per blob with one `cat-file --batch` and kept per process, never for the working tree.
+  - The conflict notes of `plan` come from one `merge-tree --stdin` for all pairs; older git checks pair by pair as before.
+  - Two candidates that share no commit beyond the base cost no `merge-base`.
+  - The dispatch placement is read once per planning.
+  - The own-family rule is read at the snapshot base.
+- **Who stays behind, and why.**
+  - Every `run` prints the reasons of each candidate that does not board, in `plan`'s words, plus one line for the branches with nothing ahead. It does so whether the run departs, holds or finds nothing to do.
+  - A departing run writes the lines into its log before the first build.
+  - A holding run overwrites `<git-common-dir>/process-train/last-hold.txt`.
+- **Planning time is measured:** a phase `plan` in `phases.jsonl` and in `process_kpis.py train-phases`.
+- **Two deliberate verdict changes, both stricter or neutral:**
+  - An unreadable plan diff of an already merged branch no longer blocks the other candidates.
+  - In one rare case two plans count as two: the base history has a merge, and one side deleted the plan and added it again.
+
+**Effect.** `plan` on the synthetic repository: 43.6 s → 9.2 s, with the same candidates and verdicts. A steward sees in every `run` why a branch did not board.
+
+**Changed sections.**
+- `train.md` (Departure — a number, not a judgment; The run)
+
+**Update.** A pure update. Old `phases.jsonl` rows without `plan` stay readable; the plan median counts only rows that carry it.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.91.md) #398 #399
+
 ## v2.90.0 — The train keeps what it checked · 2026-11-04
 
 **Why.** Downstream, on one day:
