@@ -1039,9 +1039,15 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
         # the gate's rule: the report as committed, never one the fix brought
         sha = (_git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}") or "").strip()
         head = (_git(root, "rev-parse", "HEAD") or "").strip()
-        slugs, issues = _review_gate.expand_work(root, _bundled_work(root, plan_filter, plan_texts),
-                                                 ref=head or None)[1]
-        found = _review_gate.prior_report(root, slugs, issues, sha, head) if sha and head else None
+        bundled = _bundled_work(root, plan_filter, plan_texts)
+        slugs, issues = _review_gate.expand_work(root, bundled, ref=head or None)[1]
+        # #345: another plan of the same issue (a stacked phase) lends its slug to
+        # expand_work's work, but its reports are not this plan's previous round
+        own = set(_review_gate.work_keys(bundled)[0])
+        siblings = tuple(s for s in slugs if own and s not in own)
+        slugs = tuple(s for s in slugs if s not in siblings)
+        found = (_review_gate.prior_report(root, slugs, issues, sha, head, siblings)
+                 if sha and head else None)
         if found:
             add(f"### {_shown(found[0])}\n{found[1]}\n")
         else:
