@@ -2379,6 +2379,40 @@ def _auto_merge(root: Path, ours: str, other: str) -> tuple[str, set[str]] | Non
     return merged
 
 
+def _auto_merges(root: Path, pairs: list[tuple[str, str]]) -> None:
+    """Fill `_auto_merge`'s memo for many pairs from ONE `merge-tree --stdin` (git
+    2.40+; #398: a process per pair was 12 % of `train plan`). Only a clean exit with
+    one answer per pair counts: in batch mode git stops at a line it cannot merge
+    (exit 1, the answers before it on stdout). Anything else fills nothing, and
+    `_auto_merge` asks per pair as before. A pair without full ids is never kept."""
+    todo = list(dict.fromkeys((ours, other) for ours, other in pairs
+                              if (where := _addressed(root, (ours, other))) is not None
+                              and ("auto", where) not in _PURE))
+    if not todo:
+        return
+    try:
+        r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", "--stdin", "--allow-unrelated-histories",
+                            "--name-only", "-z", "--no-messages"],
+                           input="".join(f"{ours} {other}\n" for ours, other in todo).encode(),
+                           capture_output=True, timeout=60 * len(todo), check=False, env=git_environment())
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    out = r.stdout.decode(errors="surrogateescape")
+    # per pair `<status>\0<tree>\0<path>\0…\0`, each answer closed by one more `\0`
+    records = out[:-2].split("\0\0") if out.endswith("\0\0") else []
+    if r.returncode != 0 or len(records) != len(todo):
+        return
+    answers = []
+    for record in records:
+        status, *fields = record.split("\0")
+        # the status (1 clean, 0 conflicts) only cross-checks the conflicted paths
+        if not fields or status != ("0" if fields[1:] else "1"):
+            return
+        answers.append((fields[0].strip(), frozenset(fields[1:])))
+    for pair, answer in zip(todo, answers):
+        _PURE[("auto", _addressed(root, pair))] = answer
+
+
 def _auto_merge_uncached(root: Path, ours: str, other: str) -> tuple[str, set[str]] | None:
     try:
         r = subprocess.run(["git", "-C", str(root), "merge-tree", "--write-tree", "--allow-unrelated-histories", "--name-only", "-z",
