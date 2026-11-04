@@ -9,6 +9,23 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.87.0 — Weniger Leerlauf und Doppelarbeit im Zug · 2026-11-04
+
+**Warum.** Der Steward downstream hat eine Woche Züge ausgewertet (28.10. bis 03.11.): 42 Läufe, 39 % der Zugminuten rot. Vier Ursachen hatten einen Hebel im Template. Ein Tier-1-Start lief durch den vollen Execute-Ablauf. Eine Sitzung wartete bis zu 155 Minuten an einem Freigabe-Prompt, ohne dass es jemand erfuhr. Ein Konflikt mit main fiel erst im Zug auf, nach dem letzten Review. Und ein Zug mit eigenem `--suite` ließ die Suite ein zweites Mal laufen, weil der Hook diesen Lauf nicht anerkannte (#376 #377 #379 #381).
+
+**Was sich ändert.**
+- **Ein Tier-0/1-Start ohne eigenen Plan läuft als Quick-Ablauf** (#376). `dispatch.py start --phase execute --tier 0|1` schickt `/quick` nur, wenn der Branch keinen eigenen Plan trägt, Spec-Kit-Pläne eingeschlossen, weder auf origin noch am HEAD einer lokalen Sitzung. Ein unerreichbares origin weist ab, statt als „kein Plan“ zu gelten. Ein Branch mit Plan führt diesen aus. Der Quick-Prompt endet mit einer Tier-1-Selbstprüfung per `attest.py`, einem Push und `report.py review-pass`. So gibt die Kette die Sitzung frei, und der Zug nimmt den Branch mit. Wächst der Umfang, meldet die Sitzung `blocked` mit „needs /plan“.
+- **Ein tmux-Worker an einem Freigabe-Prompt weckt den Steward** (#377). Nach 10 stillen Minuten (`--prompt-minutes`, `PROCESS_PROMPT_MINUTES` oder `prompt_minutes` der Policy; ein ungültiger Wert wird abgewiesen) meldet der Tower `permission-prompt` (high). Der Befund nennt Sitzung, Minuten und Dialogzeile. `tower.py --wait --states prompt` weckt darauf. Erkannt wird mit dem Erkenner, den `dispatch say` schon nutzte, jetzt auch für `Allow …?` und `(y/n)`, über die letzten 15 Bildschirmzeilen. Ein `claude -p`-Lauf (detached) zeigt nie einen Prompt und bekommt den Befund nie. Der Shell-Form-Block jedes Worker-Prompts sagt zusätzlich: Gewartet wird mit einem Hintergrund-Job oder einer Prüfung je Aufruf, nie mit einer `until …; do sleep …; done`-Schleife.
+- **Ein Code-Review startet nur auf einem Branch, der sich in main mergen lässt** (#379). `make_review_bundle.py` weist vor dem Gate-Preflight ab, wenn der Branch mit dem Integrationsref kollidiert. Die Ablehnung nennt Pfade und Abhilfe. Bei einem gestapelten Branch, dessen Eltern-Branch schon kollidiert, nennt sie den Eltern-Branch und dessen Rebase. `dispatch.py start --phase review` und der Kettenschritt pushed → review fragen dasselbe, bevor eine Sitzung startet. Kann die Prüfung nicht laufen, heißt es „could not check“ mit Basis-SHA, und das gilt nie als sauber. Ein Plan-Review wird nicht geprüft.
+- **`train.py plan` nennt Konflikte zwischen Kandidaten paarweise** als Hinweis (#379). Das gilt nur für Kandidaten, die mitfahren dürfen, im Text und additiv in `--json`. `train.py run` rechnet das nicht.
+- **`train.py run --suite X` wird abgewiesen, wenn `merge_suite` gesetzt ist und `X.strip()` davon abweicht** (#381), nach derselben Regel wie `finish.py`. Gleich nach `strip` läuft `merge_suite` selbst. `--suite-differs-ok` erlaubt die Ausnahme für einen Passagier, der `merge_suite` ändert, und das Zug-Log hält sie fest.
+
+**Wirkung.** Weniger rote Minuten: Kleine Fixes sparen den Plan-Zyklus, eine hängende Sitzung wird in Minuten gemeldet, ein Konflikt fällt vor dem letzten Review auf, und ein Zug zahlt seine Suite nicht mehr doppelt.
+
+**Update.** Reines Update. Wer den Zug mit eigenem `--suite` aufruft, lässt es weg oder setzt es gleich `merge_suite`. Ein Start mit `--tier 0|1` auf einem Branch ohne Plan läuft jetzt als `/quick` statt `/execute`.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.87.md) #376 #377 #379 #381
+
 ## v2.86.0 — Wartung: nichts Fehlendes gilt als bestanden · 2026-11-04
 
 **Warum.** Acht offene Fehler, jeder eine Prüfung, die im Fehlerfall durchließ, eine Zahl, die falsch maß, oder eine Suche, die das Falsche nahm — gegen die Regel, dass eine fehlende Prüfung nie als bestanden gilt.

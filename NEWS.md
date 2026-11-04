@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.87.0 — Less idle time and double work in the train
+
+Four changes against waiting and duplicate runs. A small fix without a plan of its own now goes through the short flow instead of the full one, and still reaches the merge train. A session stuck at a permission question is reported within ten minutes instead of waiting for hours. A branch that no longer fits onto the main branch is told so before its last review, not after it in the train. And a train started with its own test command no longer runs the tests twice.
+
 ## v2.86.0 — Maintenance: nothing missing counts as passed
 
 Eight small fixes, all in the same direction: a check that could not look no longer passes. A copy of the repository with cut-off history is told to fetch the rest instead of being waved through; a test the runner skips no longer counts as proof; numbers the cockpit cannot measure say "unknown" instead of zero; and a review round no longer picks up the findings of a neighbouring phase.
