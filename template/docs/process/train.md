@@ -259,8 +259,7 @@ measured yet. Reading the decision needs more than the default window
 (`--runs`).
 
 The train decides nothing from these fields. They are the data the subset
-run of #378 waits for, after four plan rounds showed its saving unproven
-(`docs/analysis/2026-11-04-v2.88.md`).
+run waits for: four plan rounds of dev-process #378 left its saving unproven.
 
 ## Who pushes to main — the merge route
 
