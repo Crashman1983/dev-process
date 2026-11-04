@@ -247,12 +247,12 @@ test function, is new. `unknown` covers the rest.
 
 `train-phases` sorts the rounds into three classes, flake rounds apart from
 offender rounds:
-- **fit:** every red stage named red tests, and all of them existed on the
-  base;
-- **unfit:** a red test is new;
+- **capable:** every red stage named red tests, and all of them existed on
+  the base;
+- **not capable:** a red test is new;
 - **undetermined:** anything else.
 
-Only an offender round can be fit for a subset base and bisect. A flake
+Only an offender round can be capable of a subset base and bisect. A flake
 round needs no more than readable ids. The suite time saved this way is an
 upper bound, because the cost of a subset run (start, collection) is not
 measured yet. Reading the decision needs more than the default window

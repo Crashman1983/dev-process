@@ -16,7 +16,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 **Was sich ändert.**
 - **Jeder Lauf des roten Pfads wird gezählt, je Runde.** Die `phases.jsonl`-Zeile des Zuges trägt `rounds`, mit einem Eintrag für die erste Runde und einem je Runde nach einem Drop. Jeder Eintrag hat `red_path`, wie die Runde endete: `green`, `flaky`, `gate-flaky`, `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`, `environment`, `push-rejected` oder `aborted`. Dazu kommen `runs` je Art (`first`, `retry_gates`, `retry_failed`, `retry_full`, `base`, `probe`) mit Anzahl, Build- und Gates-Sekunden und, getrennt davon, Suite-Sekunden.
 - **Rote Tests, nur lesend, aus pytests eigenem Protokoll.** Mit `red_ids` in `testing.local.json` liest der Zug nach einem in der Suite roten ersten Lauf die `lastfailed`-Datei jeder pytest-Stage. Jeder Eintrag nennt den Pfad der `lastfailed`-Datei, das pytest-`rootdir` und die Stage. Der Zug hält die roten Stages fest und je rotem Test, ob es ihn auf der Basis schon gab:
-  - `true`: die Testdatei ist auf Basis und Bord gleich;
+  - `true`: die Testdatei ist auf Basis und Bord gleich und definiert den Test selbst;
   - `false`: Datei oder Testfunktion sind neu;
   - `unknown`: alles andere.
 

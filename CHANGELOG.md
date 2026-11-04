@@ -17,12 +17,12 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 **What changes.**
 - **Every run of the red path is counted, per round.** The train's `phases.jsonl` line carries `rounds`, with one entry for the first round and one per round after a drop. Each entry has `red_path`, how the round ended: `green`, `flaky`, `gate-flaky`, `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`, `environment`, `push-rejected` or `aborted`. It also has `runs` by kind (`first`, `retry_gates`, `retry_failed`, `retry_full`, `base`, `probe`), each with its count, its build-and-gates seconds and its suite seconds kept apart.
 - **Red tests, read only, from pytest's own record.** With `red_ids` in `testing.local.json`, the train reads each pytest stage's `lastfailed` file after a suite-red first run. Each entry names the `lastfailed` path, the pytest `rootdir` and the stage. The train records the red stages and, for each red test, whether it already existed on the base:
-  - `true`: the test file is unchanged between base and board;
+  - `true`: the test file is unchanged between base and board and defines the test itself;
   - `false`: the file or the test function is new;
   - `unknown`: anything else.
 
   A reader error costs a field, never the run.
-- **`train-phases` prints the decision number.** Per run kind it prints the number of runs and the median suite seconds. Red rounds are sorted into fit, unfit or undetermined, with flake rounds and offender rounds counted apart. Only an offender round can be fit for a subset base and bisect. The saving is an upper bound, because the cost of a subset run is not measured yet.
+- **`train-phases` prints the decision number.** Per run kind it prints the number of runs and the median suite seconds. Red rounds are sorted into capable, not capable or undetermined, with flake rounds and offender rounds counted apart. Only an offender round can be capable of a subset base and bisect. The saving is an upper bound, because the cost of a subset run is not measured yet.
 - `train.md` "The red path, measured" and `testing.md` "Red tests" describe both.
 
 **Effect.** The train runs as before. After some weeks of trains, the numbers say whether a subset run would save suite time, and in how many red rounds.
