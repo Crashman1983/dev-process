@@ -2741,3 +2741,57 @@ def test_a_quick_runs_review_pass_ends_its_phase_and_frees_the_session(render, t
     err = capsys.readouterr()
     assert stopped == ["q"] and mod.queue_load(out) == [], err
     assert "cannot read its plan" not in err.err + err.out
+
+
+def _conflicting_branch(root: Path, branch: str, rel: str = "widget.py") -> None:
+    """`branch` and main change `rel` differently: the branch conflicts with main."""
+    _git(root, "checkout", "-q", "-b", branch)
+    _commit_file(root, rel, "w = 1\n", "branch: widget")
+    _git(root, "checkout", "-q", "main")
+    _commit_file(root, rel, "w = 2\n", "main: widget")
+
+
+def test_a_code_review_of_a_branch_that_conflicts_with_main_is_not_started(render, tmp_path):
+    """#379: the train would drop it anyway — later, after a whole review."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "clean")
+    _commit_file(out, "gadget.py", "g = 1\n", "branch: gadget")
+    _git(out, "checkout", "-q", "main")
+    _conflicting_branch(out, "feat")
+    # a clean branch starts as before
+    r = _dispatch(out, "start", "--issue", "6", "--phase", "review", "--tier", "2", "--branch", "clean", "--dry-run")
+    assert r.returncode == 0 and "would start review" in r.stdout, r.stderr
+    assert "conflict" not in r.stderr and "could not check" not in r.stderr
+    r = _dispatch(out, "start", "--issue", "5", "--phase", "review", "--tier", "2", "--branch", "feat", "--dry-run")
+    assert r.returncode == 3, r.stdout + r.stderr
+    assert "widget.py" in r.stderr and "merge main into the branch" in r.stderr, r.stderr
+    assert "would start" not in r.stdout
+    # a plan review does not touch the code: not checked
+    r = _dispatch(out, "start", "--issue", "5", "--phase", "review", "--tier", "2", "--branch", "feat",
+                  "--plan-review", "--dry-run")
+    assert r.returncode == 0 and "would start review" in r.stdout, r.stderr
+    assert "conflict" not in r.stderr
+
+
+def test_the_chain_queues_no_review_of_a_branch_that_conflicts_with_main(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "p", {"project_name": "d", "modules": {}})
+    mod = _load_dispatch(out)
+    work = _origin_pair(tmp_path)  # on branch w
+    _commit_file(work, "a.py", "a = 1\n", "code")
+    _git(work, "push", "-q", "origin", "w")
+    _git(work, "checkout", "-q", "main")
+    _commit_file(work, "a.py", "a = 2\n", "main moves")
+    _git(work, "push", "-q", "origin", "main")
+    _git(work, "fetch", "-q", "origin")
+    recs = [{"branch": "w", "issue": 2, "tier": 2, "phase": "execute", "started": 1}]
+    stopped, started = [], []
+    monkeypatch.setattr(mod, "records", lambda root: recs)
+    monkeypatch.setattr(mod, "_load_record", lambda root, b: (None, recs[0]))
+    monkeypatch.setattr(mod._report, "read_reports", lambda root, **_kw: [{"worker": "w", "state": "pushed", "epoch": 1}])
+    monkeypatch.setattr(mod, "new_code_on_origin", lambda root, b, **_kw: True)
+    monkeypatch.setattr(mod, "work_complete_on_origin", lambda root, b: True)
+    monkeypatch.setattr(mod, "stop", lambda root, b, **kw: stopped.append(b) or 0)
+    monkeypatch.setattr(mod, "queue_add", lambda root, **kw: started.append(kw["phase"]))
+    mod.chain(work)
+    assert stopped == [] and started == []

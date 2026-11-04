@@ -2144,3 +2144,84 @@ def test_a_branch_cannot_scope_its_own_review(render, tmp_path):
     _git(out, "commit", "-q", "-m", "map")
     part = _checklist_part(_run(out, "--skip-preflight", "--base", "main").stdout)
     assert "## Surfaces" in part and "omitted" not in part
+
+
+# --- #379: a code review starts only on a branch that merges into main -------
+
+def _conflict_on_main(out: Path) -> str:
+    """main changes widget.py the way the checked-out branch did not: a
+    conflict. Returns main's commit."""
+    branch = _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "main")
+    (out / "widget.py").write_text("def widget():\n    return 7\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main: widget")
+    main_tip = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", branch)
+    return main_tip
+
+
+def _marking_preflight(out: Path) -> Path:
+    marker = out.parent / f"{out.name}-preflight-ran"
+    (out / "scripts/process/gate_runner.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n")
+    return marker
+
+
+def test_a_branch_that_conflicts_with_main_is_refused_before_the_preflight(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    marker = _marking_preflight(out)
+    # a clean merge changes nothing
+    r = _run(out, "--base", "main")
+    assert r.returncode == 0 and "Review bundle" in r.stdout and marker.exists(), r.stderr
+    assert "conflict" not in r.stderr and "could not check" not in r.stderr
+    marker.unlink()
+    _conflict_on_main(out)
+    r = _run(out)
+    assert r.returncode == 1 and "Review bundle" not in r.stdout
+    assert "widget.py" in r.stderr and "merge main into the branch" in r.stderr, r.stderr
+    assert not marker.exists(), "the preflight ran before the conflict check"
+    # an explicit --base is never what the merge is checked against
+    r = _run(out, "--base", "HEAD^")
+    assert r.returncode == 1 and "widget.py" in r.stderr and not marker.exists(), r.stderr
+    # a plan reviewer reads no code: not checked
+    r = _run(out, "--plan-review", "--skip-preflight", "--base", "main")
+    assert r.returncode == 0, r.stderr
+    assert "conflict" not in r.stderr and "could not check" not in r.stderr
+
+
+def test_an_unanswered_merge_check_is_named_with_its_base_never_clean(render, tmp_path):
+    import os
+    import shutil
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    main_tip = _conflict_on_main(out)
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    # a git that cannot answer merge-tree (an old one says "unknown option")
+    (fake / "git").write_text("#!/bin/sh\n"
+                              "for a in \"$@\"; do [ \"$a\" = merge-tree ] && exit 129; done\n"
+                              f"exec {shutil.which('git')} \"$@\"\n")
+    (fake / "git").chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}"}
+    r = subprocess.run([sys.executable, str(out / "scripts/process/make_review_bundle.py"),
+                        "--skip-preflight", "--base", "main"], cwd=out, capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    assert "could not check (" in r.stderr and main_tip in r.stderr, r.stderr
+    assert "Review bundle" in r.stdout
+
+
+def test_a_stacked_branch_names_its_conflicting_parent(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _seed_repo(out)  # feat changes widget.py
+    _conflict_on_main(out)  # and main changes it too: feat conflicts
+    _git(out, "checkout", "-q", "-b", "child")
+    (out / "gadget.py").write_text("g = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "child: gadget")
+    for args in ((), ("--base", "feat")):
+        r = _run(out, "--skip-preflight", *args)
+        assert r.returncode == 1, r.stderr
+        assert "widget.py" in r.stderr and "parent branch feat" in r.stderr, r.stderr
+        assert "rebase feat onto main" in r.stderr, r.stderr

@@ -1336,6 +1336,16 @@ def main(argv: list[str]) -> int:
     if extra:
         raise SystemExit(f"{USAGE} — unknown argument(s): {' '.join(extra)}")
     root = _repo_root(Path.cwd())
+    if not plan_review:
+        # a code review of a branch that cannot merge is wasted (#379): asked
+        # before the preflight, which takes minutes; a plan reviewer reads no code
+        branch = (_git(root, "symbolic-ref", "-q", "--short", "HEAD") or "").strip()
+        refusal, note = _review_gate.integration_conflict(root, "HEAD", branch, base)
+        if refusal:
+            print(f"review bundle blocked: {refusal}", file=sys.stderr)
+            return 1
+        if note:
+            print(f"make_review_bundle: {note}", file=sys.stderr)
     if not skip_preflight:
         ok, status, detail = _preflight(root)
         if not ok:

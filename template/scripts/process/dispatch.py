@@ -1884,6 +1884,13 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         tip = _remote_head(root, branch) if remote else (
             _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch))
         plan_paths = uncleared_plans(root, tip, branch) if tip else []
+    if phase == "review" and not plan_review:
+        tip = _remote_head(root, branch) if remote else (
+            _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch))
+        why = review_conflict(root, branch, tip)
+        if why:
+            print(f"dispatch: not starting — {why}", file=sys.stderr)
+            return 3
     if codex and plan_review and len(plan_paths) > 1:
         # one schema verdict attests one plan (`_dispatch_codex.handoff`)
         print(f"dispatch: not starting — {len(plan_paths)} plans are due ({', '.join(plan_paths)}); a Codex plan "
@@ -2615,6 +2622,16 @@ def _integration_base(root: Path, tip: str) -> str:
         return ""
 
 
+def review_conflict(root: Path, branch: str, tip: str) -> str | None:
+    """Why a code review of `branch` at `tip` must not start — it does not merge
+    into the integration ref (`check_review.integration_conflict`, #379) — or
+    None. A merge that cannot be checked is said, and does not refuse."""
+    refusal, note = _review.integration_conflict(root, tip or branch, branch)
+    if note:
+        print(f"dispatch: {branch}: {note}", file=sys.stderr)
+    return refusal
+
+
 def fork_problem(root: Path, tip: str) -> str | None:
     """Why `tip` has no single fork point by the gate's rule, or None."""
     try:
@@ -3025,6 +3042,10 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
             if not code:
                 print(f"dispatch: {branch} reported pushed, but origin has no code beyond its last "
                       "attestation — not queuing a review")
+                continue
+            why = review_conflict(root, branch, _tip_on_origin(root, branch, fetch=False))
+            if why:
+                print(f"dispatch: {branch} reported pushed — {why}; not queuing a review", file=sys.stderr)
                 continue
             nxt = "review"
         elif state == "review-pass" and phase == "review" and rec.get("plan_review"):
