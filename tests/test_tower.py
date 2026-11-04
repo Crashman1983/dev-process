@@ -990,3 +990,79 @@ def test_the_tower_reads_the_input_line_the_policy_names(render, tmp_path, monke
     (out / "docs/process/model-policy.local.json").write_text(json.dumps({"say_prompt": r"^codex> ?(.*)$"}))
     assert tower.sessions(out)[0]["prompt"] is None
     assert [k for k, _s in _prompt_kinds(tower, out)] == []
+
+
+# --- v2.90 (#336): one owner of the hold rule — the tower shows the train's holds -------
+
+def _published(out: Path, host: str, *records: dict) -> None:
+    """Der Report-Ref eines anderen Hosts, wie `fetch_reports` ihn bringt — ohne Netz."""
+    text = "".join(json.dumps(r) + "\n" for r in records)
+    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=out, input=text,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    _git(out, "update-ref", f"refs/process/reports/{host}", blob)
+
+
+def _hold_kinds(table: dict) -> list[tuple[str, str]]:
+    return sorted((f["kind"], f["what"].split(":")[0]) for f in table["findings"]
+                  if f["kind"] in ("train-hold", "blocked"))
+
+
+def test_a_hold_behind_a_later_idle_is_a_train_hold_in_tower_and_train(render, tmp_path, monkeypatch):
+    """#336: `blocked`, dann `idle` — der Zug hält, der Tower zeigte `idle`. Beide lesen jetzt
+    `tower.train_holds`, auch ohne `--remote` (die veröffentlichten Refs liegen lokal)."""
+    import importlib.util
+    import time
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _worktree(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "branch", "gamma", "alpha")
+    _report(out, "blocked", "--worker", "alpha", "--note", "wait for #12")
+    _report(out, "idle", "--worker", "alpha")
+    _published(out, "otherhost", {"worker": "gamma", "epoch": int(time.time()), "state": "blocked",
+                                  "note": "steward: hold", "host": "otherhost"})
+    r = _tower(out, "--json")
+    assert r.returncode == 0, r.stderr
+    t = json.loads(r.stdout)
+    assert sorted(h["worker"] for h in t["holds"]) == ["alpha", "gamma"], t["holds"]
+    assert _hold_kinds(t) == [("train-hold", "alpha"), ("train-hold", "gamma")], t["findings"]
+    hold = next(f for f in t["findings"] if f["kind"] == "train-hold" and f["what"].startswith("alpha"))
+    assert hold["severity"] == "medium" and "wait for #12" in hold["what"]
+    # the train holds the same branches — through the same function
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("train_for_holds", out / "scripts/process/train.py")
+    train = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(train)
+    by = {c["branch"]: c for c in train.candidates(out, "main", "main")}
+    assert all(any("latest report `blocked`" in why for why in by[b]["reasons"]) for b in ("alpha", "gamma")), by
+    assert set(train._tower.train_holds(out)) == {"alpha", "gamma"}
+    monkeypatch.setattr(train._tower, "train_holds", lambda root: {})
+    by = {c["branch"]: c for c in train.candidates(out, "main", "main")}
+    assert not any("latest report `blocked`" in why for b in ("alpha", "gamma") for why in by[b]["reasons"])
+
+
+def test_a_blocked_latest_report_is_the_blocked_finding_only(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _worktree(out, "alpha", {"src/a.py": "a\n"})
+    _report(out, "idle", "--worker", "alpha")
+    _report(out, "blocked", "--worker", "alpha", "--note", "wait for #12")
+    t = json.loads(_tower(out, "--json", "--stale-minutes", "0").stdout)
+    assert [h["worker"] for h in t["holds"]] == ["alpha"]
+    assert _hold_kinds(t) == [("blocked", "alpha blocked for 0 min")], t["findings"]
+
+
+def test_a_merged_or_deleted_branch_shows_no_train_hold(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "merged", "main")
+    (out / "m.txt").write_text("m\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "m")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "merge", "-q", "--ff-only", "merged")
+    for worker in ("merged", "gone"):  # merged: not ahead; gone: no branch at all
+        _report(out, "blocked", "--worker", worker, "--note", "old")
+        _report(out, "idle", "--worker", worker)
+    t = json.loads(_tower(out, "--json").stdout)
+    assert t["holds"] == [] and _hold_kinds(t) == [], (t["holds"], t["findings"])

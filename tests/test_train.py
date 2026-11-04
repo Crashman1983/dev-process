@@ -26,8 +26,8 @@ def _repo(out: Path) -> None:
 
 
 def _branch(out: Path, name: str, files: dict[str, str], *, tier: int = 2, reviewed: bool = True,
-            archive: bool = True, delete: tuple[str, ...] = ()) -> None:
-    _git(out, "checkout", "-q", "-b", name, "main")
+            archive: bool = True, delete: tuple[str, ...] = (), start: str = "main") -> None:
+    _git(out, "checkout", "-q", "-b", name, start)
     for rel, text in files.items():
         p = out / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -514,7 +514,7 @@ def test_after_a_drop_the_rest_gets_its_own_flake_rerun(render, tmp_path, monkey
     states = iter(["red", "red", "green", "red", "red", "green"])
     wt = tmp_path / "wt"
     wt.mkdir()
-    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (wt, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (wt, "train/x", list(subset), []))
     monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
@@ -904,7 +904,7 @@ def test_a_suite_the_base_has_but_the_combined_tree_lost_is_red(render, tmp_path
     wt = tmp_path / "wt"
     wt.mkdir()
     written = []
-    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (wt, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (wt, "train/x", list(subset), []))
     monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
@@ -941,18 +941,26 @@ def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, 
     states = iter(["red", "red", "undefined", "red", "undefined"])
     wt = tmp_path / "wt"
     wt.mkdir()
-    written = []
-    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (wt, "train/x", list(subset), []))
+    written, builds = [], []
+
+    def build(root, base, subset, stamp, log, **kw):
+        builds.append((base, dict(kw["shas"])))
+        return wt, "train/x", list(subset), []
+    monkeypatch.setattr(train, "build_train", build)
     monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(train, "_out", lambda *a, **k: "")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda root, state, note, worker: written.append((state, worker)))
-    p = {"base": "origin/main", "candidates": [{"branch": "b1", "hours_waiting": 2}, {"branch": "b2", "hours_waiting": 1}]}
+    p = _pinned({"base": "origin/main", "candidates": [{"branch": "b1", "hours_waiting": 2},
+                                                       {"branch": "b2", "hours_waiting": 1}]})
     rc = train._run_batch(out, "main", p, ["b1", "b2"], "x", tmp_path / "t.log", suite="s", deploy=None,
                           push=False, keep_branches=True)
     assert rc == 1 and ("blocked", "b1") in written
+    # every run — first, retry, base, probe, rebuild — on the pinned base and tips (#391)
+    pinned = {"b1": f"{1:040x}", "b2": f"{2:040x}"}
+    assert builds and all(base == "b" * 40 and shas == pinned for base, shas in builds), builds
 
 
 def _head_pass(out, work, head, base=None):
@@ -1284,9 +1292,15 @@ def test_a_stacked_passenger_already_contained_counts_as_merged(render, tmp_path
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "b")
     _git(out, "checkout", "-q", "main")
-    wt, merged, dropped, _msgs = _settle(out, ["41-b", "40-a"], "t6")
+    # pinned (#391): 40-a moves on after boarding — its boarded SHA is in 41-b, the new one is not
+    shas = {b: _git(out, "rev-parse", b).stdout.strip() for b in ("40-a", "41-b")}
+    _move(out, "40-a", files={"late.txt": "late\n"})
+    train = _load_train(out)
+    wt, _b, merged, dropped = train.build_train(out, _git(out, "rev-parse", "main").stdout.strip(),
+                                                ["41-b", "40-a"], "t6", lambda _m: None, shas=shas)
     try:
         assert merged == ["41-b", "40-a"] and not dropped
+        assert not (wt / "late.txt").exists()
     finally:
         _git(out, "worktree", "remove", "--force", str(wt))
 
@@ -1953,7 +1967,7 @@ def _memo_batch(render, tmp_path, monkeypatch, *, seen, red):
         _git(out, "commit", "-q", "-m", name)
     _git(out, "checkout", "-q", "main")
 
-    def build(root, base, subset, stamp, log):
+    def build(root, base, subset, stamp, log, **kw):
         current[:] = subset
         _git(out, "checkout", "-q", {0: "main", 1: "one", 2: "both"}[len(subset)])
         return out, "train/x", list(subset), []
@@ -2029,7 +2043,7 @@ def _retry_batch_with(train, render, tmp_path, monkeypatch, *, retry, sh):
     train = train or _load_train(out)
     builds, runs = [], []
 
-    def build(root, base, subset, stamp, log):
+    def build(root, base, subset, stamp, log, **kw):
         builds.append(list(subset))
         return out, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
@@ -2147,7 +2161,7 @@ def test_red_gates_rerun_the_gates_on_the_same_tree_then_the_suite(render, tmp_p
     train = _load_train(out)
     builds, runs, gates = [], [], iter([False, True])
     monkeypatch.setattr(train, "build_train",
-                        lambda root, base, subset, stamp, log: builds.append(1) or (out, "train/x", list(subset), []))
+                        lambda root, base, subset, stamp, log, **kw: builds.append(1) or (out, "train/x", list(subset), []))
     monkeypatch.setattr(train, "_run_gates", lambda w, log: next(gates))
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or "green")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
@@ -2189,7 +2203,7 @@ def test_a_tree_this_train_saw_green_is_not_run_again_after_the_drop(render, tmp
     train = _load_train(out)
     runs, current = [], []
 
-    def build(root, base, subset, stamp, log):
+    def build(root, base, subset, stamp, log, **kw):
         current[:] = subset
         _git(out, "checkout", "-q", {0: "main", 1: "one", 2: "both"}[len(subset)])
         return out, "train/x", list(subset), []
@@ -2632,7 +2646,7 @@ def test_red_gates_then_green_are_a_gate_flake_not_a_flaky_suite(render, tmp_pat
     _repo(out)
     train = _load_train(out)
     gates = iter([False, True, True, True])
-    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log: (out, "train/x", list(subset), []))
+    monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (out, "train/x", list(subset), []))
     monkeypatch.setattr(train, "_run_gates", lambda w, log: next(gates))
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: "green")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
@@ -2805,7 +2819,7 @@ def _measured(render, tmp_path, monkeypatch, *, sh, n=2, gates=None, retry=None,
     _git(out, "checkout", "-q", "main")
     current, calls = [], []
 
-    def build(root, base, subset, stamp, log):
+    def build(root, base, subset, stamp, log, **kw):
         dropped = list((conflicts or (lambda s: []))(list(subset)))
         merged = [b for b in subset if b not in dropped]
         current[:] = merged
@@ -3547,3 +3561,335 @@ def test_a_dispatch_worktree_on_the_probe_path_is_left_alone(render, tmp_path):
     kept, checks = train.pre_board(out, "main", ["alpha"], "20261104-1200", "true", 60, lambda s: None)
     assert (wt / "wip.txt").read_text() == "uncommitted work\n"
     assert kept == ["alpha"] and checks["unchecked"] == 1 and "train-preboard" in checks["reason"], checks
+
+
+# --- v2.90 (#391, #335): the train keeps what it checked ----------------------------------
+
+def _pinned(p: dict) -> dict:
+    """Ein `_run_batch`-Plan, wie `plan()` ihn liefert: Basis und Spitzen beim Boarden
+    festgehalten (#391) — die Fakes von `build_train` sehen sie in `shas`."""
+    p["base_sha"] = "b" * 40
+    for i, c in enumerate(p["candidates"]):
+        c["sha"] = f"{i + 1:040x}"
+    return p
+
+
+def _move(out: Path, branch: str, files: dict[str, str] | None = None, delete: tuple[str, ...] = (),
+          msg: str = "later") -> str:
+    """Ein Commit auf `branch`, ohne ihn im Root auszuchecken — ein Worker in seinem
+    Worktree während des Laufs; gibt den neuen SHA."""
+    wt = out.parent / f"move-{branch.replace('/', '-')}-{time.monotonic_ns()}"
+    _git(out, "worktree", "add", "-q", str(wt), branch)
+    try:
+        for rel, text in (files or {}).items():
+            (wt / rel).parent.mkdir(parents=True, exist_ok=True)
+            (wt / rel).write_text(text)
+        for rel in delete:
+            _git(wt, "rm", "-q", rel)
+        _git(wt, "add", "-A")
+        _git(wt, "commit", "-q", "-m", msg)
+        return _git(wt, "rev-parse", "HEAD").stdout.strip()
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+
+
+def _run_in_process(train, out, **kw):
+    args = dict(suite="true", deploy=None, push=False, min_candidates=1, max_wait_hours=0, force=True,
+                keep_branches=False, dry_run=False)
+    args.update(kw)
+    return train.run(out, **args)
+
+
+def _states_of(train, out: Path) -> list[tuple[str, str, str]]:
+    return [(r["worker"], r["state"], r.get("note") or "") for r in train._report.read_reports(out)]
+
+
+def test_a_fix_on_a_passenger_during_the_run_does_not_reach_the_probes(render, tmp_path, monkeypatch, capsys):
+    """#391 (Kenni, Zug 20261104-0828): ein Fix kam im Lauf auf einen Passagier — die Proben
+    enthielten ihn, der rote Baum nicht, und beschuldigt wurde ein Unbeteiligter. Proben und
+    Neubau nehmen den festgehaltenen SHA: beschuldigt wird, wer den roten Baum rot machte."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/BROKEN": "x\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    train = _load_train(out)
+    suite = "test ! -e src/BROKEN"
+    real_sh, moved = train._sh, []
+
+    def sh(cwd, cmd, log, *a, **k):
+        if cmd == suite and not moved:  # the first, red run: the fix lands on alpha meanwhile
+            moved.append(_move(out, "alpha", delete=("src/BROKEN",), msg="fix: broken"))
+        return real_sh(cwd, cmd, log, *a, **k)
+    monkeypatch.setattr(train, "_sh", sh)
+    rc = _run_in_process(train, out, suite=suite, retry=suite)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert "red with alpha aboard" in said.out and "red with beta aboard" not in said.out, said.out
+    log = _git(out, "log", "--format=%s", "main").stdout
+    assert "train: merge beta" in log and "merge alpha" not in log
+    assert _git(out, "rev-parse", "alpha").stdout.strip() == moved[0]  # blamed: the branch stays
+    assert ("alpha", "blocked", f"dropped from train {_phases(out)[-1]['stamp']}: red with it aboard") \
+        in _states_of(train, out)
+
+
+def test_a_fetch_that_moves_the_base_mid_run_moves_no_run(render, tmp_path, monkeypatch, capsys):
+    """#391: jeder Lauf baut auf `base_sha` — ein `git fetch`, der `origin/main` im Lauf
+    bewegt, macht weder den Neubau noch die Basisprobe rot."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "bad", {"src/BAD": "x\n"})
+    _git(out, "update-ref", "refs/remotes/origin/main", "main")
+    _git(out, "checkout", "-q", "-b", "next-main", "main")
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/MAINBAD").write_text("x\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main moves on, red")
+    ahead = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "main")
+    _git(out, "branch", "-q", "-D", "next-main")
+    train = _load_train(out)
+    suite = "test ! -e src/BAD && test ! -e src/MAINBAD"
+    real_sh, fetched = train._sh, []
+
+    def sh(cwd, cmd, log, *a, **k):
+        if cmd == suite and not fetched:  # a fetch on the host while the first suite runs
+            fetched.append(_git(out, "update-ref", "refs/remotes/origin/main", ahead))
+        return real_sh(cwd, cmd, log, *a, **k)
+    monkeypatch.setattr(train, "_sh", sh)
+    rc = _run_in_process(train, out, suite=suite)
+    said = capsys.readouterr()
+    assert rc == 0 and "fix main first" not in said.err, said.out + said.err
+    assert "red with bad aboard" in said.out
+    assert (out / "src/a.py").is_file() and not (out / "src/MAINBAD").exists()
+
+
+def test_a_commit_after_boarding_rides_no_train_and_its_branch_stays(render, tmp_path, monkeypatch, capsys):
+    """#391: die Eignung galt zur Plan-Zeit, der Merge las zur Bau-Zeit — ein Commit danach,
+    ohne Review, stieg mit ein. Jetzt fährt der geprüfte SHA; der bewegte Branch bleibt
+    stehen, ohne `done` und ohne `forget_branch`."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    train = _load_train(out)
+    real_plan, late = train.plan, []
+
+    def plan(root, **kw):
+        p = real_plan(root, **kw)
+        late.append(_move(out, "alpha", files={"src/late.py": "unreviewed\n"}))
+        return p
+    monkeypatch.setattr(train, "plan", plan)
+    import dispatch
+    forgot: list[str] = []
+    monkeypatch.setattr(dispatch, "forget_branch", lambda root, b: forgot.append(b))
+    rc = _run_in_process(train, out)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert (out / "src/a.py").is_file() and (out / "src/b.py").is_file()
+    assert not (out / "src/late.py").exists()  # the unreviewed commit stayed off main
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert "alpha" in branches and "beta" not in branches
+    assert _git(out, "rev-parse", "alpha").stdout.strip() == late[0]
+    assert forgot == ["beta"]
+    states = _states_of(train, out)
+    assert ("beta", "done") in [(w, s) for w, s, _n in states]
+    assert "alpha" not in [w for w, s, _n in states if s == "done"]
+    stamp = _phases(out)[-1]["stamp"]
+    text = (out / f".git/process-train/{stamp}.log").read_text()
+    assert "alpha moved since boarding — merged at " in text and "need their own review and train" in text
+
+
+def test_a_pinned_merge_reads_identity_by_name_and_content_by_sha(render, tmp_path):
+    """Plan-Review Runde 1: der SHA nur für den Inhalt — ein Plan auf der Basis, der die Issue
+    des Branches nennt, bleibt sein eigener: `Refs` statt `Closes`, der DoD-deviation-Hold wie
+    bisher, gelesen am festgehaltenen SHA, nicht an der bewegten Spitze."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _plan_on_main(out, "2026-09-01-61-work.md", "# work\n\ntier: 1\nissue: #61\n\n## Decisions\n")
+    _git(out, "checkout", "-q", "-b", "61-work", "main")
+    plan = out / ".process-work/plans/2026-09-01-61-work.md"
+    plan.write_text(plan.read_text() + "DoD-deviation: open AC-2 — the CLI follows\n")
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/w.py").write_text("w\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: work")
+    _git(out, "checkout", "-q", "main")
+    sha = _git(out, "rev-parse", "61-work").stdout.strip()
+    base_sha = _git(out, "rev-parse", "main").stdout.strip()
+    # the tip moves on: the deviation is gone there — the pinned content still carries it
+    _move(out, "61-work", files={".process-work/plans/2026-09-01-61-work.md":
+                                 "# work\n\ntier: 1\nissue: #61\n\n## Decisions\n"})
+    train = _load_train(out)
+    logged: list[str] = []
+    wt, _b, merged, _d = train.build_train(out, base_sha, ["61-work"], "t61", logged.append,
+                                           shas={"61-work": sha})
+    try:
+        assert merged == ["61-work"]
+        body = _git(wt, "log", "-1", "--format=%B").stdout
+        assert "DoD-deviation: open AC-2 — the CLI follows" in body and "Refs #61" in body, body
+        assert "Closes" not in body
+        assert _git(wt, "rev-parse", "HEAD^2").stdout.strip() == sha
+        assert any("#61 stays open" in line for line in logged), logged
+    finally:
+        _git(out, "worktree", "remove", "--force", str(wt))
+    found = train._deviations(out, base_sha, "61-work", tip=sha)
+    assert found is not None and found[1] == {61}
+
+
+def test_after_the_push_done_names_the_issue_and_a_moved_origin_copy_stays(render, tmp_path, monkeypatch, capsys):
+    """`log base..b` las nach dem Push nichts mehr (`origin/main` war vorgerückt): `done` nannte
+    keine Issue. Jetzt `base_sha..sha`. Und die Kopie auf origin, auf die der Worker im Lauf
+    gepusht hat, löscht der Zug nicht (`--force-with-lease`)."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    _branch(out, "62-feat", {"src/f.py": "f\n"})
+    _git(out, "checkout", "-q", "62-feat")
+    _git(out, "commit", "-q", "--amend", "-m", "feat: f\n\nRefs #62")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "push", "-q", "origin", "62-feat")
+    train = _load_train(out)
+    real_plan, pushed = train.plan, []
+
+    def plan(root, **kw):
+        p = real_plan(root, **kw)
+        _git(out, "branch", "-q", "copy-62", "62-feat")
+        pushed.append(_move(out, "copy-62", files={"src/g.py": "g\n"}))
+        _git(out, "push", "-q", "--force", "origin", "copy-62:62-feat")  # the worker, from elsewhere
+        _git(out, "branch", "-q", "-D", "copy-62")
+        return p
+    monkeypatch.setattr(train, "plan", plan)
+    rc = _run_in_process(train, out, push=True)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    done = [r for r in train._report.read_reports(out) if r["worker"] == "62-feat" and r["state"] == "done"]
+    assert done and done[-1]["issue"] == 62 and "issues [62]" in done[-1]["note"], done
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert "62-feat" not in branches  # the local copy is the one that boarded: merged, deleted
+    assert _git(bare, "rev-parse", "refs/heads/62-feat").stdout.strip() == pushed[0]
+    assert "62-feat" in said.err and "origin" in said.err
+
+
+def _suite_reporting(out: Path, tmp: Path, *lines: str, first_rc: int = 0) -> str:
+    """Eine Suite, die beim ersten Lauf Reports schreibt — ein Worker oder Steward während
+    des Laufs — und `first_rc` gibt; danach grün."""
+    mark = tmp / "reported"
+    script = tmp / "suite-reporting.sh"
+    report = f"{sys.executable} {out}/scripts/process/report.py"
+    body = "\n".join(ln if ln.startswith("echo ") else f"{report} {ln} --root {out}" for ln in lines)
+    script.write_text(f"if [ ! -e {mark} ]; then\ntouch {mark}\n{body}\nexit {first_rc}\nfi\nexit 0\n")
+    return f"sh {script}"
+
+
+def _held_run(out: Path, suite: str):
+    r = _train(out, "run", "--force", "--suite", suite)
+    row = _phases(out)[-1]
+    log = (out / f".git/process-train/{row['stamp']}.log").read_text()
+    return r, row, log
+
+
+def test_a_blocked_report_written_during_the_run_drops_the_passenger(render, tmp_path):
+    """#335: ein Hold, der im Lauf gesetzt wird, kam nicht mehr an. Vor dem Push wird neu
+    gelesen: der Passagier steigt aus, der Rest fährt ohne ihn, `held` steht in der Zeile —
+    und der Zug schreibt kein eigenes `blocked`."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    r, row, log = _held_run(out, _suite_reporting(out, tmp_path, "blocked --worker beta --note 'wait for #12'"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert row["held"] == ["beta"] and row["branches"] == ["alpha"], row
+    assert [x["red_path"] for x in row["rounds"]] == ["green", "green"], row["rounds"]
+    assert "beta held during the run" in log
+    assert "beta" in r.stderr and "held during the run" in r.stderr
+    main = _git(out, "log", "--format=%s", "main").stdout
+    assert "train: merge alpha" in main and "merge beta" not in main
+    assert "beta" in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    notes = [n for w, _s, n in _states_of(_load_train(out), out) if w == "beta"]
+    assert notes == ["wait for #12"], notes  # the worker's own report counts, no train-written one
+
+
+def test_a_blocked_released_again_during_the_run_still_drops(render, tmp_path):
+    """Die Freigabe gilt der neuen Spitze, nicht der festgehaltenen."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    r, row, _log = _held_run(out, _suite_reporting(out, tmp_path, "blocked --worker beta --note fix",
+                                                   "review-pass --worker beta"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert row["held"] == ["beta"] and row["branches"] == ["alpha"], row
+
+
+def test_a_blocked_with_another_hosts_old_clock_still_counts(render, tmp_path):
+    """Kein Zeitfilter: ein `blocked`, dessen Epoche weit vor dem Boarden liegt (die Uhr eines
+    anderen Hosts), ist neu, weil es beim Boarden nicht da war — auch hinter einem `pushed`."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    path = _load_train(out)._report.reports_path(out)
+    now = int(time.time())
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"worker": "beta", "epoch": now, "state": "pushed", "note": "", "host": "h"}) + "\n")
+    old = json.dumps({"worker": "beta", "epoch": now - 10 * 86400, "state": "blocked",
+                      "note": "steward: hold", "host": "skewed"})
+    r, row, _log = _held_run(out, _suite_reporting(out, tmp_path, f"echo '{old}' >> {path}"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert row["held"] == ["beta"] and row["branches"] == ["alpha"], row
+
+
+def test_a_train_written_blocked_during_the_run_holds_nothing(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    r, row, _log = _held_run(out, _suite_reporting(
+        out, tmp_path, "blocked --worker beta --note 'dropped from train 20261104-0000: red with it aboard'"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert row["held"] == [] and sorted(row["branches"]) == ["alpha", "beta"], row
+
+
+def test_a_stacked_passenger_that_contains_a_held_one_is_held_too(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    # Tier 1: a stack carries its base's archived plan twice, and a de-dated slug that is
+    # not unique clears nothing (the review gate's rule) — beside the point here
+    _branch(out, "beta", {"src/b.py": "b\n"}, tier=1, reviewed=False)
+    _branch(out, "beta-more", {"src/c.py": "c\n"}, tier=1, reviewed=False, start="beta")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert all(by[b]["eligible"] for b in ("alpha", "beta", "beta-more")), {b: c["reasons"] for b, c in by.items()}
+    r, row, log = _held_run(out, _suite_reporting(out, tmp_path, "blocked --worker beta --note hold"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert sorted(row["held"]) == ["beta", "beta-more"] and row["branches"] == ["alpha"], row
+    assert "beta-more held during the run — it contains beta" in log
+
+
+def test_the_round_before_the_hold_keeps_its_flaky(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    r, row, _log = _held_run(out, _suite_reporting(out, tmp_path, "blocked --worker beta --note hold", first_rc=1))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert [x["red_path"] for x in row["rounds"]] == ["flaky", "green"], row["rounds"]
+    assert row["held"] == ["beta"] and row["branches"] == ["alpha"]
+
+
+def test_every_passenger_held_during_the_run_merges_nothing(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    head = _git(out, "rev-parse", "main").stdout
+    r, row, _log = _held_run(out, _suite_reporting(out, tmp_path, "blocked --worker alpha --note hold"))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert row["held"] == ["alpha"] and row["branches"] == [] and row["result"] == "red", row
+    assert _git(out, "rev-parse", "main").stdout == head
+    assert not [b for b in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+                if b.startswith("train/")]
