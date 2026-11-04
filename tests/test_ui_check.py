@@ -485,3 +485,20 @@ def test_a_tab_indented_example_is_code(project):
     _plan(out, "design-contract: web\n\n" + TRACE + "\nAn example:\n\n" + tabbed + "\n")
     _commit(out)
     assert "no `ui-check:` block" in _check(out).stdout
+
+
+def test_a_shallow_clone_without_a_fork_point_refuses(project, tmp_path):
+    """v2.86 (#302): ui-check, like plan-structure, never passes a branch it cannot range."""
+    out = project
+    _plan(out, "design-contract: web\n\n" + TRACE)
+    _commit(out)
+    _git(out, "checkout", "-q", "main")
+    _write(out, "m.txt", "main moves on\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "main moves on")  # the fork is no longer main's tip
+    shallow = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--no-single-branch", "-b", "feature",
+                    f"file://{out}", str(shallow)], check=True, env=_env())
+    r = subprocess.run([sys.executable, "scripts/process/check_ui.py", "."], cwd=shallow,
+                       capture_output=True, text=True, env=_env())
+    assert r.returncode == 1 and "git fetch --unshallow" in r.stdout, r.stdout + r.stderr

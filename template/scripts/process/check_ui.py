@@ -339,6 +339,14 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     except GitReadError as exc:
         return [f"cannot read the integration ref: {exc}"], soft
     if ref is None:
+        from check_review import forkless_refs, is_shallow  # noqa: PLC0415
+
+        forkless = forkless_refs(root)
+        if forkless:  # a ref exists but no fork point: unknown is no pass (#302)
+            remedy = ("this clone is shallow: `git fetch --unshallow`" if is_shallow(root)
+                      else f"fetch the history of {forkless[0]} the branch forked from")
+            return [f"no fork point with {', '.join(forkless)} in this history — which plans this "
+                    f"branch adds is unknown, so none is checked; {remedy}"], soft
         return hard, ["no branch range against an integration ref — no plan is checked"]
     plans = bound_plans(root, ref)
     if not plans:
