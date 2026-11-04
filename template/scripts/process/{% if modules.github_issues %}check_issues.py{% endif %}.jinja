@@ -329,9 +329,10 @@ _NO_RANGE = ("no branch range against an integration ref (on it, or none in this
 _UNKNOWN_NEW = "which blocker and major findings this branch adds is unknown"
 
 
-# fields a finding may gain after it stood: `issue=` (`publish_review.sh` writes it), and
-# what classifies and places it — backfilling them makes no old finding new (v2.78)
-_BACKFILL = ("issue", "class", "rule", "at")
+# fields a finding may gain after it stood: `issue=` (`publish_review.sh` writes it), what
+# classifies and places it (v2.78), and the round it came from (`origin=`, #362) —
+# backfilling them makes no old finding new
+_BACKFILL = ("issue", "class", "rule", "at", "origin")
 
 
 def _old_matches(findings: list[dict], old: list[dict]) -> list[bool]:
