@@ -2777,6 +2777,108 @@ def test_conflict_hints_come_in_boarding_order(render, tmp_path, monkeypatch):
     assert "z × a conflict" in text and "drops a unless z" in text, text
 
 
+def _pairs_repo(render, tmp_path):
+    """Candidates for every kind of pair: a conflict (alpha × gamma), clean ones, an
+    unrelated history (orphan) and a branch behind the base whose change conflicts
+    with main only (old × side: their changes against the base share no path)."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/f.py").write_text("0\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "f")
+    _branch(out, "old", {"src/f.py": "old\n"})
+    (out / "src/f.py").write_text("main\n")
+    _git(out, "commit", "-q", "-am", "main moves on")
+    _branch(out, "side", {"src/g.py": "g\n"})
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "gamma", {"src/a.py": "gamma\n"})
+    _git(out, "checkout", "-q", "--orphan", "orphan")
+    _git(out, "rm", "-rfq", ".")
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/o.py").write_text("o\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "unrelated")
+    _git(out, "checkout", "-q", "-f", "main")
+    names = ("old", "side", "alpha", "gamma", "orphan")
+    return out, {b: _git(out, "rev-parse", b).stdout.strip() for b in names}
+
+
+# old is behind the base: it conflicts with every branch that carries main's f.py
+_PAIR_HINTS = [{"branches": ["old", b], "paths": ["src/f.py"]} for b in ("side", "alpha", "gamma")] + [
+    {"branches": ["alpha", "gamma"], "paths": ["src/a.py"]}]
+
+
+def _merge_trees(review, monkeypatch, *, refuse_stdin=False) -> list[list[str]]:
+    """Every `git merge-tree` `review` runs; `refuse_stdin`: a git before 2.40."""
+    calls: list[list[str]] = []
+    real = review.subprocess.run
+
+    def run(cmd, *a, **k):
+        if cmd and cmd[0] == "git" and "merge-tree" in cmd:
+            calls.append(cmd)
+            if refuse_stdin and "--stdin" in cmd:
+                return subprocess.CompletedProcess(cmd, 129, b"", b"error: unknown option `stdin'\n")
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(review.subprocess, "run", run)
+    return calls
+
+
+def test_one_merge_tree_answers_every_pair_as_its_own_merge(render, tmp_path, monkeypatch):
+    """v2.91 (#398, M0: 12 % of `plan`): one `merge-tree --stdin` for all pairs, each
+    answer the one git gives the pair alone — nothing skipped (plan review round 3)."""
+    import itertools
+    out, tips = _pairs_repo(render, tmp_path)
+    review = _load_train(out)._review
+    pairs = list(itertools.combinations(tips.values(), 2))
+    alone = {pair: review._auto_merge_uncached(out, *pair) for pair in pairs}
+    assert alone[(tips["old"], tips["side"])][1] == {"src/f.py"}
+    assert alone[(tips["alpha"], tips["gamma"])][1] == {"src/a.py"}
+    assert alone[(tips["alpha"], tips["orphan"])][1] == set() and alone[(tips["side"], tips["alpha"])][1] == set()
+    review.clear_memo()
+    calls = _merge_trees(review, monkeypatch)
+    review._auto_merges(out, pairs)
+    assert len(calls) == 1
+    for pair in pairs:
+        assert review._PURE[("auto", (str(out), pair))] == (alone[pair][0], frozenset(alone[pair][1])), pair
+    assert all(review._auto_merge(out, *pair) == alone[pair] for pair in pairs) and len(calls) == 1
+
+
+def test_conflict_hints_run_one_merge_tree_for_all_pairs(render, tmp_path, monkeypatch):
+    out, tips = _pairs_repo(render, tmp_path)
+    train = _load_train(out)
+    train._review.clear_memo()
+    calls = _merge_trees(train._review, monkeypatch)
+    cands = [{"branch": b, "sha": sha, "eligible": True, "hours_waiting": 10 - i} for i, (b, sha) in enumerate(tips.items())]
+    assert train.conflict_hints(out, cands) == _PAIR_HINTS
+    assert len(calls) == 1
+
+
+def test_a_git_without_merge_tree_stdin_merges_each_pair_alone(render, tmp_path, monkeypatch):
+    """Guard: a git before 2.40 refuses `--stdin` — every pair alone, the same hints."""
+    out, tips = _pairs_repo(render, tmp_path)
+    train = _load_train(out)
+    train._review.clear_memo()
+    calls = _merge_trees(train._review, monkeypatch, refuse_stdin=True)
+    cands = [{"branch": b, "sha": sha, "eligible": True, "hours_waiting": 10 - i} for i, (b, sha) in enumerate(tips.items())]
+    assert train.conflict_hints(out, cands) == _PAIR_HINTS
+    assert len([c for c in calls if "--stdin" not in c]) == 10
+
+
+def test_a_batch_cut_short_by_an_unmergeable_line_fills_nothing(render, tmp_path, monkeypatch):
+    """In batch mode git stops at a line it cannot merge (exit 1, the answers before it
+    on stdout): only exit 0 with one answer per pair counts — else each pair alone."""
+    out, tips = _pairs_repo(render, tmp_path)
+    review = _load_train(out)._review
+    review.clear_memo()
+    calls = _merge_trees(review, monkeypatch)
+    good, bad = (tips["alpha"], tips["gamma"]), (tips["alpha"], "1" * 40)
+    review._auto_merges(out, [good, bad])
+    assert len(calls) == 1 and not [k for k in review._PURE if k[0] == "auto"]
+    assert review._auto_merge(out, *good)[1] == {"src/a.py"} and review._auto_merge(out, *bad) is None
+
+
 def test_run_does_not_compute_the_conflict_hints(render, tmp_path, monkeypatch, capsys):
     """#379: the hint is the plan's output only — `run` calls plan() and must stay as fast."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})

@@ -2509,13 +2509,14 @@ def conflict_hints(root: Path, cands: list[dict]) -> list[dict]:
     aboard = [c["branch"] for c in sorted((c for c in cands if c["eligible"]),
                                           key=lambda c: -(c.get("hours_waiting") or 0))]
     tip = {c["branch"]: c.get("sha") or c["branch"] for c in cands}  # as boarding judged them (#391)
+    pairs = [(first, second) for i, first in enumerate(aboard) for second in aboard[i + 1:]]
+    _review._auto_merges(root, [(tip[first], tip[second]) for first, second in pairs])  # one git for all (#398)
     hints: list[dict] = []
-    for i, first in enumerate(aboard):
-        for second in aboard[i + 1:]:
-            merged = _review._auto_merge(root, tip[first], tip[second])
-            if merged is None or merged[1]:
-                hints.append({"branches": [first, second],
-                              "paths": sorted(merged[1]) if merged is not None else None})
+    for first, second in pairs:
+        merged = _review._auto_merge(root, tip[first], tip[second])
+        if merged is None or merged[1]:
+            hints.append({"branches": [first, second],
+                          "paths": sorted(merged[1]) if merged is not None else None})
     return hints
 
 
