@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.88.0 — Der rote Pfad des Zuges, gemessen
+
+Wird der Merge-Zug rot, hält er jetzt fest, was ihn die Suche nach dem Grund kostet: jeden Retry, jede Basisprüfung und jeden Suchschritt, mit seiner Zeit. In Projekten, die ihre pytest-Ergebnisse benennen, hält er auch fest, welche Tests rot waren und ob es sie vor der Änderung schon gab. Das Cockpit macht daraus eine Zahl: in wie vielen roten Zügen es Zeit gespart hätte, nur die roten Tests zu wiederholen. Der Zug selbst läuft genau wie bisher. Die Idee, nur die roten Tests zu wiederholen, wartet auf diese Zahl, denn vier Planungsrunden konnten nicht zeigen, dass sie etwas spart.
+
 ## v2.87.0 — Weniger Leerlauf und Doppelarbeit im Zug
 
 Vier Änderungen gegen Warten und doppelte Läufe. Ein kleiner Fix ohne eigenen Plan geht jetzt den kurzen statt des vollen Wegs und kommt trotzdem in den Merge-Zug. Eine Sitzung, die an einer Freigabe-Frage hängt, wird nach zehn Minuten gemeldet, statt stundenlang zu warten. Ein Branch, der nicht mehr auf den Hauptbranch passt, erfährt das vor seinem letzten Review und nicht erst danach im Zug. Und ein Zug mit eigenem Testbefehl lässt die Tests nicht mehr zweimal laufen.

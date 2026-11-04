@@ -10,6 +10,27 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.88.0 — The train's red path, measured · 2026-11-04
+
+**Why.** #378 proposed re-running only the red tests after a red train: the retry, the base and every bisection probe. Four plan rounds blocked that subset run. Its safety kept growing harder, and the last round found its saving unproven. When the offender adds the red test itself, the test does not exist on the base, so the subset falls back to the full suite. How often that happens had never been measured. The owner decided to measure first.
+
+**What changes.**
+- **Every run of the red path is counted, per round.** The train's `phases.jsonl` line carries `rounds`, with one entry for the first round and one per round after a drop. Each entry has `red_path`, how the round ended: `green`, `flaky`, `gate-flaky`, `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`, `environment`, `push-rejected` or `aborted`. It also has `runs` by kind (`first`, `retry_gates`, `retry_failed`, `retry_full`, `base`, `probe`), each with its count, its build-and-gates seconds and its suite seconds kept apart.
+- **Red tests, read only, from pytest's own record.** With `red_ids` in `testing.local.json`, the train reads each pytest stage's `lastfailed` file after a suite-red first run. Each entry names the `lastfailed` path, the pytest `rootdir` and the stage. The train records the red stages and, for each red test, whether it already existed on the base:
+  - `true`: the test file is unchanged between base and board;
+  - `false`: the file or the test function is new;
+  - `unknown`: anything else.
+
+  A reader error costs a field, never the run.
+- **`train-phases` prints the decision number.** Per run kind it prints the number of runs and the median suite seconds. Red rounds are sorted into fit, unfit or undetermined, with flake rounds and offender rounds counted apart. Only an offender round can be fit for a subset base and bisect. The saving is an upper bound, because the cost of a subset run is not measured yet.
+- `train.md` "The red path, measured" and `testing.md` "Red tests" describe both.
+
+**Effect.** The train runs as before. After some weeks of trains, the numbers say whether a subset run would save suite time, and in how many red rounds.
+
+**Update.** A pure update. To contribute the numbers, set `red_ids` for the pytest stages. The merge suite must keep pytest's cache on (no `-p no:cacheprovider`), and two pytest stages that share a rootdir each need their own `cache_dir`.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.88.md) #378
+
 ## v2.87.0 — Less idle time and double work in the train · 2026-11-04
 
 **Why.** The downstream steward reviewed a week of trains (28 October to 3 November): 42 runs, 39 % of the train minutes red. Four causes had a lever in the template. A tier-1 start ran the full execute flow. A session waited at a permission prompt for up to 155 minutes without anyone being told. A conflict with main showed up only in the train, after the last review. And a train called with its own `--suite` ran the suite a second time, because the hook did not accept that run (#376 #377 #379 #381).
