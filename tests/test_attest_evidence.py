@@ -2808,3 +2808,37 @@ def test_reports_are_chosen_by_their_snapshot_path(repo, tmp_path, swap):
     _fired(r, "S1")
     assert r.returncode == 0, r.stdout + r.stderr
     assert report in _git(repo, "show", "--name-only", "--format=", "HEAD")
+
+
+# --- refute v2.86: JSX and Playwright --------------------------------------------------
+
+JSX_SKIPPED = """import { render } from "x";
+describe.skip("list", () => {
+  it("first", () => {
+    render(<><A x={1} />{list.map((i) => <B k={i} />)}</>);
+    render(<p>Don't <span>stop</span></p>);
+  });
+  it("later", () => {
+    expect(1).toBe(1);
+  });
+});
+describe("aktiv", () => {
+  it("läuft wirklich", () => {
+    render(<Item key={1} />);
+  });
+});
+"""
+
+
+def test_jsx_inside_a_skipped_suite_keeps_its_tests_skipped_and_later_ones_active(ev_mod):
+    mod, _out = ev_mod
+    assert mod._other_status(JSX_SKIPPED, "web/a.test.tsx", "later", mod.DEFAULTS)  # inside: skipped
+    assert mod._other_status(JSX_SKIPPED, "web/a.test.tsx", "läuft wirklich", mod.DEFAULTS) is None
+
+
+def test_a_playwright_skipped_suite_is_skipped(ev_mod):
+    mod, _out = ev_mod
+    text = 'import { test } from "@playwright/test";\ntest.describe.skip("x", () => {\n  test("works", async () => {});\n});\n'
+    for form in (text, text.replace(".skip(", ".fixme(")):
+        got = mod._other_status(form, "e2e/a.spec.ts", "works", mod.DEFAULTS)
+        assert got and "skip" in got, (form, got)

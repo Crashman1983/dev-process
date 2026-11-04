@@ -22,6 +22,14 @@ DEFAULT_TIMEOUT = 3600.0
 DEFAULT_PREFLIGHT_TIMEOUT = 600.0
 
 
+def _finite(value) -> bool:
+    """A finite number — a huge JSON integer is not one (math.isfinite overflows on it)."""
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 class ConfigError(ValueError):
     """`testing.local.json` is unreadable or malformed — say where, run nothing."""
 
@@ -54,7 +62,7 @@ def _lanes(raw) -> dict[str, dict]:
         wait = spec.get("wait", DEFAULT_LANES.get(name, {}).get("wait", 300.0))
         nice = spec.get("nice", 0)
         if isinstance(wait, bool) or not isinstance(wait, (int, float)) \
-                or not math.isfinite(wait) or wait < 0:
+                or not _finite(wait) or wait < 0:
             raise ConfigError(f"lanes.{name}.wait must be finite seconds ≥ 0")
         if isinstance(nice, bool) or not isinstance(nice, int) or not 0 <= nice <= 19:
             raise ConfigError(f"lanes.{name}.nice must be an integer 0-19")
@@ -97,7 +105,7 @@ def _stack(name: str, raw) -> dict:
         raise ConfigError(f"{where}.unmapped must be one of {', '.join(UNMAPPED)}")
     timeout = raw.get("timeout", DEFAULT_TIMEOUT)
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) \
-            or not math.isfinite(timeout) or timeout <= 0:
+            or not _finite(timeout) or timeout <= 0:
         raise ConfigError(f"{where}.timeout must be finite seconds > 0")
     cwd = raw.get("cwd", ".")
     if not isinstance(cwd, str) or Path(cwd).is_absolute() or ".." in Path(cwd).parts:
@@ -160,7 +168,7 @@ def parse(data) -> dict:
         raise ConfigError("merge_suite must be the train's suite command (a string, as --suite)")
     preflight_timeout = data.get("preflight_timeout", DEFAULT_PREFLIGHT_TIMEOUT)
     if isinstance(preflight_timeout, bool) or not isinstance(preflight_timeout, (int, float)) \
-            or not math.isfinite(preflight_timeout) or preflight_timeout <= 0:
+            or not _finite(preflight_timeout) or preflight_timeout <= 0:
         raise ConfigError("preflight_timeout must be finite seconds > 0")
     stacks_raw = data.get("stacks", {})
     if not isinstance(stacks_raw, dict):

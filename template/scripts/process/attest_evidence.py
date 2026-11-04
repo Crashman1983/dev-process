@@ -1589,7 +1589,9 @@ def _declares_test(lines: list[str], i: int, name: str, titles: dict[int, list[s
 # #338: a JS/TS suite switched off — `describe.skip(`, `describe.skip.each(…)(`, `describe.todo(`,
 # `context.skip(`, `suite.skip(`, `xdescribe(`, `xcontext(` — skips every test inside its call
 _JS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts")
-_SKIPPED_SUITE = re.compile(r"(?<![\w$.])(?:x(?:describe|context)|(?:describe|context|suite)(?:\.\w+)*\.(?:skip|todo))"
+# Playwright's `test.describe.skip(` / `.fixme(` too (refute v2.86)
+_SKIPPED_SUITE = re.compile(r"(?<![\w$.])(?:test\.)?(?:x(?:describe|context)|(?:describe|context|suite)(?:\.\w+)*\."
+                            r"(?:skip|todo|fixme))"
                             r"(?![\w$])(?:\.\w+)*")
 _REGEX_AFTER = set("(,=:[!&|?{};+-*%<>~^") | {"", "return", "typeof", "case", "in", "of", "void", "delete",
                                               "throw", "new", "yield", "await"}
@@ -1638,7 +1640,8 @@ def _code_only(text: str) -> str:
                 j += 1
             blank(i + 1, j)
             i, prev = j + 1, "a"
-        elif c == "/" and prev in _REGEX_AFTER:
+        elif c == "/" and prev in _REGEX_AFTER and prev != "<" and not text.startswith("/>", i):
+            # `</tag>` and `<X />` are JSX, never a regex literal (refute v2.86)
             j, cls = i + 1, False
             while j < n and text[j] != "\n" and (cls or text[j] != "/"):
                 cls = (cls or text[j] == "[") and text[j] != "]"
@@ -1697,8 +1700,33 @@ def _skipped_suites(text: str) -> list[tuple[int, int]]:
             else:
                 break
         if calls:  # a bare reference (`const off = xdescribe`) opens no suite
+            # the bracket walk can misread JSX text (an apostrophe, a stray slash); the
+            # formatted layout is a second reading: the first closing line back at the
+            # opener's indentation. The later end wins — a test inside never escapes —
+            # and a clean layout end replaces an unreadable walk (refute v2.86)
+            layout = _layout_end(text, m.start())
+            unreadable = at >= len(code)
+            if layout is not None:
+                at = layout if unreadable else max(at, layout)
             out.append((m.start(), at))
     return out
+
+
+def _layout_end(text: str, start: int) -> int | None:
+    """The offset after the first line below the suite opener at `start` that sits at the
+    opener's indentation or less and closes it (starts with `}` or `)`); None without one."""
+    line_start = text.rfind("\n", 0, start) + 1
+    opener = text[line_start:start]
+    indent = len(opener) - len(opener.lstrip(" \t"))
+    pos = text.find("\n", start)
+    while pos != -1:
+        nxt = text.find("\n", pos + 1)
+        line = text[pos + 1: nxt if nxt != -1 else len(text)]
+        stripped = line.lstrip(" \t")
+        if stripped and len(line) - len(stripped) <= indent:
+            return (nxt if nxt != -1 else len(text)) if stripped[0] in "})" else None
+        pos = nxt
+    return None
 
 
 def _decl_col(ln: str, name: str) -> int:
