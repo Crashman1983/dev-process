@@ -8,12 +8,17 @@ full suite, at a good moment, instead of every branch paying its own
 full run and deploy.
 
     uv run scripts/process/train.py plan [--json]        # who may board, why not, ready to depart?
-    uv run scripts/process/train.py run --suite "<full suite cmd>" [--retry "<cmd>"] [--deploy "<cmd>"] [--push]
-                                       [--preflight "<cmd>"] [--min-candidates N] [--max-wait-hours H]
+    uv run scripts/process/train.py run [--suite "<full suite cmd>" [--suite-differs-ok]] [--retry "<cmd>"]
+                                       [--deploy "<cmd>"] [--push] [--preflight "<cmd>"]
+                                       [--min-candidates N] [--max-wait-hours H]
                                        [--force] [--keep-branches] [--dry-run]
 
-`--suite` defaults to `merge_suite` of `docs/process/testing.local.json`,
-`--preflight` to its `preflight`; every stack's own `preflight` follows either
+`--suite` defaults to `merge_suite` of `docs/process/testing.local.json` —
+with `merge_suite` set, another command (after `strip`) is refused before
+boarding, as the push would never match its certificate; `--suite-differs-ok`
+runs it anyway and logs it. `plan` also names pairwise conflicts among the
+candidates that may board (`run` does not compute them).
+`--preflight` defaults to its `preflight`; every stack's own `preflight` follows either
 way — a merge runs every stack, so any of them red is the host's.
 `--preflight` checks the environment (tools, logins, disk) on the first
 combined tree before any gate: red there is the host's, not a passenger's —
@@ -1400,7 +1405,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool,
         retry: str | None = None, preflight: str | None = None,
         certificate_env: list[str] | None = None, preflight_timeout: float | None = None,
-        merge_scope: list[str] | None = None) -> int:
+        merge_scope: list[str] | None = None, suite_note: str | None = None) -> int:
     local = local_integration(root)
     if local is None:
         print("train: no local main/master branch", file=sys.stderr)
@@ -1431,9 +1436,15 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     if not suite:
         print("train: no --suite — only the process gates run; the batch merges without "
               "its full suite (docs/process/train.md)", file=sys.stderr)
+    if suite_note:
+        print(f"train: {suite_note}", file=sys.stderr)
     if dry_run:
         print("train: dry run — no merge, no suite")
         return 0
+    if suite_note:
+        # the deliberate exception stays on the run's record, beside what it ran
+        with logfile.open("a", encoding="utf-8") as fh:
+            fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {suite_note}\n")
     phases: dict[str, float] = {}
     outcome: dict = {}
     stages: dict[str, dict] = {}
@@ -1604,8 +1615,9 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             break
         if state == "undefined":
             if check_base() == "undefined":
-                print(f"train: the suite `{suite}` does not exist on the combined tree — fix --suite; "
-                      "nothing merged", file=sys.stderr)
+                print(f"train: the suite `{suite}` does not exist on the combined tree — fix the suite "
+                      "command (merge_suite in docs/process/testing.local.json, or --suite where none "
+                      "is set); nothing merged", file=sys.stderr)
                 log("suite undefined on the combined tree and on the base — aborted without blame")
                 # an offender dropped earlier may have been the one that brought
                 # the suite in: it still owes its fix, say so (downstream refutation)
@@ -1844,6 +1856,23 @@ def _cleanup(root: Path, stamp: str) -> None:
     _git(root, "branch", "-D", f"train/{stamp}")
 
 
+def conflict_hints(root: Path, cands: list[dict]) -> list[dict]:
+    """Pairwise conflicts among the candidates that may board, as git's own merge
+    of the two tips sees them (`check_review._auto_merge`): {"branches": [a, b],
+    "paths": [...]}, `paths` None where git could not tell — never read as clean.
+    A note for `plan` only: `run` calls `plan()` and must not pay for it (#379);
+    the run itself drops the later of a conflicting pair (`build_train`)."""
+    aboard = [c["branch"] for c in cands if c["eligible"]]
+    hints: list[dict] = []
+    for i, first in enumerate(aboard):
+        for second in aboard[i + 1:]:
+            merged = _review._auto_merge(root, first, second)
+            if merged is None or merged[1]:
+                hints.append({"branches": [first, second],
+                              "paths": sorted(merged[1]) if merged is not None else None})
+    return hints
+
+
 def render_plan(p: dict) -> str:
     lines = [f"train plan — base {p['base']}: {'READY' if p['ready'] else 'hold'} ({p['why']})"]
     for c in p["candidates"]:
@@ -1855,7 +1884,38 @@ def render_plan(p: dict) -> str:
                      f"{c.get('hours_waiting', '?')} h, {c.get('deviations', 0)} DoD deviation(s){keeps}){extra}")
         for r in c["reasons"]:
             lines.append(f"      - {r}")
+    for h in p.get("conflicts") or []:
+        first, second = h["branches"]
+        if h["paths"] is None:
+            lines.append(f"  note: {first} × {second}: could not check for a conflict (git merge-tree)")
+        else:
+            lines.append(f"  note: {first} × {second} conflict ({', '.join(h['paths'])}) — merged in "
+                         f"this order, the train drops {second} unless {first} is dropped first")
     return "\n".join(lines)
+
+
+def resolve_suite(cli: str | None, merge_suite: str | None, *,
+                  differs_ok: bool) -> tuple[str | None, str | None, str | None]:
+    """(suite to run, refusal, note to log) for `run --suite`. With `merge_suite`
+    configured, the push to main looks the merge certificate up under that
+    command, so `--suite` must be it — finish.py's rule, equal after `strip` —
+    and the run uses `merge_suite` itself: the certificate's evidence is then the
+    hook's string exactly (#381). `--suite-differs-ok` lets a deliberate
+    difference through and names it for the train log. Without `merge_suite`
+    the caller's command runs as before."""
+    if not cli or not merge_suite:
+        return cli or merge_suite, None, None
+    if cli.strip() == merge_suite:
+        return merge_suite, None, None
+    if differs_ok:
+        return cli, None, (f"--suite-differs-ok: running `{cli}`, not merge_suite `{merge_suite}` — "
+                           "its merge certificate will not match the push, which runs merge_suite again")
+    return None, (f"train: --suite `{cli}` is not merge_suite `{merge_suite}` of "
+                  "docs/process/testing.local.json — the push to main looks the merge certificate up "
+                  "under merge_suite, so a certificate of this run would never match and the push "
+                  "runs the suite again. Drop --suite (it defaults to merge_suite) or make it equal; "
+                  "--suite-differs-ok only when the difference is deliberate — a passenger changes "
+                  "merge_suite itself; nothing boarded"), None
 
 
 def main(argv: list[str]) -> int:
@@ -1869,7 +1929,11 @@ def main(argv: list[str]) -> int:
     sub.choices["plan"].add_argument("--json", action="store_true")
     r = sub.choices["run"]
     r.add_argument("--suite", help="the full suite command, run once on the combined tree "
-                                   "(default: merge_suite of docs/process/testing.local.json)")
+                                   "(default: merge_suite of docs/process/testing.local.json; with "
+                                   "merge_suite set, another command is refused)")
+    r.add_argument("--suite-differs-ok", action="store_true",
+                   help="run a --suite other than merge_suite on purpose (a passenger changes "
+                        "merge_suite itself); logged in the train log")
     r.add_argument("--preflight", help="an environment check run once before the gates; red stops the "
                                        "run without blaming anybody (default: preflight of "
                                        "docs/process/testing.local.json)")
@@ -1888,6 +1952,8 @@ def main(argv: list[str]) -> int:
             print("train plan: hold — no local main/master branch yet (no commits)")
             return 0
         result = plan(root, min_candidates=a.min_candidates, max_wait_hours=a.max_wait_hours)
+        # computed here, not in plan(): `run` calls plan() and must not pay for the hint (#379)
+        result["conflicts"] = conflict_hints(root, result["candidates"])
         print(json.dumps(result, indent=2) if a.json else render_plan(result))
         return 0
     import testing_config  # noqa: PLC0415
@@ -1897,7 +1963,11 @@ def main(argv: list[str]) -> int:
     except testing_config.ConfigError as exc:
         print(f"train: {exc} — fix it first; the suite and the certificates read it", file=sys.stderr)
         return 2
-    suite = a.suite or (cfg["merge_suite"] if cfg else None)
+    suite, refusal, suite_note = resolve_suite(a.suite, cfg["merge_suite"] if cfg else None,
+                                               differs_ok=a.suite_differs_ok)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
     # the configured environment check is the train's too; an explicit one wins,
     # `--preflight ""` included (none for this run)
     # and every stack's own after it (#373) — always, `--preflight` replaces only the
@@ -1912,7 +1982,7 @@ def main(argv: list[str]) -> int:
                max_wait_hours=a.max_wait_hours, force=a.force, keep_branches=a.keep_branches,
                dry_run=a.dry_run, retry=a.retry, preflight=preflight,
                certificate_env=cfg["certificate_env"] if cfg else [],
-               merge_scope=cfg["merge_scope"] if cfg else None,
+               merge_scope=cfg["merge_scope"] if cfg else None, suite_note=suite_note,
                preflight_timeout=cfg["preflight_timeout"] if cfg else testing_config.DEFAULT_PREFLIGHT_TIMEOUT)
 
 

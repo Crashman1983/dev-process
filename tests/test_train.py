@@ -2561,3 +2561,99 @@ def test_every_stack_preflight_is_the_trains_too(render, tmp_path, tmp_path_fact
     r = _train(out, "run", "--force", "--preflight", "")
     assert r.returncode == 1 and "exit 3" in r.stderr, r.stderr
     assert not (logs / "suite.log").exists()
+
+
+# --- #381: a --suite the hook would not match; #379: conflict hints in plan -----------------
+
+def test_a_suite_the_hook_would_not_match_is_refused_before_boarding(render, tmp_path, tmp_path_factory):
+    """#381: the push checks the merge certificate against merge_suite — a train run under
+    another command certifies nothing the hook reads, and the push runs the suite again."""
+    logs = tmp_path_factory.mktemp("suite")
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    config = out / "docs/process/testing.local.json"
+    config.write_text(json.dumps({"merge_suite": f"echo run >> {logs}/suite.log"}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    head = _git(out, "rev-parse", "main").stdout
+    other = f"echo other >> {logs}/other.log"
+    r = _train(out, "run", "--force", "--suite", other)
+    assert r.returncode == 2, r.stdout + r.stderr
+    # both commands, the reason and the one legitimate case for the flag
+    assert other in r.stderr and f"echo run >> {logs}/suite.log" in r.stderr, r.stderr
+    assert "never match" in r.stderr and "runs the suite again" in r.stderr, r.stderr
+    assert "--suite-differs-ok" in r.stderr and "changes merge_suite itself" in r.stderr, r.stderr
+    # refused before boarding: no departure, no staging branch, no log, main untouched
+    assert "departing" not in r.stdout and not (logs / "other.log").exists()
+    assert not [b for b in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+                if b.startswith("train/")]
+    assert not list((out / ".git/process-train").glob("*.log"))
+    assert _git(out, "rev-parse", "main").stdout == head
+    # without merge_suite the command is the caller's, as before
+    config.write_text(json.dumps({}))
+    _git(out, "commit", "-q", "-am", "no merge_suite")
+    r = _train(out, "run", "--force", "--suite", other)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "other" in (logs / "other.log").read_text()
+
+
+def test_a_suite_equal_to_merge_suite_but_for_blanks_runs_merge_suite_itself(render, tmp_path):
+    """#381: the rule of finish.py — equal after strip — and the run uses merge_suite, so the
+    certificate's evidence is the hook's string exactly."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": "true"}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "  true ")
+    assert r.returncode == 0, r.stdout + r.stderr
+    hit = _find_merge_certificate(out, "true")
+    assert hit and hit["writer"] == "train"
+    text = sorted((out / ".git/process-train").glob("*.log"))[-1].read_text()
+    assert "$ true → exit 0" in text and "$   true " not in text, text
+
+
+def test_suite_differs_ok_runs_the_other_suite_and_logs_it(render, tmp_path, tmp_path_factory):
+    """#381: a passenger that changes merge_suite itself needs the new command — deliberate, logged."""
+    logs = tmp_path_factory.mktemp("suite")
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"merge_suite": f"echo run >> {logs}/suite.log"}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    other = f"echo other >> {logs}/other.log"
+    r = _train(out, "run", "--force", "--suite", other, "--suite-differs-ok")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "other" in (logs / "other.log").read_text() and not (logs / "suite.log").exists()
+    assert "--suite-differs-ok" in r.stderr, r.stderr
+    text = sorted((out / ".git/process-train").glob("*.log"))[-1].read_text()
+    assert "--suite-differs-ok" in text and other in text and f"echo run >> {logs}/suite.log" in text, text
+
+
+def test_plan_names_conflicts_between_candidates_that_may_board(render, tmp_path):
+    """#379: a pairwise conflict among the eligible candidates is a note in `plan` — text and JSON."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/a.py": "beta\n"}, reviewed=False)   # conflicts too, but may not board
+    _branch(out, "gamma", {"src/a.py": "conflict\n", "src/g.py": "g\n"})
+    _branch(out, "tiny", {"README.md": "tiny\n"}, tier=1, reviewed=False)
+    r = _train(out, "plan", "--json")
+    assert r.returncode == 0, r.stderr
+    p = json.loads(r.stdout)
+    assert p["conflicts"] == [{"branches": ["alpha", "gamma"], "paths": ["src/a.py"]}], p.get("conflicts")
+    text = _train(out, "plan").stdout
+    line = next((ln for ln in text.splitlines() if "conflict" in ln and "src/a.py" in ln), "")
+    assert "alpha" in line and "gamma" in line and "beta" not in line, text
+
+
+def test_run_does_not_compute_the_conflict_hints(render, tmp_path, monkeypatch, capsys):
+    """#379: the hint is the plan's output only — `run` calls plan() and must stay as fast."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "gamma", {"src/a.py": "conflict\n"})
+    train = _load_train(out)
+    calls: list[int] = []
+    monkeypatch.setattr(train, "conflict_hints", lambda root, cands: calls.append(1) or [])
+    assert train.main(["run", "--force", "--dry-run", "--suite", "true", "--root", str(out)]) == 0
+    assert calls == [] and "departing" in capsys.readouterr().out
+    assert train.main(["plan", "--json", "--root", str(out)]) == 0
+    assert calls == [1]

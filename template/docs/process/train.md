@@ -7,7 +7,7 @@ them as one batch behind **one** full suite at a good moment
 (`scripts/process/train.py`; `testing.md`, "one full run per batch").
 
     uv run scripts/process/train.py plan                       # who may board, why not, ready?
-    uv run scripts/process/train.py run --suite "<full suite>" --deploy "<deploy>" --push
+    uv run scripts/process/train.py run [--suite "<full suite>"] --deploy "<deploy>" --push
 
 **`--suite` is the full suite of every stack**: backend, frontend, whatever
 the repository ships. A stack the command leaves out is untested at the
@@ -16,6 +16,12 @@ target behind it (e.g. `make test-merge` = frontend + backend) rather than a
 single stack's runner. `--suite` defaults to `merge_suite` in
 `docs/process/testing.local.json`; that is also the command the push to main
 checks the merge certificate against (`testing.md`, "One test path").
+With `merge_suite` set, a `--suite` that differs from it after `strip`
+(the rule `finish.py` certifies by) is refused before anything boards: its
+certificate would never match, and the push would run the suite again. A
+`--suite` equal but for blanks at the ends runs `merge_suite` itself.
+`--suite-differs-ok` lets a deliberate difference run, for a passenger that
+changes `merge_suite` itself; the train log records it.
 Without either the train runs the process gates only and says so.
 
 `--preflight "<cmd>"` checks the environment — tools, logins, disk — on the
@@ -85,7 +91,11 @@ the former overlap rule kept three reviewed branches a whole train behind
 for one shared test, contract doc or registry file.
 
 `train.py plan` prints every candidate with its reasons; `--json` gives an
-orchestrator the same.
+orchestrator the same. It also names, as a note, every pair of candidates
+that may board and conflict with each other, with the paths
+(`check_review._auto_merge`; `conflicts` in `--json`, `paths` null where
+git could not tell). The rebase can start before the train drops one of
+them. `train.py run` does not compute these hints.
 
 ## Departure — a number, not a judgment
 
@@ -156,7 +166,8 @@ a day downstream, with five reviewed candidates waiting.
    red, a prefix is not blamed. A combined tree that reads undefined has the
    base checked: a base that HAS the suite makes it a passenger's removal
    (a deleted make target, a broken script) — red, and the search blames
-   whoever loses it; a base without it aborts ("fix --suite"). One rule
+   whoever loses it; a base without it aborts ("fix the suite command":
+   `merge_suite`, or `--suite` where none is configured). One rule
    decides (`decide()` in `train.py`, one table row per case), first row
    that applies: exit 0 is green; any make call of the suite failing on a
    defined target (`*** [file:N: target] Error n`, also run into output

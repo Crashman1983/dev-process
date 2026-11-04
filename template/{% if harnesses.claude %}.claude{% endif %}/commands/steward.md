@@ -93,7 +93,11 @@ tower run. Owner messages are a third wake. On each wake:
 3. `uv run scripts/process/train.py plan` — who may board and whether the
    train is ready. When it is, `train.py run --deploy "<deploy>" --push` —
    the suite defaults to `merge_suite` in `testing.local.json`; a project
-   recipe (e.g. `make train`) may wrap it. A dropped
+   recipe (e.g. `make train`) may wrap it. Pass no other `--suite`: one that
+   differs from `merge_suite` is refused, since its certificate would never
+   match the push. `--suite-differs-ok` is only for a passenger that changes
+   `merge_suite` itself. A conflict note from `plan` names a pair aboard; tell
+   the later branch's worker to rebase. A dropped
    offender is a finding for its worker, not for you to fix.
 4. Assign: the next Ready issue (DoR, `docs/process/definition-of-ready-and-done.md`)
    to a session of its own, one phase at a time, with the model the
