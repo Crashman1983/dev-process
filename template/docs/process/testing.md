@@ -241,7 +241,10 @@ code. A project supplies data; the template owns the sequence:
   `preflight_timeout`, default 600 s, for the train's too; on a push the
   process gates run first, so a host that breaks a gate is refused as that
   gate; `preflight_timeout` holds for every preflight, a stack's too — in
-  the train for all of them together, chained into one check), `lanes`, `lane_dir`,
+  the train for all of them together, chained into one check), `preboard`
+  (an argv the train runs per candidate before the combined build, seconds
+  long; `preboard_timeout`, default 120 s — `train.md`), `red_ids` ("Red
+  tests" below), `lanes`, `lane_dir`,
   `certificate_env`, and `areas` (what a change contains — "Areas" below).
   No file: the gates run, no tests.
   A malformed file refuses the push — a typo in a map must not skip tests.
