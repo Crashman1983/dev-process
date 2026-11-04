@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.86.0 — Wartung: nichts Fehlendes gilt als bestanden
+
+Acht kleine Korrekturen, alle in dieselbe Richtung: Eine Prüfung, die nicht hinsehen konnte, lässt nicht mehr durch. Eine Kopie des Repositorys mit abgeschnittener Historie wird aufgefordert, den Rest zu holen, statt durchgewinkt zu werden; ein Test, den der Runner überspringt, gilt nicht mehr als Beleg; Zahlen, die das Cockpit nicht messen kann, heißen „unbekannt“ statt null; und eine Review-Runde übernimmt nicht mehr die Befunde einer Nachbar-Phase.
+
 ## v2.85.0 — Ein Host, der einen Stack nicht kann
 
 Ein Rechner, der einen Teil der Tests eines Projekts nicht ausführen kann — etwa ein Mac ohne die Umgebung des Backends —, pusht seine Branches jetzt, ohne den Owner um das Abschalten der Tests zu bitten. Das Projekt hält in einer Prüfung, die schon auf dem Hauptbranch liegt, fest, welche Hosts diesen Teil nicht können; der Push nennt ihn dann als fällig und fährt den Rest, und nichts gilt als getestet, was nicht lief. Gemergt wird weiterhin nur, wo alles läuft. Jeder verbleibende Weg, eine Prüfung zu überspringen, muss jetzt seinen Grund nennen, und der steht im Protokoll.

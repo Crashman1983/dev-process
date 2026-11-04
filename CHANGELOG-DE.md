@@ -9,6 +9,26 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.86.0 — Wartung: nichts Fehlendes gilt als bestanden · 2026-11-04
+
+**Warum.** Acht offene Fehler, jeder eine Prüfung, die im Fehlerfall durchließ, eine Zahl, die falsch maß, oder eine Suche, die das Falsche nahm — gegen die Regel, dass eine fehlende Prüfung nie als bestanden gilt.
+
+**Was sich ändert.**
+- **Plan-Struktur und UI-Check weisen einen Klon ohne Abzweigpunkt ab** (#302). Gibt es einen Integrationsref, aber der Abzweig des Branches ist nicht bestimmbar (flacher Klon, fehlende Historie), weist das Gate ab und nennt die Abhilfe — `git fetch --unshallow` bei einem flachen Klon —, statt nichts zu prüfen. Auf dem Integrationsbranch selbst oder ohne jeden Integrationsref bleibt es ein Hinweis.
+- **testing_config lehnt `inf` und `nan` ab** für `lanes.<name>.wait` und `stacks.<name>.timeout` (#309).
+- **attest liest einen JS/TS-Test in einer übersprungenen Suite als übersprungen** (#338): `describe.skip`, `.todo`, `.skip.each`, `xdescribe`, `context.skip`. Die umschließende Suite bestimmt die Klammerschachtelung, Strings, Kommentare und Regex-Literale sind ausgeblendet; eine nicht geschlossene übersprungene Suite gilt als übersprungen.
+- **KPI-Rückfälle:** Das Fenster öffnet beim ersten Merge einer Work, wenn dieser keine eigene Train-Zeile hat; Host und Klon zählen gleich (#342).
+- **KPI-Größe:** Bei ungelesener Git-Historie stehen die Bänder auf `unknown`, nicht auf 0 (#346).
+- **Das Delta-Review-Bundle nimmt die Vorrunde derselben Work**, nie den Bericht einer Geschwister-Phase mit gleicher Issue-Nummer; ohne Vorrunde sagt es das (#345).
+- **publish_and_prune weist vor dem Posten ab**, wenn das Lesen der Kommentare kein Inventar liefert, auch bei leerer Ausgabe mit Exit 0 (#347).
+- **check_issues:** Ein Befund, der mit `origin=` neu formuliert wird — hinzugefügt oder geändert —, bleibt derselbe und schuldet kein neues `class=`/`at=` (#362).
+
+**Wirkung.** Weniger stille Durchläufe und ehrliche Zahlen; die einzige neue Ablehnung ist ein Klon, der seinen Abzweig nicht nennen kann.
+
+**Update.** Reines Update. Ein Push aus einem flachen Klon mit Integrationsref wird mit Abhilfe abgewiesen; die CI-Checkouts des Templates nutzen `fetch-depth: 0` und sind nicht betroffen.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.86.md) #302 #309 #338 #342 #345 #346 #347 #362
+
 ## v2.85.0 — Ein Host, der einen Stack nicht kann · 2026-11-03
 
 **Warum.** Downstream kann ein Mac-Agent den Backend-Stack nicht ausführen; sein Preflight fällt dort durch. Jeder Branch-Push, der den Stack wählte, wurde abgewiesen, und der einzige Weg vorbei war `PROCESS_SKIP=tests` mit dem Wort des Owners — dreimal an einem Tag (#373, Kenni #2844). Der Skip schützte nichts, weil die Merge-Suite ohnehin im Zug auf dem Gate-Host läuft, und seine Protokollzeile trug keinen Grund.

@@ -10,6 +10,26 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.86.0 — Maintenance: nothing missing counts as passed · 2026-11-04
+
+**Why.** Eight open defects, each a check that passed on a failure, a number that measured wrong, or a lookup that took the wrong thing — against the rule that a missing check never counts as passed.
+
+**What changes.**
+- **plan-structure and ui-check refuse a clone without a fork point** (#302). When an integration ref exists but the branch's fork cannot be found (a shallow clone, missing history), the gate refuses and names the remedy — `git fetch --unshallow` on a shallow clone — instead of checking nothing. On the integration branch itself, or without any integration ref, it stays a note.
+- **testing_config refuses `inf` and `nan`** for `lanes.<name>.wait` and `stacks.<name>.timeout` (#309).
+- **attest reads a JS/TS test inside a skipped suite as skipped** (#338): `describe.skip`, `.todo`, `.skip.each`, `xdescribe`, `context.skip`. The enclosing suite is found by bracket nesting, with strings, comments and regex literals blanked; an unclosed skipped suite counts as skipped.
+- **KPI escapes:** the window opens at a work's first merge when that merge has no train row of its own, so host and clone count the same (#342).
+- **KPI size:** with the git history unread, the bands print `unknown`, not 0 (#346).
+- **The delta review bundle takes the previous round of the same work**, never a sibling phase's report that shares the issue number; without one it says so (#345).
+- **publish_and_prune refuses before posting** when the comment read yields no inventory, empty output at exit 0 included (#347).
+- **check_issues:** a finding restated with `origin=` — added or changed — is the same finding and owes no new `class=`/`at=` (#362).
+
+**Effect.** Fewer silent passes and honest numbers; the only new refusal is a clone that cannot name its fork.
+
+**Update.** A pure update. A push from a shallow clone with an integration ref is refused with the remedy; CI checkouts of the template use `fetch-depth: 0` and are unaffected.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.86.md) #302 #309 #338 #342 #345 #346 #347 #362
+
 ## v2.85.0 — A host that cannot run a stack · 2026-11-03
 
 **Why.** Downstream, a Mac agent cannot run the backend stack; its preflight fails there. Every branch push that selected the stack was refused, and the only way past was `PROCESS_SKIP=tests` with the owner's word — three times in one day (#373, Kenni #2844). The skip protected nothing, since the merge suite runs on the gate host in the train anyway, and its ledger line carried no reason.
