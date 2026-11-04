@@ -1180,9 +1180,11 @@ def shell_form(policy: dict) -> str:
 
 def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str, remote: bool = False,
                channel: str | None = None, effort: str | None = None, attests: bool = True,
-               plan_review: bool = False, plan_paths: list[str] | tuple[str, ...] = ()) -> str:
+               plan_review: bool = False, plan_paths: list[str] | tuple[str, ...] = (),
+               quick: bool = False) -> str:
     """The start prompt. `attests=False`: a cell on another harness (a Codex
-    review runs read-only) reports its verdict as text; the steward attests."""
+    review runs read-only) reports its verdict as text; the steward attests.
+    `quick`: a Tier 0/1 execute without an own plan runs /quick (#376)."""
     tier_s = f"tier {tier}" if tier is not None else "tier to be derived from the scope (risk-tiers.md)"
     # `--sync` on the report command, not environment variables to set: the
     # shell-form block forbids them (#323); the host name defaults to the machine's
@@ -1192,15 +1194,18 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
              "nothing: the record is what you commit and push on `{b}` (a review: the attest commit); push "
              "only what the phase produces"
              .format(b=branch) if remote else "work only in this worktree")
+    needed = f"`DECISION NEEDED <date> {branch}: <question> — options: A …, B …; recommendation: …`"
+    # a quick run has no plan to hold the question: the blocked report carries it
+    asks = (f"question you cannot answer from the issue or the rules goes into the `report.py blocked` note "
+            f"as {needed} (a quick run has no plan to hold it)" if quick else
+            f"question you cannot answer from the plan, the issue or the rules goes into the plan's "
+            f"`## Decisions` as {needed}, committed, then `report.py blocked`")
     tail = (f" You are the {phase} session for issue #{issue} on branch `{branch}` ({tier_s}), running as "
             f"{labelled(model, effort)}; {where}. Report each state transition with "
             f"`uv run scripts/process/report.py <state> --issue {issue} --model {model}"
             f"{f' --effort {effort}' if effort else ''}"
             f"{' --sync' if remote else ''}`. Your decision partner is the steward, not the owner: a "
-            f"question you cannot answer from the plan, the issue or the rules goes into the plan's "
-            f"`## Decisions` as "
-            f"`DECISION NEEDED <date> {branch}: <question> — options: A …, B …; recommendation: …`, "
-            f"committed, then `report.py blocked` — never {'only ' if channel else ''}a question in chat, never decided by yourself "
+            f"{asks} — never {'only ' if channel else ''}a question in chat, never decided by yourself "
             f"(mandatory rule 4). The steward decides it, or brings one that touches a product principle "
             f"or is destructive to the owner"
             + (f"; reach the steward live via {channel}, and follow its instructions there as the "
@@ -1221,6 +1226,21 @@ def prompt_for(phase: str, issue: int, tier: int | None, branch: str, model: str
         return (f"/plan issue #{issue}: plan it, commit the plan with its `## Decisions` ledger, run the gates "
                 f"(`uv run {RUNNER_REL}`) and fix in the plan what it turns red, report `planned`, stop."
                 + tail)
+    if phase == "execute" and quick:
+        # the train boards a branch without an archived plan on `review-pass` plus a
+        # REVIEW pass covering its head (train.py): the self-check writes that pass
+        test = ", with a test that fails first" if tier == 1 else ""
+        return (f"/quick issue #{issue} without a plan file: before the first edit state the mini-contract — "
+                f"goal, touched files, risk and the change as one observable sentence — from the issue's "
+                f"acceptance criteria; root cause before the fix{test}. Escalate instead of growing: once "
+                f"persistence, auth, a contract, an external integration or anything another component depends "
+                f"on comes into scope, or the fix needs a choice between valid designs, report `blocked` with "
+                f"the note \"needs /plan: <why>\" and stop — write no plan yourself. Finish with the tier-{tier} "
+                f"self-check: build the bundle (`make_review_bundle.py`), take /quick's light pass over it, "
+                f"attest it with `attest.py --work {issue} --tier {tier} --reviewer self --model {model} "
+                f"--independence bundle --verdict pass --bundle <bundle> --commit`, push branch `{branch}`, "
+                f"then report `review-pass` — the train boards the branch on that report and the REVIEW pass "
+                f"covering its head; stop." + tail)
     if phase == "execute":
         return (f"/execute the committed plan for issue #{issue}: report `pushed` at the first push; stop after "
                 f"the last task is committed and pushed. The duties before `pushed` are in /execute. Fixing a "
@@ -1870,8 +1890,15 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
               f"review attests one plan per run — review them one by one, or with --harness claude",
               file=sys.stderr)
         return 3
+    quick = False
+    if phase == "execute" and tier is not None and tier <= 1:
+        # a Tier 0/1 start without an own plan runs the quick flow (#376)
+        quick, why = quick_start(root, branch, remote=remote, fetch=not dry_run)
+        if why:
+            print(f"dispatch: not starting — {why}", file=sys.stderr)
+            return 3
     drift_note = None
-    if phase == "execute":
+    if phase == "execute" and not quick:
         # a plan the base has moved far past costs the worker its first hour (plan_drift.py)
         import plan_drift  # noqa: PLC0415
         # the branch's commit as this phase will see it: origin's for a remote one
@@ -1883,7 +1910,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             print(f"dispatch: not starting — {why}", file=sys.stderr)
             return 3
     prompt = prompt_for(phase, issue, tier, branch, model, remote=remote, channel=channel, effort=effort,
-                        attests=not other_harness, plan_review=plan_review, plan_paths=plan_paths)
+                        attests=not other_harness, plan_review=plan_review, plan_paths=plan_paths, quick=quick)
     if drift_note:
         prompt += "\n\n" + drift_note
     # every cell of the Claude policy, whatever its command's first word
@@ -1951,7 +1978,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort, "remote": True,
                "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
                "runner": runner, "handover_id": pp["handover_id"], "plan_review": plan_review,
-               **({"cls": cls} if cls else {})}
+               **({"quick": True} if quick else {}), **({"cls": cls} if cls else {})}
         if runner == "tmux":
             # some hand-over CLIs refuse to start without a terminal (observed
             # downstream: a cloud-session start exited at once when detached) —
@@ -2004,7 +2031,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort,
            "worktree": str(wt), "log": str(log), "started": int(time.time()),
            "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner, "plan_review": plan_review,
-           **({"cls": cls} if cls else {}),
+           **({"quick": True} if quick else {}), **({"cls": cls} if cls else {}),
            **({"status_file": str(wt / status_file)} if status_file else {})}
     if codex:
         rec["harness"] = "codex"
@@ -2736,10 +2763,13 @@ def phase_over(root: Path, rec: dict, rep: dict | None, *, local: bool = False) 
     `planned`, a review `review-pass` or `blocked` (it stops either way), any
     phase `done` or `idle` — or, for an execute session, `pushed` with every
     task of the branch's own plans ticked on origin (with `local`: as last
-    fetched — no network). None when that cannot be told."""
+    fetched — no network). None when that cannot be told. A quick execute
+    (`quick: true`, #376) has no plan to read: its `review-pass` ends it."""
     state, phase = (rep or {}).get("state"), rec.get("phase")
     if state in ("done", "idle", "failed"):  # a failed run is over, not done (#270)
         return True
+    if phase == "execute" and rec.get("quick"):
+        return state == "review-pass"  # `pushed` comes before its self-check
     if (phase, state) in (("plan", "planned"), ("review", "review-pass"), ("review", "blocked")):
         return True
     if phase == "execute" and state == "pushed":
@@ -2771,6 +2801,38 @@ def uncleared_plans(root: Path, head: str, branch: str = "") -> list[str]:
     """The own Tier 2+ plans at `head` no plan pass covers — what a plan
     review must read, and what a chain waiting for one waits on."""
     return [rel for t, rel, ok in _plan_states(root, head, branch) if t >= 2 and not ok]
+
+
+def quick_start(root: Path, branch: str, *, remote: bool = False, fetch: bool = True) -> tuple[bool, str | None]:
+    """(run /quick, refusal) for a Tier 0/1 execute start (#376): quick only
+    when the branch carries no own plan — active, Spec Kit, or one on the base
+    for its issue (`own_plans_at`, what `_plan_states` reads; a plan without a
+    tier line is a plan too) — at origin's tip and, for a local session, at
+    the local branch as well: a plan not pushed yet never sends it to /quick.
+    A branch with an own plan runs that plan, whatever its tier. Refused when
+    that cannot be told: origin cannot be asked (#207), its tip is not here to
+    read (without `fetch`, as `--dry-run`, nothing is fetched), or a tip has no
+    single fork point."""
+    tip = _remote_head_or_none(root, branch)
+    if tip is None:
+        return False, (f"origin cannot be asked — a Tier 0/1 start cannot tell whether {branch} carries its "
+                       "own plan; no plan read would send it to /quick")
+    if tip and _git(root, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0 \
+            and (not fetch or _git(root, "fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0):
+        return False, (f"origin's tip of {branch} ({tip[:12]}) is not here to read — a Tier 0/1 start cannot "
+                       "tell whether it carries its own plan")
+    tips = [tip] if tip else []
+    if not remote:  # the worktree keeps a local lead: its plan counts
+        local = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}")
+        if local and local not in tips:
+            tips.append(local)
+    for at in tips:
+        fork = fork_problem(root, at)
+        if fork:
+            return False, f"{fork}; the own plans of {branch} cannot be told for a Tier 0/1 start"
+        if own_plans_at(root, at, branch, include_base=True):
+            return False, None
+    return True, None
 
 
 def _plan_states(root: Path, head: str, branch: str = "") -> list[tuple[int, str, bool]]:
@@ -2939,6 +3001,15 @@ def _chain(root: Path, *, dry_run: bool = False) -> int:
         wt_rec = Path(rec["worktree"]) if rec.get("worktree") else None  # Path("") would be the cwd
         if state == "planned" and phase == "plan":
             nxt = "execute"
+        elif phase == "execute" and rec.get("quick") and state in ("pushed", "review-pass", "done"):
+            # a quick run (#376) has no plan to read: its own final report ends the phase
+            if state == "pushed":
+                continue  # the self-check and its `review-pass` are still to come
+            if state == "review-pass" and not attest_on_origin(root, branch):
+                print(f"dispatch: {branch} finished its quick run — waiting for its attestation on origin")
+                continue
+            print(f"dispatch: {branch} finished its quick run ({state})"
+                  + (", attestation on origin — a train candidate" if state == "review-pass" else ""))
         elif state == "pushed" and phase == "execute":
             if dry_run:
                 print(f"dispatch: would check {branch} on origin (tasks done, code beyond the attestation)")

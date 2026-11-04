@@ -2604,3 +2604,140 @@ def test_a_status_file_travels_from_the_policy_cell_to_the_tower(render, tmp_pat
         assert row["status_minutes_ago"] == 0, row
     finally:
         _dispatch(out, "stop", "b7", "--force")
+
+
+# --- #376: a Tier 0/1 start without an own plan runs the quick flow ---
+
+
+def _start_prompt(mod, out, monkeypatch, *, tier, branch="b", issue=7):
+    """The prompt a dry-run execute start builds, or None when it refused."""
+    seen = []
+    real = mod.prompt_for
+    monkeypatch.setattr(mod, "prompt_for", lambda *a, **kw: seen.append(real(*a, **kw)) or seen[-1])
+    rc = mod.start(out, issue=issue, phase="execute", tier=tier, branch=branch, title=None, dry_run=True)
+    return (seen[-1] if seen else None), rc
+
+
+def _code_branch(out: Path) -> None:
+    """A branch `b` with code and no plan of its own."""
+    _repo(out)
+    _git(out, "checkout", "-q", "-b", "b")
+    (out / "src").mkdir(exist_ok=True)
+    (out / "src/fix.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "code")
+
+
+@pytest.mark.parametrize("tier", [0, 1])
+def test_a_tier_0_or_1_start_without_an_own_plan_sends_quick(render, tmp_path, monkeypatch, tier):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _code_branch(out)
+    _with_origin(out, tmp_path)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    prompt, rc = _start_prompt(mod, out, monkeypatch, tier=tier)
+    assert rc == 0 and prompt.startswith("/quick issue #7"), prompt
+    assert "acceptance criteria" in prompt and "root cause" in prompt
+    assert f"attest.py --work 7 --tier {tier}" in prompt and "review-pass" in prompt
+    assert "needs /plan" in prompt and "write no plan" in prompt
+    assert "## Decisions" not in prompt and "/execute" not in prompt
+
+
+@pytest.mark.parametrize("where", ["plan", "speckit", "local-only"])
+def test_a_tier_1_start_with_an_own_tier_1_plan_keeps_the_plan(render, tmp_path, monkeypatch, where):
+    """A Tier 1 plan from a plan session (the chain queues its execute at the
+    plan session's --tier 1) is the plan to execute; a plan not pushed yet too."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    if where == "speckit":
+        _repo(out)
+        _git(out, "checkout", "-q", "-b", "b")
+        (out / "specs/7-fix").mkdir(parents=True)
+        (out / "specs/7-fix/plan.md").write_text("# fix\n\ntier: 1\nissue: #7\n")
+        (out / "specs/7-fix/tasks.md").write_text("- [ ] T1 fix\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "spec plan")
+        _with_origin(out, tmp_path)
+    elif where == "local-only":
+        _code_branch(out)
+        _with_origin(out, tmp_path)  # origin holds b without the plan
+        plans = out / ".process-work/plans"
+        plans.mkdir(parents=True, exist_ok=True)
+        (plans / "2026-10-09-fix.md").write_text("# fix\n\ntier: 1\nissue: #7\n\n## Decisions\n")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", "plan, not pushed")
+    else:
+        _planned_branch(out, 1, plan_pass=False)
+        _with_origin(out, tmp_path)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    prompt, rc = _start_prompt(mod, out, monkeypatch, tier=1)
+    assert rc == 0 and prompt.startswith("/execute the committed plan for issue #7"), prompt
+
+
+def test_a_tier_1_start_over_a_tier_2_plan_runs_that_plan(render, tmp_path, monkeypatch):
+    """The branch's plan decides, whatever --tier says (a plan session started at
+    --tier 1 that wrote a Tier 2 plan): never /quick over a plan."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _planned_branch(out, 2, plan_pass=True)
+    _with_origin(out, tmp_path)
+    _git(out, "checkout", "-q", "main")
+    mod = _load_dispatch(out)
+    prompt, rc = _start_prompt(mod, out, monkeypatch, tier=1)
+    assert rc == 0 and prompt.startswith("/execute the committed plan"), prompt
+
+
+def test_a_tier_1_start_refuses_when_origin_cannot_be_asked(render, tmp_path, monkeypatch, capsys):
+    """An unreachable origin is no "no plan": it may hold the branch's plan."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _code_branch(out)
+    _git(out, "checkout", "-q", "main")
+    _git(out, "remote", "add", "origin", str(tmp_path / "gone.git"))
+    mod = _load_dispatch(out)
+    prompt, rc = _start_prompt(mod, out, monkeypatch, tier=1)
+    err = capsys.readouterr().err
+    assert rc == 3 and prompt is None and "origin" in err and "plan" in err, err
+
+
+def test_a_quick_start_records_quick(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _fake_command(out, "sleep 30\n")
+    r = _dispatch(out, "start", "--issue", "7", "--phase", "execute", "--tier", "1", "--branch", "b7")
+    assert r.returncode == 0, r.stderr
+    try:
+        rec = next(x for x in _load_dispatch(out).records(out) if x["branch"] == "b7")
+        assert rec.get("quick") is True, rec
+    finally:
+        _dispatch(out, "stop", "b7", "--force")
+    r = _dispatch(out, "start", "--issue", "8", "--phase", "execute", "--tier", "2", "--branch", "b8")
+    assert r.returncode == 0, r.stderr
+    try:
+        rec = next(x for x in _load_dispatch(out).records(out) if x["branch"] == "b8")
+        assert not rec.get("quick"), rec
+    finally:
+        _dispatch(out, "stop", "b8", "--force")
+
+
+def test_a_quick_runs_review_pass_ends_its_phase_and_frees_the_session(render, tmp_path, monkeypatch, capsys):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    mod = _load_dispatch(out)
+    quick = {"branch": "q", "issue": 7, "tier": 1, "phase": "execute", "quick": True, "started": 1}
+    monkeypatch.setattr(mod, "work_complete_on_origin", lambda *a, **kw: None)  # no plan to read
+    assert mod.phase_over(out, quick, {"state": "review-pass"}) is True
+    assert mod.phase_over(out, quick, {"state": "pushed"}) is False  # the self-check is still to come
+    assert mod.phase_over(out, {**quick, "quick": False}, {"state": "review-pass"}) is False
+    recs = [quick, {**quick, "branch": "p", "issue": 8}]
+    reports = [{"worker": "q", "state": "review-pass", "epoch": 2}, {"worker": "p", "state": "pushed", "epoch": 2}]
+    stopped = []
+    monkeypatch.setattr(mod, "records", lambda root: recs)
+    monkeypatch.setattr(mod, "_load_record", lambda root, b: (None, next(r for r in recs if r["branch"] == b)))
+    monkeypatch.setattr(mod._report, "read_reports", lambda root, **_kw: reports)
+    monkeypatch.setattr(mod, "new_code_on_origin", lambda root, b, **_kw: True)
+    monkeypatch.setattr(mod, "attest_on_origin", lambda root, b: True)
+    monkeypatch.setattr(mod, "stop", lambda root, b, **kw: stopped.append(b) or 0)
+    monkeypatch.setattr(mod, "start", lambda root, **_kw: 0)
+    mod.chain(out)
+    err = capsys.readouterr()
+    assert stopped == ["q"] and mod.queue_load(out) == [], err
+    assert "cannot read its plan" not in err.err + err.out
