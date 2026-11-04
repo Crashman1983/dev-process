@@ -978,6 +978,133 @@ def test_doubling_merges_and_passes_does_not_quadruple_the_git_work(tmp_path):
     assert large < 3 * small, (small, large)
 
 
+# --- v2.91 (#398): a record text is read once per blob ---------------------------
+
+def _cat_file_reads(mod, monkeypatch) -> list[str]:
+    """Every object `mod` asks `git cat-file` for: one per `cat-file blob`, one per
+    line fed to `cat-file --batch`."""
+    asked: list[str] = []
+    real = mod.subprocess.run
+
+    def run(cmd, *a, **k):
+        if cmd and cmd[0] == "git" and "cat-file" in cmd:
+            if "--batch" in cmd:
+                asked.extend((k.get("input") or b"").decode().split())
+            else:
+                asked.append(cmd[-1])
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(mod.subprocess, "run", run)
+    return asked
+
+
+def _records_repo(tmp_path, files: dict[str, str | bytes]) -> Path:
+    root = tmp_path / "r"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(text, bytes):
+            (root / rel).write_bytes(text)
+        else:
+            (root / rel).write_text(text, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "records")
+    return root
+
+
+def test_thirty_branches_with_the_same_plans_read_each_blob_once(tmp_path, monkeypatch):
+    # M0: every branch and every pass read all plans anew (`ls-tree` plus one
+    # `cat-file` per plan) — 36 % of a 44 s `train plan`
+    root = _records_repo(tmp_path, {f".process-work/plans/archive/2026-01-01-p{i}.md":
+                                    f"# p{i}\n\ntier: 2\nissue: #{i + 1}\n" for i in range(50)})
+    tree = _git(root, "rev-parse", "HEAD^{tree}")
+    tips = [_git(root, "commit-tree", tree, "-p", "HEAD", "-m", f"branch {i}") for i in range(30)]
+    mod = _mod()
+    asked = _cat_file_reads(mod, monkeypatch)
+    known = [mod._known_work(root, ref=tip) for tip in tips]
+    texts = [mod.record_texts(root, mod.PLAN_KINDS + ("plan-archive",), ref=tip) for tip in tips]
+    assert all(k == known[0] for k in known) and {"1", "50", "2026-01-01-p49"} <= known[0]
+    assert len(texts[0]) == 50 and all(t == texts[0] for t in texts)
+    assert len(set(asked)) == 50 and len(asked) == 50, (len(set(asked)), len(asked))
+
+
+def test_the_memo_answers_as_a_fresh_read(tmp_path):
+    # the path belongs to the key: one blob at two Spec Kit paths, under an
+    # active and an archived name, is four plans with four stems
+    plan = "# Größe\n\ntier: 2\nissue: #7\n\nÄnderung: ü\n"
+    root = _records_repo(tmp_path, {"specs/001-alpha/plan.md": plan, "specs/002-beta/plan.md": plan,
+                                    ".process-work/plans/2026-01-01-größe.md": plan,
+                                    ".process-work/plans/archive/2026-01-02-umbenannt.md": plan,
+                                    ".process-work/journal/2026-01-01.md": "REVIEW …\n"})
+    mod = _mod()
+    fresh = mod.record_texts(root)
+    assert mod.record_texts(root, ref="HEAD") == fresh
+    assert mod.record_texts(root, ref="HEAD") == fresh  # from the memo
+    known = mod._known_work(root, ref="HEAD")
+    assert {"001-alpha", "002-beta", "2026-01-01-größe", "2026-01-02-umbenannt", "7"} <= known, known
+    assert mod._known_work(root, ref="HEAD") == known == mod._known_work(root)
+    mod.clear_memo()
+    assert mod._known_work(root, ref="HEAD") == known
+
+
+def test_a_blob_is_cut_at_its_exact_size(tmp_path):
+    files = {".process-work/plans/2026-01-01-a.md": f"{'0' * 40} blob 12\nline\n\n\nno newline at the end",
+             ".process-work/plans/2026-01-01-b.md": b"tier: 2\n\xff\xfe caf\xc3\xa9\r\n\n",
+             ".process-work/plans/2026-01-01-c.md": "\n"}
+    root = _records_repo(tmp_path, files)
+    mod = _mod()
+    # the bytes as committed (a worktree read would turn `\r\n` into `\n`)
+    assert mod.record_texts(root, ref="HEAD") == [
+        (rel, (text if isinstance(text, bytes) else text.encode()).decode("utf-8", errors="replace"))
+        for rel, text in files.items()]
+
+
+def test_a_missing_or_non_blob_record_makes_the_whole_reading_unknown(tmp_path):
+    # one path left out would hide a record from the gate: fail open
+    root = _records_repo(tmp_path, {".process-work/plans/2026-01-01-a.md": "# a\n",
+                                    ".process-work/plans/2026-01-01-b.md": "# b\n"})
+    base = _git(root, "rev-parse", "HEAD")
+    _git(root, "update-index", "--add", "--cacheinfo", f"160000,{base},.process-work/plans/2026-01-02-sub.md")
+    _git(root, "commit", "-q", "-m", "a gitlink where a plan would be")
+    gitlink = _git(root, "rev-parse", "HEAD")
+    _git(root, "reset", "-q", "--hard", base)
+    lost = _commit(root, ".process-work/plans/2026-01-01-b.md", "# b, lost\n", "b changes")
+    blob = _git(root, "rev-parse", f"{lost}:.process-work/plans/2026-01-01-b.md")
+    (root / ".git/objects" / blob[:2] / blob[2:]).unlink()
+    mod = _mod()
+    assert [rel for rel, _t in mod.record_texts(root, ref=base)] == [
+        ".process-work/plans/2026-01-01-a.md", ".process-work/plans/2026-01-01-b.md"]
+    assert mod.record_texts(root, ref=gitlink) is None
+    assert mod.record_texts(root, ref=lost) is None
+
+
+def test_the_worktree_is_never_memoized(tmp_path):
+    rel = ".process-work/plans/2026-01-01-a.md"
+    root = _records_repo(tmp_path, {rel: "# a\n"})
+    mod = _mod()
+    assert dict(mod.record_texts(root))[rel] == dict(mod.record_texts(root, ref="HEAD"))[rel] == "# a\n"
+    (root / rel).write_text("# a, edited\n")
+    assert dict(mod.record_texts(root))[rel] == "# a, edited\n"
+
+
+def test_clear_memo_forgets_the_plans_at_a_ref(tmp_path, monkeypatch):
+    # `_plans_at_ref` kept its own cache by ref NAME: a name moves, and
+    # `clear_memo()` never reached it
+    rel = ".process-work/plans/2026-01-01-a.md"
+    root = _records_repo(tmp_path, {rel: "# a\n"})
+    mod = _mod()
+    asked = _cat_file_reads(mod, monkeypatch)
+    first = mod._plans_at_ref(str(root), "HEAD")
+    assert mod._plans_at_ref(str(root), "HEAD") == first and len(asked) == 1
+    mod.clear_memo()
+    assert mod._plans_at_ref(str(root), "HEAD") == first and len(asked) == 2
+    _commit(root, rel, "# a, moved on\n", "the ref moves")
+    assert dict(mod._plans_at_ref(str(root), "HEAD"))[rel] == "# a, moved on\n"
+
+
 
 
 
