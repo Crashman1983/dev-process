@@ -151,12 +151,54 @@ def _areas(raw) -> dict[str, list[str]]:
     return out
 
 
+RED_IDS_KEYS = ("lastfailed", "rootdir", "stage")
+
+
+def _inside(value, where: str) -> str:
+    """A relative path inside the repository, `/`-separated, without `..`."""
+    if not (isinstance(value, str) and value) or Path(value).is_absolute() \
+            or value.startswith(("/", "\\")) or ".." in Path(value.replace("\\", "/")).parts:
+        raise ConfigError(f"{where} must be a relative path inside the repository (no `..`)")
+    return Path(value).as_posix()
+
+
+def _red_ids(raw) -> list[dict]:
+    """Where the train reads the red tests of a suite-red run — pytest's own
+    `lastfailed` files, read only (`docs/process/train.md`). A malformed entry is a
+    ConfigError like any other key; reading the data later costs a field, never the run."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ConfigError("red_ids must be a list of {lastfailed, rootdir, stage} entries")
+    out: list[dict] = []
+    seen: dict[str, int] = {}
+    for i, entry in enumerate(raw):
+        here = f"red_ids[{i}]"
+        if not isinstance(entry, dict):
+            raise ConfigError(f"{here} must be an object {{lastfailed, rootdir, stage}}")
+        unknown = sorted(set(entry) - set(RED_IDS_KEYS))
+        if unknown:
+            raise ConfigError(f"{here}: unknown key(s) {', '.join(unknown)} (known: {', '.join(RED_IDS_KEYS)})")
+        lastfailed = _inside(entry.get("lastfailed"), f"{here}.lastfailed")
+        rootdir = _inside(entry.get("rootdir", "."), f"{here}.rootdir")
+        stage = entry.get("stage")
+        if stage is not None and not (isinstance(stage, str) and stage.strip()):
+            raise ConfigError(f"{here}.stage must be a stage name")
+        if lastfailed in seen:
+            # two stages writing one file: it would name the tests of the other stage
+            raise ConfigError(f"{here}.lastfailed names the file of red_ids[{seen[lastfailed]}] "
+                              "— each stage needs its own")
+        seen[lastfailed] = i
+        out.append({"lastfailed": lastfailed, "rootdir": rootdir, "stage": stage})
+    return out
+
+
 def parse(data) -> dict:
     """The validated configuration from the decoded JSON."""
     if not isinstance(data, dict):
         raise ConfigError("the configuration must be a JSON object")
     known = {"lane_dir", "lanes", "certificate_env", "merge_suite", "merge_scope", "preflight",
-             "preflight_timeout", "stacks", "areas"}
+             "preflight_timeout", "stacks", "areas", "red_ids"}
     unknown = sorted(set(data) - known)
     if unknown:
         raise ConfigError(f"unknown key(s): {', '.join(unknown)} (known: {', '.join(sorted(known))})")
@@ -189,6 +231,8 @@ def parse(data) -> dict:
         "preflight_timeout": float(preflight_timeout),
         "stacks": [_stack(name, raw) for name, raw in stacks_raw.items()],
         "areas": _areas(data.get("areas", {})),
+        # pytest's `lastfailed` files the train reads after a suite-red run (v2.88, #378)
+        "red_ids": _red_ids(data.get("red_ids")),
     }
 
 

@@ -436,3 +436,38 @@ def test_a_non_finite_json_literal_is_a_broken_configuration(tmp_path, data, say
     _write(tmp_path, tc.CONFIG, json.dumps(data("<v>")).replace('"<v>"', literal))
     with pytest.raises(tc.ConfigError, match=says):
         tc.load(tmp_path)
+
+
+# --- v2.88 (#378): red_ids — where the train reads pytest's own lastfailed ------------
+
+def test_red_ids_parse_with_defaults():
+    tc = _testing_config()
+    assert tc.parse({})["red_ids"] == []
+    got = tc.parse({"red_ids": [
+        {"lastfailed": ".pytest_cache/v/cache/lastfailed"},
+        {"lastfailed": "backend/.pytest_cache/v/cache/lastfailed", "rootdir": "backend/",
+         "stage": "test-backend"}]})["red_ids"]
+    assert got == [{"lastfailed": ".pytest_cache/v/cache/lastfailed", "rootdir": ".", "stage": None},
+                   {"lastfailed": "backend/.pytest_cache/v/cache/lastfailed", "rootdir": "backend",
+                    "stage": "test-backend"}]
+
+
+@pytest.mark.parametrize("bad, says", [
+    ({"red_ids": {"lastfailed": "x"}}, r"red_ids must be a list"),
+    ({"red_ids": ["x"]}, r"red_ids\[0\] must be an object"),
+    ({"red_ids": [{"rootdir": "."}]}, r"red_ids\[0\]\.lastfailed"),
+    ({"red_ids": [{"lastfailed": ""}]}, r"red_ids\[0\]\.lastfailed"),
+    ({"red_ids": [{"lastfailed": "/abs/lastfailed"}]}, r"red_ids\[0\]\.lastfailed"),
+    ({"red_ids": [{"lastfailed": "../out/lastfailed"}]}, r"red_ids\[0\]\.lastfailed"),
+    ({"red_ids": [{"lastfailed": "x", "rootdir": "a/../.."}]}, r"red_ids\[0\]\.rootdir"),
+    ({"red_ids": [{"lastfailed": "x", "rootdir": 3}]}, r"red_ids\[0\]\.rootdir"),
+    ({"red_ids": [{"lastfailed": "x", "stage": ""}]}, r"red_ids\[0\]\.stage"),
+    ({"red_ids": [{"lastfailed": "x", "rootDir": "b"}]}, r"red_ids\[0\]: unknown key"),
+    ({"red_ids": [{"lastfailed": "c/lastfailed"}, {"lastfailed": "./c//lastfailed", "stage": "b"}]},
+     r"red_ids\[1\]\.lastfailed .*red_ids\[0\]")])
+def test_a_malformed_red_ids_is_a_broken_configuration(bad, says):
+    # DECISION 2026-11-04: a typo in the configuration is loud; a shared lastfailed
+    # file would name the tests of the other stage
+    tc = _testing_config()
+    with pytest.raises(tc.ConfigError, match=says):
+        tc.parse(bad)
