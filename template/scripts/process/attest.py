@@ -15,7 +15,7 @@ reviewed change exactly; the diff digest older lines carry is no longer
 written. What this cannot do — and does not claim — is prove the review
 happened; it proves the line names a range that exists.
 
-The round is counted, not claimed: round = 1 + the blocking REVIEW lines
+The round is counted, not claimed: round = the highest blocking REVIEW round + 1 (gaps included, #397)
 already recorded for this work. A re-check after a pass, a rebase or a
 "short look" keeps the round — only a block starts a new one (observed
 downstream: rounds numbered 6 with one line in the journal, re-checks counted
