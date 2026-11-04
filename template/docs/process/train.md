@@ -229,6 +229,39 @@ bisect, push, deploy — in the log and as one line of
 `<git-common-dir>/process-train/phases.jsonl`; `process_kpis.py train-phases` reads the
 median and maximum per phase, so a slow merge names its slow phase.
 
+**The red path, measured (#378).** The line also carries `rounds`, one entry
+per round: the first, and one more after each drop. Each entry has:
+- `red_path`, how the round ended: `green`, `flaky`, `gate-flaky`,
+  `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`,
+  `environment`, `push-rejected` or `aborted`.
+- `runs`, every run of the round by kind (`first`, `retry_gates`,
+  `retry_failed`, `retry_full`, `base`, `probe`), each with its count, its
+  build-and-gates seconds and its suite seconds kept apart.
+
+With `red_ids` configured (`testing.md`, "Red tests"), the entry also holds
+`red_tests`, read from pytest's own `lastfailed` after a suite-red first
+run, before anything else runs. It lists the red stages and, per red test,
+whether it already existed on the base. `true` means the test file is
+unchanged between the base and the board. `false` means the file, or the
+test function, is new. `unknown` covers the rest.
+
+`train-phases` sorts the rounds into three classes, flake rounds apart from
+offender rounds:
+- **fit:** every red stage named red tests, and all of them existed on the
+  base;
+- **unfit:** a red test is new;
+- **undetermined:** anything else.
+
+Only an offender round can be fit for a subset base and bisect. A flake
+round needs no more than readable ids. The suite time saved this way is an
+upper bound, because the cost of a subset run (start, collection) is not
+measured yet. Reading the decision needs more than the default window
+(`--runs`).
+
+The train decides nothing from these fields. They are the data the subset
+run of #378 waits for, after four plan rounds showed its saving unproven
+(`docs/analysis/2026-11-04-v2.88.md`).
+
 ## Who pushes to main — the merge route
 
 A push to main is the merge, and the pre-push guard
