@@ -10,6 +10,36 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.90.0 — The train keeps what it checked · 2026-11-04
+
+**Why.** Downstream, on one day:
+- A train blamed a passenger that had nothing to do with the red test. Another passenger's fix arrived mid-run, the bisection probes already had it and the red tree did not (#391).
+- A hold set during a run did not reach the push (#335), and the tower did not show a hold that the train saw (#336).
+- `dispatch say` left its text unsent in the input field (#390).
+- A remote quick run could not attest on a branch not named for its issue (#384).
+- attest miscounted rounds after a replaced block round, so a pass tied with a block and a merge push stayed held (#397).
+
+**What changes.**
+- **One snapshot at boarding.** The train reads every branch's SHA and the base's in one `for-each-ref`. Everything it reads for content uses those commits: diffs, plans, review coverage and the template-update check. So does every build of the run, the probes and the rebuild after a drop included. A branch's identity (its issues, its own plans, `Closes`/`Refs`) is still read by name.
+  - A commit that arrives during the run rides a later train.
+  - A branch that moved since boarding is kept: no `done`, no cleanup. Origin's copy is deleted only with a lease on the boarded SHA.
+  - After a push, `done` names the issue again; before, `log base..b` came back empty.
+- **Holds before the push.** The train reads the reports again before it pushes. A passenger whose worker reported `blocked` during the run, even if a release followed, leaves the batch, together with any passenger stacked on it. The rest is rebuilt and judged; the phase line names them in `held`. The train compares report sets, never another host's clock.
+- **One owner of the hold rule.** `tower.train_holds` serves both the train and the tower. The new tower finding `train-hold` shows a hold that a later report (`idle`, `planned`) hides.
+- **`dispatch say`** reads the current Claude Code input line: `❯` with a no-break space, as well as `>`. It never takes a numbered dialog option for the input line. It types only into a readable, empty line, otherwise exit 6 or 7 with nothing typed. If the line turns unreadable after typing, it clears the text before Enter.
+- **A remote quick start** needs a branch named `<issue>-…`, because the remote session attests its issue by the branch name.
+- **attest** counts the next round past the highest block round, gaps included.
+
+**Effect.** No wrong blame for a moved passenger, no merge over a fresh hold, no half-typed message in a worker's input.
+
+**Changed sections.**
+- `train.md` (The merge train — one full suite per batch; Boarding — computed, never claimed)
+- `tower.md` (the findings list; the `say` paragraph)
+
+**Update.** A pure update. Remote quick runs need a branch name `<issue>-…`. A local `say_prompt` override written for the `❯` input line can go.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.90.md) #391 #335 #336 #390 #384 #397
+
 ## v2.89.0 — A fast check per candidate before the train boards · 2026-11-04
 
 **Why.** Downstream, a mixed train ran its 50-minute merge suite, went red on a test that takes seconds (an anchor budget), and then paid a retry and a full restart. Nothing checked a candidate cheaply before it boarded (#386).

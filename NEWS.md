@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.90.0 — The train keeps what it checked
+
+The merge train now remembers exactly which commits it checked when it started, and merges those. A fix that a worker pushes during the run waits for the next train, instead of confusing the search for the branch that broke the tests and getting the wrong branch blamed. If a worker stops their branch while the train is running, the train leaves it out before it pushes. The cockpit now also shows a branch that is held back even when a later note covers that up. Messages to running sessions are only typed when the input field can be read and is empty.
+
 ## v2.89.0 — A fast check per candidate before the train boards
 
 A project can now name a check that takes seconds, and the merge train runs it on each waiting branch before the long combined test run. A branch that fails it twice stays behind with a note to its worker, instead of turning a fifty-minute run red. If the check fails on the main branch itself, or the machine cannot run it, nobody is held back. The cockpit counts how often the check ran, held a branch back or could not run.

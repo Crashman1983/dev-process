@@ -9,6 +9,36 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.90.0 — Der Zug bleibt bei dem, was er geprüft hat · 2026-11-04
+
+**Warum.** Downstream an einem Tag:
+- Ein Zug beschuldigte einen Passagier, der mit dem roten Test nichts zu tun hatte. Der Fix eines anderen Passagiers kam während des Laufs, die Bisect-Proben enthielten ihn schon, der rote Baum nicht (#391).
+- Ein Hold, der im Lauf gesetzt wurde, kam vor dem Push nicht mehr an (#335), und der Tower zeigte einen Hold nicht, den der Zug sah (#336).
+- `dispatch say` ließ seinen Text unabgeschickt im Eingabefeld stehen (#390).
+- Ein entfernter Quick-Lauf konnte auf einem Branch, der nicht nach seiner Issue heißt, nicht attestieren (#384).
+- attest zählte die Runden nach einer ersetzten Block-Runde falsch. Ein Pass stand gleichauf mit einem Block, und ein Merge-Push blieb gesperrt (#397).
+
+**Was sich ändert.**
+- **Ein Schnappschuss beim Boarden.** Der Zug liest die SHAs aller Branches und der Basis mit einem `for-each-ref`. Alles, was er als Inhalt liest, nutzt diese Commits: Diffs, Pläne, Review-Abdeckung und die Prüfung auf ein Template-Update. Ebenso jeder Build des Laufs, auch die Proben und der Neubau nach einem Drop. Die Identität eines Branches (Issues, eigene Pläne, `Closes`/`Refs`) liest er weiter nach Namen.
+  - Ein Commit, der während des Laufs kommt, fährt mit einem späteren Zug.
+  - Ein Branch, der sich seit dem Boarden bewegt hat, bleibt stehen: kein `done`, kein Aufräumen. Die Kopie auf origin wird nur mit einem Lease auf den geboardeten SHA gelöscht.
+  - Nach einem Push nennt `done` die Issue wieder; vorher kam `log base..b` leer zurück.
+- **Holds vor dem Push.** Der Zug liest die Reports vor dem Push neu. Ein Passagier, dessen Worker im Lauf `blocked` gemeldet hat, steigt aus, auch wenn danach eine Freigabe folgt, und ein darauf gestapelter Passagier mit ihm. Der Rest wird neu gebaut und geurteilt; die Phasenzeile nennt die Ausgestiegenen in `held`. Der Zug vergleicht Mengen von Reports, nie die Uhr eines anderen Hosts.
+- **Ein Besitzer der Hold-Regel.** `tower.train_holds` gilt für den Zug und den Tower. Der neue Tower-Befund `train-hold` zeigt einen Hold, den ein späterer Report (`idle`, `planned`) verdeckt.
+- **`dispatch say`** liest die aktuelle Eingabezeile von Claude Code: `❯` mit geschütztem Leerzeichen, und `>` wie bisher. Eine nummerierte Dialog-Option hält es nie für die Eingabezeile. Es tippt nur in eine lesbare, leere Zeile, sonst Exit 6 oder 7, und nichts ist getippt. Wird die Zeile nach dem Tippen unlesbar, löscht es den Text vor Enter.
+- **Ein entfernter Quick-Start** braucht einen Branch namens `<issue>-…`, denn die entfernte Sitzung attestiert ihre Issue über den Branch-Namen.
+- **attest** zählt die nächste Runde nach der höchsten Block-Runde, auch über Lücken.
+
+**Wirkung.** Keine falsche Beschuldigung nach einem bewegten Passagier, kein Merge über einen frischen Hold, keine halb getippte Nachricht im Eingabefeld eines Workers.
+
+**Geänderte Abschnitte.**
+- `train.md` (The merge train — one full suite per batch; Boarding — computed, never claimed)
+- `tower.md` (die Befundliste; der Abschnitt zu `say`)
+
+**Update.** Reines Update. Entfernte Quick-Läufe brauchen einen Branch-Namen `<issue>-…`. Ein lokales `say_prompt` für die `❯`-Eingabezeile kann weg.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.90.md) #391 #335 #336 #390 #384 #397
+
 ## v2.89.0 — Eine schnelle Prüfung je Kandidat, bevor der Zug boardet · 2026-11-04
 
 **Warum.** Downstream lief ein gemischter Zug 50 Minuten durch seine Merge-Suite und wurde an einem Test rot, der Sekunden braucht (ein Anker-Budget). Danach kamen Retry und voller Neustart. Nichts prüfte einen Kandidaten billig, bevor er einstieg (#386).

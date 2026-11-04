@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.90.0 — Der Zug bleibt bei dem, was er geprüft hat
+
+Der Merge-Zug merkt sich jetzt genau, welche Commits er beim Start geprüft hat, und merged diese. Ein Fix, den ein Worker während des Laufs pusht, wartet auf den nächsten Zug. Er verwirrt nicht mehr die Suche nach dem Branch, der die Tests gebrochen hat, sodass kein falscher Branch beschuldigt wird. Hält ein Worker seinen Branch an, während der Zug läuft, lässt der Zug ihn vor dem Push weg. Das Cockpit zeigt auch einen zurückgehaltenen Branch, wenn eine spätere Notiz das verdeckt. Nachrichten an laufende Sitzungen werden nur getippt, wenn das Eingabefeld lesbar und leer ist.
+
 ## v2.89.0 — Eine schnelle Prüfung je Kandidat, bevor der Zug boardet
 
 Ein Projekt kann jetzt eine Prüfung nennen, die Sekunden dauert. Der Merge-Zug führt sie an jedem wartenden Branch aus, bevor der lange gemeinsame Testlauf beginnt. Ein Branch, der zweimal durchfällt, bleibt mit einer Notiz an seinen Worker zurück, statt einen Lauf von fünfzig Minuten rot zu machen. Scheitert die Prüfung am Hauptbranch selbst oder kann der Rechner sie nicht ausführen, wird niemand zurückgehalten. Das Cockpit zählt, wie oft die Prüfung lief, einen Branch zurückhielt oder nicht laufen konnte.
