@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.88.0 — The train's red path, measured
+
+When the merge train goes red, it now records what it spent on finding out why: each retry, base check and search step, with its time. For projects that name their pytest results, it also records which tests were red and whether they already existed before the change. The cockpit turns that into a number: in how many red trains running only the red tests could have saved time. The train itself runs exactly as before. The idea of running only the red tests waits for that number, because four planning rounds could not show that it would save anything.
+
 ## v2.87.0 — Less idle time and double work in the train
 
 Four changes against waiting and duplicate runs. A small fix without a plan of its own now goes through the short flow instead of the full one, and still reaches the merge train. A session stuck at a permission question is reported within ten minutes instead of waiting for hours. A branch that no longer fits onto the main branch is told so before its last review, not after it in the train. And a train started with its own test command no longer runs the tests twice.

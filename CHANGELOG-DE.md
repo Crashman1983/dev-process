@@ -9,6 +9,27 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.88.0 — Der rote Pfad des Zuges, gemessen · 2026-11-04
+
+**Warum.** #378 schlug vor, nach einem roten Zug nur die roten Tests zu wiederholen: im Retry, auf der Basis und in jeder Bisect-Probe. Vier Plan-Runden haben diesen Teillauf blockiert. Seine Sicherheit wurde mit jeder Runde schwieriger, und die letzte Runde fand die Ersparnis unbelegt. Führt der Täter den roten Test selbst ein, fehlt dieser auf der Basis, und der Teillauf fällt auf die volle Suite zurück. Wie oft das so ist, hatte niemand gemessen. Der Owner hat entschieden: erst messen.
+
+**Was sich ändert.**
+- **Jeder Lauf des roten Pfads wird gezählt, je Runde.** Die `phases.jsonl`-Zeile des Zuges trägt `rounds`, mit einem Eintrag für die erste Runde und einem je Runde nach einem Drop. Jeder Eintrag hat `red_path`, wie die Runde endete: `green`, `flaky`, `gate-flaky`, `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`, `environment`, `push-rejected` oder `aborted`. Dazu kommen `runs` je Art (`first`, `retry_gates`, `retry_failed`, `retry_full`, `base`, `probe`) mit Anzahl, Build- und Gates-Sekunden und, getrennt davon, Suite-Sekunden.
+- **Rote Tests, nur lesend, aus pytests eigenem Protokoll.** Mit `red_ids` in `testing.local.json` liest der Zug nach einem in der Suite roten ersten Lauf die `lastfailed`-Datei jeder pytest-Stage. Jeder Eintrag nennt den Pfad der `lastfailed`-Datei, das pytest-`rootdir` und die Stage. Der Zug hält die roten Stages fest und je rotem Test, ob es ihn auf der Basis schon gab:
+  - `true`: die Testdatei ist auf Basis und Bord gleich;
+  - `false`: Datei oder Testfunktion sind neu;
+  - `unknown`: alles andere.
+
+  Ein Fehler beim Lesen kostet ein Feld, nie den Lauf.
+- **`train-phases` druckt die Entscheidungszahl.** Je Art druckt es die Zahl der Läufe und den Median der Suite-Sekunden. Rote Runden sortiert es in fähig, nicht fähig oder unbestimmt, getrennt nach Flake- und Täter-Runden. Nur eine Täter-Runde kann für Basis und Bisect im Teillauf fähig sein. Die Ersparnis ist eine Obergrenze, denn die Kosten eines Teillaufs sind noch nicht gemessen.
+- `train.md` („The red path, measured“) und `testing.md` („Red tests“) beschreiben beides.
+
+**Wirkung.** Der Zug läuft wie bisher. Nach einigen Wochen Zügen sagen die Zahlen, ob ein Teillauf Suite-Zeit sparen würde und in wie vielen roten Runden.
+
+**Update.** Reines Update. Wer die Zahlen beitragen will, setzt `red_ids` für die pytest-Stages. Die Merge-Suite muss den pytest-Cache anlassen (kein `-p no:cacheprovider`), und zwei pytest-Stages mit gemeinsamem rootdir brauchen je ein eigenes `cache_dir`.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.88.md) #378
+
 ## v2.87.0 — Weniger Leerlauf und Doppelarbeit im Zug · 2026-11-04
 
 **Warum.** Der Steward downstream hat eine Woche Züge ausgewertet (28.10. bis 03.11.): 42 Läufe, 39 % der Zugminuten rot. Vier Ursachen hatten einen Hebel im Template. Ein Tier-1-Start lief durch den vollen Execute-Ablauf. Eine Sitzung wartete bis zu 155 Minuten an einem Freigabe-Prompt, ohne dass es jemand erfuhr. Ein Konflikt mit main fiel erst im Zug auf, nach dem letzten Review. Und ein Zug mit eigenem `--suite` ließ die Suite ein zweites Mal laufen, weil der Hook diesen Lauf nicht anerkannte (#376 #377 #379 #381).
