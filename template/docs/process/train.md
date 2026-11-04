@@ -36,6 +36,26 @@ passenger's: the run stops, nobody is blamed, nothing is retried or bisected,
 and no branch is reported blocked. Downstream, an expired login and a full
 disk each cost a whole release run that read as a red train.
 
+`preboard` in `testing.local.json` (`preboard_timeout`, 120 s without one;
+`--preboard ""` switches it off for one run) is a guard that takes seconds,
+run per candidate before the combined build (#386). The order is:
+1. **The base.** The check runs on the base alone. If it is red or cannot
+   run there — a broken host, or main itself failing it — nobody is
+   checked, and the train goes on as without it.
+2. **Each candidate.** The check runs on the base merged with that
+   candidate. The tree comes from `build_train` in a second worktree
+   (`<root>-train-preboard`), so plans are settled as in the real merge.
+3. **Red twice.** A candidate red on a freshly rebuilt tree a second time
+   does not board and is reported `blocked`. One that conflicts, times out
+   or cannot run the check boards and is logged "not pre-checked".
+
+The counts (`preboard_checks`) and the seconds (`preboard`) stand in the
+phase line, and `train-phases` prints them, so a check that never runs is
+seen. It is no second suite and needs no project environment: no `uv sync`
+or `npm install` in the fresh worktree. A fast test belongs first in its
+stack's `pins`, so the branch push already runs it. A candidate stacked on
+one that was dropped carries the dropped one's commits, as with any drop.
+
 ## Boarding — computed, never claimed
 
 A local branch boards when it is ahead of the integration branch and
@@ -224,8 +244,8 @@ a day downstream, with five reviewed candidates waiting.
 
 Run from the root worktree on the integration branch with a clean tree.
 The log lives in the clone's git common dir (`process-train/<stamp>.log`).
-Each run ends with its phase times — preflight, gates, suite, retry,
-bisect, push, deploy — in the log and as one line of
+Each run ends with its phase times — preboard, preflight, gates, suite,
+retry, bisect, push, deploy — in the log and as one line of
 `<git-common-dir>/process-train/phases.jsonl`; `process_kpis.py train-phases` reads the
 median and maximum per phase, so a slow merge names its slow phase.
 
