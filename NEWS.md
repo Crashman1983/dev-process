@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.86.0 — Maintenance: nothing missing counts as passed
+
+Eight small fixes, all in the same direction: a check that could not look no longer passes. A copy of the repository with cut-off history is told to fetch the rest instead of being waved through; a test the runner skips no longer counts as proof; numbers the cockpit cannot measure say "unknown" instead of zero; and a review round no longer picks up the findings of a neighbouring phase.
+
 ## v2.85.0 — A host that cannot run a stack
 
 A computer that cannot run one part of a project's tests — a Mac without the backend's environment, say — can now push its branches without asking the owner to switch the tests off. The project marks, in a check that already sits on the main branch, which hosts cannot run that part; the push then names it as owed and runs the rest, and nothing counts as tested that was not. Merging still runs everything on a host that can. Every remaining way to skip a check now has to say why, and that reason is kept in the log.
