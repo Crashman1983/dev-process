@@ -2386,6 +2386,94 @@ def test_train_phases_reads_median_and_maximum_per_phase(render, tmp_path):
     assert "bisect" not in r.stdout and "1/3 runs ended red, 1 stopped by the preflight" in r.stdout
 
 
+def _train_phases(render, tmp_path, rows: list, *args: str) -> str:
+    out = render(tmp_path, {"project_name": "d", "modules": {"telemetry": True}})
+    _repo(out)
+    d = out / ".git/process-train"
+    d.mkdir(parents=True)
+    (d / "phases.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "train-phases", *args],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return r.stdout
+
+
+def _red(**sources) -> dict:
+    """red_tests einer Runde: jede genannte Stage ist rot, ihr Wert die Quelle."""
+    return {"red_stages": list(sources), "sources": {k: v for k, v in sources.items() if v is not None}}
+
+
+def test_train_phases_counts_red_path_runs_per_kind_with_their_median_suite(render, tmp_path):
+    """v2.88 M3: je Art die Zahl der Läufe und der Median der Suite-Sekunden je Lauf, im Fenster der Phasen."""
+    run = lambda n, s: {"n": n, "build_gates_s": 5.0 * n, "suite_s": s}  # noqa: E731
+    rows = [{"stamp": "old", "result": "red", "suite": 1.0,
+             "rounds": [{"red_path": "flaky", "runs": {"first": run(1, 9999.0)}}]},  # außerhalb von --runs 2
+            {"stamp": "a", "result": "green", "suite": 100.0,
+             "rounds": [{"red_path": "flaky", "runs": {"first": run(1, 100.0), "retry_full": run(1, 300.0)}}]},
+            {"stamp": "b", "result": "green", "suite": 100.0,
+             "rounds": [{"red_path": "dropped:beta", "runs": {"first": run(1, 200.0), "base": run(2, 100.0),
+                                                              "probe": run(1, 0.0)}},
+                        {"red_path": "green", "runs": {"first": run(1, 300.0)}}]}]
+    out = _train_phases(render, tmp_path, rows, "--runs", "2")
+    assert "red path: 3 rounds in 2/2 trains" in out, out
+    assert "runs first          3 runs, suite median    200 s per run" in out, out
+    assert "runs retry_full     1 run,  suite median    300 s per run" in out, out
+    assert "runs base           2 runs, suite median     50 s per run" in out, out
+    assert "runs probe          1 run,  suite median      0 s per run" in out, out
+    assert "9999" not in out and "retry_gates" not in out
+
+
+def test_train_phases_classes_red_tests_apart_for_flake_and_offender_rounds(render, tmp_path):
+    """v2.88 M3: fähig / nicht fähig / unbestimmt, getrennt nach dem red_path der Runde."""
+    ok = {"ids": ["t.py::a", "t.py::b"], "on_base": [True, True]}
+    rows = [{"stamp": "a", "result": "green", "rounds": [
+        {"red_path": "flaky", "runs": {}, "red_tests": _red(unit=ok)},                                  # fähig
+        {"red_path": "gate-flaky", "runs": {}, "red_tests": _red(unit={"ids": ["t.py::a"], "on_base": [False]})},  # nicht fähig, lesbar
+        {"red_path": "flaky", "runs": {}, "red_tests": _red(unit={"ids": ["t.py::a"], "on_base": ["unknown"]})},  # unbestimmt, lesbar
+        {"red_path": "flaky", "runs": {}, "red_tests": _red(unit={"error": "symlink"})},                # unbestimmt
+    ]}, {"stamp": "b", "result": "red", "rounds": [
+        {"red_path": "dropped:beta", "runs": {}, "red_tests": _red(unit=ok, e2e=ok)},                   # fähig
+        {"red_path": "base-red", "runs": {}, "red_tests": _red(unit=ok, e2e=None)},                     # unbestimmt: Stage ohne Quelle
+        {"red_path": "dropped:gamma", "runs": {}, "red_tests": _red(
+            unit={"ids": ["t.py::a"], "on_base": [False]}, e2e=None)},                                  # nicht fähig
+        {"red_path": "dropped:delta", "runs": {}, "red_tests": _red(unit={"ids": [], "on_base": []})},  # unbestimmt: leer
+        {"red_path": "dropped:eps", "runs": {}, "red_tests": "gates-red"},                              # unbestimmt
+        {"red_path": "green", "runs": {}},                                                              # ohne red_tests
+    ]}]
+    out = _train_phases(render, tmp_path, rows)
+    assert ("red tests, flake rounds (flaky, gate-flaky): 4, ids readable 3"
+            " — capable 1, not capable 1, undetermined 2") in out, out
+    assert "red tests, offender rounds (dropped, base-red): 5 — capable 1, not capable 1, undetermined 3" in out, out
+    assert "confidence: low" in out and "upper bound" in out, out
+
+
+def test_train_phases_counts_too_many_red_ids_as_undetermined(render, tmp_path):
+    rows = [{"stamp": "a", "result": "red", "rounds": [
+        {"red_path": "dropped:beta", "runs": {}, "red_tests": _red(unit={"too_many": 431})},
+        {"red_path": "flaky", "runs": {}, "red_tests": _red(unit={"too_many": 250})}]}]
+    out = _train_phases(render, tmp_path, rows)
+    assert "offender rounds (dropped, base-red): 1 — capable 0, not capable 0, undetermined 1" in out, out
+    assert "flake rounds (flaky, gate-flaky): 1, ids readable 0 — capable 0, not capable 0, undetermined 1" in out, out
+
+
+def test_train_phases_reads_rows_without_or_with_broken_rounds(render, tmp_path):
+    """v2.88 M3: alte Zeilen ohne `rounds` und kaputte Einträge kosten nichts als ihre eigene Zählung."""
+    old = [{"stamp": f"s{i}", "result": "green", "suite": 100.0} for i in range(2)]
+    out = _train_phases(render, tmp_path, old)
+    assert "suite     median    100 s, max    100 s (in 2/2 runs)" in out, out
+    assert "no red-path rounds recorded yet" in out, out
+    broken = old + [{"stamp": "x", "result": "red", "rounds": "torn"},
+                    {"stamp": "y", "result": "red", "rounds": [
+                        "torn", {"runs": {"first": {"n": "2", "suite_s": None}, "base": "x"}},
+                        {"red_path": "dropped:b", "runs": [], "red_tests": {"red_stages": "unit", "sources": []}},
+                        {"red_path": "flaky", "red_tests": _red(unit={"ids": ["a"], "on_base": "true"})},
+                        {"red_path": "flaky", "red_tests": _red(unit={"ids": ["a", "b"], "on_base": [True]})}]}]
+    out = _train_phases(render, tmp_path / "b", broken)
+    assert "red path: 4 rounds in 1/4 trains" in out, out
+    assert "offender rounds (dropped, base-red): 1 — capable 0, not capable 0, undetermined 1" in out, out
+    assert "flake rounds (flaky, gate-flaky): 2, ids readable 0 — capable 0, not capable 0, undetermined 2" in out, out
+
+
 def test_the_configured_preflight_is_the_trains_default(render, tmp_path, tmp_path_factory):
     """#209: one environment check for push, certify and train."""
     logs = tmp_path_factory.mktemp("suite")

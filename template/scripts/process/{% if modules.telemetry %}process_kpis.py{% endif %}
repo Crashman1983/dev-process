@@ -1888,6 +1888,108 @@ def _stage_lines(rows: list[dict]) -> list[str]:
     return lines
 
 
+# The run kinds of a red-path round (`rounds[].runs`, train.md), in the order the train runs them.
+_RED_PATH_KINDS = ("first", "retry_gates", "retry_failed", "retry_full", "base", "probe")
+_FLAKE_PATHS = ("flaky", "gate-flaky")
+
+
+def _round_sources(red_tests: object) -> tuple[list, bool] | None:
+    """The red stages' verdicts of one round's `red_tests` and whether every red stage has a
+    readable source with at least one id. None when there is nothing to class by id:
+    `gates-red`, no red stage, or a malformed field."""
+    if not isinstance(red_tests, dict):
+        return None
+    stages, sources = red_tests.get("red_stages"), red_tests.get("sources")
+    if not isinstance(stages, list) or not stages or not isinstance(sources, dict):
+        return None
+    verdicts: list = []
+    readable = True
+    for stage in stages:
+        source = sources.get(stage) if isinstance(stage, str) else None
+        ids = source.get("ids") if isinstance(source, dict) else None
+        on_base = source.get("on_base") if isinstance(source, dict) else None
+        if (not isinstance(ids, list) or not ids or not isinstance(on_base, list)
+                or len(on_base) != len(ids)):
+            readable = False  # no source, an error, too_many, an empty or a torn list
+            continue
+        verdicts.extend(on_base)
+    return verdicts, readable
+
+
+def _red_class(red_tests: object) -> str:
+    """v2.88 M3: capable when every red stage has a source with ids and every id lay on the
+    base (`on_base` true); not capable once one id is false; undetermined otherwise — too_many,
+    an empty list, a red stage without a source, `unknown`, `gates-red`."""
+    read = _round_sources(red_tests)
+    if read is None:
+        return "undetermined"
+    verdicts, readable = read
+    if any(v is False for v in verdicts):
+        return "not capable"
+    if readable and all(v is True for v in verdicts):
+        return "capable"
+    return "undetermined"
+
+
+def _red_path_lines(rows: list[dict]) -> list[str]:
+    """The red path per round (`rounds` of a phases line, train.md): per run kind the runs
+    and the median suite seconds per run, then the red tests' classes apart for flake rounds
+    (a partial retry needs only readable ids) and offender rounds (a partial base run needs
+    every red id on the base). Rows without `rounds` count as trains, not as rounds."""
+    trains = [row["rounds"] for row in rows if isinstance(row.get("rounds"), list)]
+    rounds = [r for t in trains for r in t if isinstance(r, dict)]
+    if not rounds:
+        return ["  no red-path rounds recorded yet"]
+    lines = [f"  red path: {len(rounds)} rounds in {len(trains)}/{len(rows)} trains"]
+    runs: dict[str, list[tuple[int, float]]] = {}
+    for rnd in rounds:
+        kinds = rnd.get("runs") if isinstance(rnd.get("runs"), dict) else {}
+        for kind, entry in kinds.items():
+            n = entry.get("n") if isinstance(entry, dict) else None
+            suite = entry.get("suite_s") if isinstance(entry, dict) else None
+            if (isinstance(n, int) and not isinstance(n, bool) and n > 0
+                    and isinstance(suite, (int, float)) and not isinstance(suite, bool)):
+                runs.setdefault(kind, []).append((n, float(suite)))
+    for kind in [*_RED_PATH_KINDS, *sorted(set(runs) - set(_RED_PATH_KINDS))]:
+        if kind in runs:
+            n = sum(e[0] for e in runs[kind])
+            median = statistics.median(s / k for k, s in runs[kind])  # a round's mean per run
+            lines.append(f"  runs {kind:<14} {n} {'run,' if n == 1 else 'runs,':<5} "
+                         f"suite median {median:>6.0f} s per run")
+    flake: list[tuple[str, bool]] = []
+    offender: list[str] = []
+    other = 0
+    for rnd in rounds:
+        if "red_tests" not in rnd:
+            continue
+        path, red = rnd.get("red_path"), rnd["red_tests"]
+        if path in _FLAKE_PATHS:
+            read = _round_sources(red)
+            flake.append((_red_class(red), read is not None and read[1]))
+        elif path == "base-red" or (isinstance(path, str) and path.startswith("dropped:")):
+            offender.append(_red_class(red))
+        else:
+            other += 1
+
+    def classes(found: list[str]) -> str:
+        return ", ".join(f"{c} {found.count(c)}" for c in ("capable", "not capable", "undetermined"))
+
+    if flake:
+        lines.append(f"  red tests, flake rounds (flaky, gate-flaky): {len(flake)}, "
+                     f"ids readable {sum(r for _, r in flake)} — {classes([c for c, _ in flake])}")
+    if offender:
+        lines.append(f"  red tests, offender rounds (dropped, base-red): {len(offender)} — {classes(offender)}")
+    if other:
+        lines.append(f"  {other} other round{'' if other == 1 else 's'} with red tests "
+                     f"(undefined, none-survived, …) not classed")
+    if flake or offender:
+        n = len(flake) + len(offender)
+        lines.append(f"  {confidence(n)} — the saved suite seconds are an upper bound: "
+                     "a partial run's start and collection are not measured")
+        lines.append(f"  -> {action(_level(n, False, False, _N_THRESHOLD), 'a partial run pays where offender rounds are capable and flake rounds readable', thin='raise --runs: the partial-run decision needs more red rounds than this window holds')}")
+    return lines
+
+
 def train_phases(runs: int = 20) -> int:
     """Median and maximum seconds per phase over the last `runs` trains
     (`process-train/phases.jsonl`, written by train.py): a slow merge is
@@ -1928,6 +2030,8 @@ def train_phases(runs: int = 20) -> int:
           f"{results.count('environment')} stopped by the preflight (the host, not a passenger)")
     n = len(rows)
     print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'shorten the phase with the largest median first: suite → test selection and certificates, bisect → smaller batches, retry → flaky tests (failure-catalog.md)', thin='let more trains run before acting on a phase')}")
+    for line in _red_path_lines(rows):
+        print(line)
     return 0
 
 
