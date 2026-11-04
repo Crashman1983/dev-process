@@ -9,6 +9,40 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.91.0 — Der Zug plant schneller und sagt, wer warum zurückbleibt · 2026-11-04
+
+**Warum.** Downstream, bei 603 Branches und 247 Journal-Shards:
+- `train plan` und jeder Zug-Start brauchten über 16 Minuten (#398).
+- Branches blieben ohne Grund in der Ausgabe von `run` zurück (#399).
+
+Auf einem synthetischen Repo derselben Form (600 Branches, 250 Pläne) brauchte `plan` 44 s, davon 94 % für den Start von 14.625 git-Prozessen.
+
+**Was sich ändert.**
+- **Die Planung liest weniger.**
+  - Branches, die schon in der Basis gemergt sind, sortiert ein einziges `for-each-ref --merged` vor jedem Diff aus; `plan --json` zählt sie in `no_lead`.
+  - Record-Texte werden je Blob einmal mit einem `cat-file --batch` gelesen und je Prozess behalten, für den Arbeitsbaum nie.
+  - Die Konflikthinweise von `plan` kommen aus einem `merge-tree --stdin` für alle Paare; ein älteres git prüft wie bisher Paar für Paar.
+  - Zwei Kandidaten ohne gemeinsamen Commit jenseits der Basis kosten kein `merge-base`.
+  - Die Dispatch-Zuordnung wird je Planung einmal gelesen.
+  - Die Familien-Regel wird am Snapshot der Basis gelesen.
+- **Wer zurückbleibt, und warum.**
+  - Jeder `run` druckt die Gründe aller Kandidaten, die nicht einsteigen, in den Worten von `plan`, dazu eine Zeile für die Branches ohne Vorsprung. Das gilt, ob der Lauf abfährt, hält oder nichts zu tun hat.
+  - Ein abfahrender Lauf schreibt die Zeilen vor dem ersten Build in sein Log.
+  - Ein haltender Lauf überschreibt `<git-common-dir>/process-train/last-hold.txt`.
+- **Die Planungszeit wird gemessen:** eine Phase `plan` in `phases.jsonl` und in `process_kpis.py train-phases`.
+- **Zwei bewusste Urteilsänderungen, beide strenger oder neutral:**
+  - Ein unlesbarer Plan-Diff eines schon gemergten Branches blockiert die anderen Kandidaten nicht mehr.
+  - In einem seltenen Fall zählen zwei Pläne als zwei: Die Basis-Historie enthält einen Merge, und eine Seite hat den Plan gelöscht und neu angelegt.
+
+**Wirkung.** `plan` auf dem synthetischen Repo: 43,6 s → 9,2 s, bei gleichen Kandidaten und Urteilen. Ein Steward sieht in jedem `run`, warum ein Branch nicht eingestiegen ist.
+
+**Geänderte Abschnitte.**
+- `train.md` (Departure — a number, not a judgment; The run)
+
+**Update.** Reines Update. Alte Zeilen in `phases.jsonl` ohne `plan` bleiben lesbar; der Median der Planung zählt nur Zeilen, die sie tragen.
+
+Details: [Plan](docs/analysis/2026-11-04-v2.91.md) #398 #399
+
 ## v2.90.0 — Der Zug bleibt bei dem, was er geprüft hat · 2026-11-04
 
 **Warum.** Downstream an einem Tag:

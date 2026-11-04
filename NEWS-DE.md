@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.91.0 — Der Zug plant schneller und sagt, wer warum zurückbleibt
+
+Bevor der Merge-Zug losfährt, ermittelt er, welche Branches einsteigen dürfen. In einem großen Repo mit Hunderten alter Branches dauerte das über eine Viertelstunde. Jetzt liest er nur, was er braucht, und fragt git viel seltener: Auf einem Test-Repo mit 600 Branches sinkt die Planung von 44 auf 9 Sekunden, mit demselben Ergebnis. Außerdem sagt jeder Zuglauf für jeden Branch, der zurückbleibt, warum. Bisher tat das nur die getrennte Planungsansicht.
+
 ## v2.90.0 — Der Zug bleibt bei dem, was er geprüft hat
 
 Der Merge-Zug merkt sich jetzt genau, welche Commits er beim Start geprüft hat, und merged diese. Ein Fix, den ein Worker während des Laufs pusht, wartet auf den nächsten Zug. Er verwirrt nicht mehr die Suche nach dem Branch, der die Tests gebrochen hat, sodass kein falscher Branch beschuldigt wird. Hält ein Worker seinen Branch an, während der Zug läuft, lässt der Zug ihn vor dem Push weg. Das Cockpit zeigt auch einen zurückgehaltenen Branch, wenn eine spätere Notiz das verdeckt. Nachrichten an laufende Sitzungen werden nur getippt, wenn das Eingabefeld lesbar und leer ist.
