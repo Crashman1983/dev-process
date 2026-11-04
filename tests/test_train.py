@@ -4043,3 +4043,89 @@ def test_a_holding_run_prints_its_planning_time_and_logs_no_phases(render, tmp_p
     assert r.returncode == 0 and said in r.stdout, r.stdout + r.stderr
     assert re.search(r"planning took \d+\.\d s", r.stdout), r.stdout
     assert not (out / ".git/process-train/phases.jsonl").exists()
+
+
+def _tip_merge_bases(calls: list[list[str]], out: Path, branches) -> list[list[str]]:
+    """Die `merge-base`-Aufrufe zwischen zwei Kandidaten-Spitzen (nicht gegen die Basis)."""
+    tips = {_git(out, "rev-parse", b).stdout.strip() for b in branches}
+    return [c for c in calls if c[:1] == ["merge-base"] and len(c) == 3 and set(c[1:]) <= tips]
+
+
+def test_candidates_that_share_no_commit_cost_no_merge_base(render, tmp_path, monkeypatch):
+    """#398 (S5): drei Kandidaten mit neuen Plänen, keiner gestapelt — disjunkte Commit-Mengen
+    jenseits der Basis sind kein Stapel, ohne `merge-base` zwischen den Spitzen."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    for name in ("alpha", "beta", "gamma"):
+        _branch(out, name, {f"src/{name}.py": "x\n"})
+    train = _load_train(out)
+    calls = _git_calls(monkeypatch)
+    cands = train.candidates(out, "main", "main")
+    assert all(c["eligible"] for c in cands) and len(cands) == 3
+    assert [c for c in calls if c[:1] == ["merge-base"]], "der Zähler sah kein merge-base"
+    assert _tip_merge_bases(calls, out, ("alpha", "beta", "gamma")) == []
+
+
+@pytest.mark.parametrize("rev_list", ["readable", "unreadable"])
+def test_a_stacked_pair_costs_one_merge_base_and_stays_one_plan(render, tmp_path, monkeypatch, rev_list):
+    """S5: ein gestapeltes Paar teilt Commits — ein `merge-base` je ungeordnetem Paar, und der
+    umbenannte Plan bleibt ein Plan (#201). Ein unlesbares `rev-list` nimmt den bisherigen Weg."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _stacked_rename(out)
+    train = _load_train(out)
+    if rev_list == "unreadable":
+        real = train._git_bytes
+        monkeypatch.setattr(train, "_git_bytes", lambda root, *a: None if a[0] == "rev-list" else real(root, *a))
+    calls = _git_calls(monkeypatch)
+    by = {c["branch"]: c for c in train.candidates(out, "main", "main")}
+    assert by["issue-2260"]["eligible"], by["issue-2260"]["reasons"]
+    expected = 1 if rev_list == "readable" else 2
+    assert len(_tip_merge_bases(calls, out, ("issue-2260", "issue-2260-redate"))) == expected
+
+
+def test_a_stacked_pair_behind_the_base_is_judged_as_before(render, tmp_path):
+    """S5 (Wächter): ein Stapel hinter der Basis — main zog nach dem Abzweig weiter — bleibt
+    ein Plan."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _stacked_rename(out)
+    _main_commit(out, {"src/later.py": "later\n"}, "main moves on")
+    train = _load_train(out)
+    by = {c["branch"]: c for c in train.candidates(out, "main", "main")}
+    assert by["issue-2260"]["behind"] == 1 and by["issue-2260"]["eligible"], by["issue-2260"]["reasons"]
+
+
+def test_a_recreated_plan_renamed_on_an_unstacked_branch_is_two_plans(render, tmp_path):
+    """S5, bewusste Urteilsänderung (Plan-Review Runde 4): main merged X1 (löscht den Plan)
+    und Y1; o = X1 + O1 legt ihn neu an, b = Y1 + B1 benennt ihn um. Bisher ein Plan (ihr
+    `merge-base` ist B0, keiner der Forks) — die Commit-Mengen sind disjunkt: zwei Pläne,
+    strenger, wie der Docstring es sagt."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    old, new = ".process-work/plans/2026-10-01-x.md", ".process-work/plans/2026-10-08-x.md"
+    _main_commit(out, {old: "# x\n\ntier: 2\nissue: #5\n"}, "B0: the plan")
+    _git(out, "checkout", "-q", "-b", "x")
+    _git(out, "rm", "-q", old)
+    _git(out, "commit", "-q", "-m", "X1: delete the plan")
+    _git(out, "checkout", "-q", "-b", "y", "main")
+    _main_commit(out, {"src/y.py": "y\n"}, "Y1")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "merge", "-q", "--no-ff", "-m", "merge x", "x")
+    _git(out, "merge", "-q", "--no-ff", "-m", "merge y", "y")
+    _git(out, "checkout", "-q", "-b", "o", "x")
+    _main_commit(out, {old: "# x again\n\ntier: 2\nissue: #6\n"}, "O1: the plan anew")
+    _git(out, "checkout", "-q", "-b", "b", "y")
+    _git(out, "mv", old, new)
+    _git(out, "commit", "-q", "-m", "B1: rename the plan")
+    _git(out, "checkout", "-q", "main")
+    train = _load_train(out)
+    base = _git(out, "rev-parse", "main").stdout.strip()
+    tips = {b: _git(out, "rev-parse", b).stdout.strip() for b in ("o", "b")}
+    new_by = {b: {rel for letter, _s, rel in train._review.name_status(train._git_bytes(
+        out, "diff", "--name-status", "-M", "-z", f"{base}...{tips[b]}", "--", train.PLANS)) if letter != "D"}
+        for b in ("o", "b")}
+    assert new_by == {"o": {old}, "b": {new}}
+    unreadable: list[str] = []
+    assert train._stacked_renames(out, base, ["o", "b"], new_by, unreadable, tips) == {}
+    assert unreadable == []
