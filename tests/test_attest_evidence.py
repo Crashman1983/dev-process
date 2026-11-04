@@ -449,6 +449,52 @@ OTHER_CASES = [
     ("a should cell does not cut the .each body", "web/a.test.ts",
      'it.each([\n  ["should add", 1],\n])("adds %s", function (t, n) {\n  this.skip();\n})\n',
      "adds should add", "skip"),
+    # #338: a test inside a skipped describe/context is skipped; the block is its call's extent
+    ("inside describe.skip", "web/a.test.ts", 'describe.skip("x", () => {\n  it("works", () => {})\n})\n',
+     "works", "skipped describe"),
+    ("inside describe.skip, one line", "web/a.test.ts", 'describe.skip("x", () => { it("works", () => {}) })\n',
+     "works", "skip"),
+    ("deep inside describe.skip", "web/a.test.ts",
+     'describe.skip("outer", () => {\n  beforeEach(() => {})\n  describe("inner", () => {\n'
+     '    it("works", () => {})\n  })\n})\n', "works", "skipped describe"),
+    ("a skipped suite nested in an active one", "web/a.test.ts",
+     'describe("outer", () => {\n  describe.skip("inner", () => {\n    it("works", () => {})\n  })\n'
+     '  it("other", () => {})\n})\n', "works", "skipped describe"),
+    ("after a nested skipped suite closed", "web/a.test.ts",
+     'describe("outer", () => {\n  describe.skip("inner", () => {\n    it("works", () => {})\n  })\n'
+     '  it("other", () => {})\n})\n', "other", None),
+    ("the outer skip wins", "web/a.test.ts",
+     'xdescribe("outer", () => {\n  describe("inner", () => {\n    it("works", () => {})\n  })\n})\n',
+     "works", "skipped describe"),
+    ("describe.skip.each", "web/a.test.ts",
+     'describe.skip.each([[1], [2]])("suite %d", (n) => {\n  it("works", () => {})\n})\n', "works",
+     "skipped describe"),
+    ("describe.skip.each tagged", "web/a.test.ts",
+     'describe.skip.each`\n  a\n  ${1}\n`("suite $a", ({ a }) => {\n  it("works", () => {})\n})\n', "works",
+     "skipped describe"),
+    ("context.skip", "test/a.spec.js", 'context.skip("x", function () {\n  it("works", function () {})\n})\n',
+     "works", "skipped describe"),
+    ("xcontext", "test/a.spec.js", 'xcontext("x", function () {\n  it("works", function () {})\n})\n',
+     "works", "skipped describe"),
+    ("describe.todo", "web/a.test.ts", 'describe.todo("x", () => {\n  it("works", () => {})\n})\n',
+     "works", "skipped describe"),
+    ("an active describe", "web/a.test.ts", 'describe("x", () => {\n  it("works", () => {})\n})\n', "works", None),
+    ("describe.skipIf(c)", "web/a.test.ts", 'describe.skipIf(isCI)("x", () => {\n  it("works", () => {})\n})\n',
+     "works", None),
+    ("a skipped suite closed before the test", "web/a.test.ts",
+     'describe.skip("old", () => {\n  it("legacy", () => {})\n})\n\nit("works", () => {})\n', "works", None),
+    ("braces in strings and comments inside a skipped suite", "web/a.test.ts",
+     'describe.skip("x {", () => {\n  // a } here )\n  const s = "}})";\n  const q = \'}\';\n'
+     '  const t = `}${"{"}`;\n  /* ) } */\n  it("works", () => {})\n})\n', "works", "skipped describe"),
+    ("open braces in strings and comments do not hold a suite open", "web/a.test.ts",
+     'describe.skip("x", () => {\n  const s = "{{(";\n  // {\n  /* ( */\n  const t = `{${"("}`;\n'
+     '  const r = /[{(]/;\n})\nit("works", () => {})\n', "works", None),
+    ("an unclosed skipped suite reads as skipped", "web/a.test.ts",
+     'describe.skip("x", () => {\n  it("works", () => {})\n', "works", "skipped describe"),
+    ("a test before an unclosed skipped suite stays", "web/a.test.ts",
+     'it("works", () => {})\ndescribe.skip("x", () => {\n', "works", None),
+    ("describe.skip in a string or comment opens nothing", "web/a.test.ts",
+     'const s = "describe.skip(\'x\', () => {";\n// xdescribe("y", () => {\nit("works", () => {})\n', "works", None),
 ]
 
 

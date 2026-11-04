@@ -1586,10 +1586,134 @@ def _declares_test(lines: list[str], i: int, name: str, titles: dict[int, list[s
     return marked
 
 
+# #338: a JS/TS suite switched off — `describe.skip(`, `describe.skip.each(…)(`, `describe.todo(`,
+# `context.skip(`, `suite.skip(`, `xdescribe(`, `xcontext(` — skips every test inside its call
+_JS = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts")
+_SKIPPED_SUITE = re.compile(r"(?<![\w$.])(?:x(?:describe|context)|(?:describe|context|suite)(?:\.\w+)*\.(?:skip|todo))"
+                            r"(?![\w$])(?:\.\w+)*")
+_REGEX_AFTER = set("(,=:[!&|?{};+-*%<>~^") | {"", "return", "typeof", "case", "in", "of", "void", "delete",
+                                              "throw", "new", "yield", "await"}
+_WORD = re.compile(r"[\w$]+")
+
+
+def _code_only(text: str) -> str:
+    """`text` with the insides of strings, template literals, regex literals and comments
+    blanked (newlines kept, a template's backticks kept), so a bracket there is no bracket.
+    Simple rules: a regex literal starts after an operator or keyword and ends on its line;
+    a `${…}` counts braces only."""
+    out, n, i, prev = list(text), len(text), 0, ""
+
+    def blank(a: int, b: int) -> None:
+        for k in range(a, min(b, n)):
+            if out[k] != "\n":
+                out[k] = " "
+
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            blank(i, j)
+            i = j
+        elif text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            blank(i, j)
+            i = j
+        elif c in "'\"":
+            j = i + 1
+            while j < n and text[j] not in (c, "\n"):
+                j += 2 if text[j] == "\\" else 1
+            blank(i, j + 1 if j < n and text[j] == c else j)
+            i, prev = j + 1 if j < n and text[j] == c else j, "a"
+        elif c == "`":
+            j, depth = i + 1, 0
+            while j < n and (depth or text[j] != "`"):
+                if not depth and text[j] == "\\":
+                    j += 1
+                elif not depth and text.startswith("${", j):
+                    depth, j = 1, j + 1
+                elif depth and text[j] in "{}":
+                    depth += 1 if text[j] == "{" else -1
+                j += 1
+            blank(i + 1, j)
+            i, prev = j + 1, "a"
+        elif c == "/" and prev in _REGEX_AFTER:
+            j, cls = i + 1, False
+            while j < n and text[j] != "\n" and (cls or text[j] != "/"):
+                cls = (cls or text[j] == "[") and text[j] != "]"
+                j += 2 if text[j] == "\\" else 1
+            if j < n and text[j] == "/":
+                blank(i + 1, j)
+                i, prev = j + 1, "a"
+            else:  # no regex closes on this line: a division
+                i, prev = i + 1, c
+        elif c.isalnum() or c in "_$":
+            m = _WORD.match(text, i)
+            i, prev = m.end(), m.group(0) if not c.isdigit() else "a"
+        else:
+            i, prev = i + 1, (prev if c.isspace() else c)
+    return "".join(out)
+
+
+_PAIRS = {")": "(", "]": "[", "}": "{"}
+
+
+def _call_end(code: str, at: int) -> int | None:
+    """The index after the call whose `(` is at `at`, by nesting of `([{` with each closer
+    matching its opener; None when it never closes or a closer mismatches (unreadable)."""
+    stack: list[str] = []
+    for k in range(at, len(code)):
+        ch = code[k]
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in _PAIRS:
+            if not stack or stack.pop() != _PAIRS[ch]:
+                return None
+            if not stack:
+                return k + 1
+    return None
+
+
+def _skipped_suites(text: str) -> list[tuple[int, int]]:
+    """(start, end) offsets of each skipped JS/TS suite: from its keyword to the close of its
+    last chained call (`describe.skip.each(rows)("t", fn)`, ``describe.skip.each`…`("t", fn)``).
+    A call that does not close readably runs to the end of the file (fail-closed)."""
+    code, out = _code_only(text), []
+    for m in _SKIPPED_SUITE.finditer(code):
+        at, calls = m.end(), 0
+        while True:
+            while at < len(code) and code[at].isspace():
+                at += 1
+            if at < len(code) and code[at] == "`":  # a tagged-template table: its body is blanked
+                close = code.find("`", at + 1)
+                at = len(code) if close < 0 else close + 1
+            elif at < len(code) and code[at] == "(":
+                end, calls = _call_end(code, at), calls + 1
+                if end is None:
+                    at = len(code)
+                    break
+                at = end
+            else:
+                break
+        if calls:  # a bare reference (`const off = xdescribe`) opens no suite
+            out.append((m.start(), at))
+    return out
+
+
+def _decl_col(ln: str, name: str) -> int:
+    """Where on its line the test `name` is declared: its title's keyword, else the line's
+    first test keyword."""
+    hit = next((m for m in _TITLE.finditer(ln) if m.group("title") == name), None)
+    hit = hit or _EACH.search(ln) or _DECLARING.search(ln) or _OPEN_CALL.search(ln)
+    return hit.start() if hit else 0
+
+
 def _other_status(text: str, file: str, name: str, rules: dict) -> str | None:
     """None: `file` declares the test `name` (`_declares_test`) and no skip marker stands on
     its attribute lines, its declaring line, its body up to the next declaration, or a setup
-    of the file; else why not. Raw lines, plain line rules — no JavaScript is parsed.
+    of the file, nor (JS/TS) does it sit inside a skipped suite (`_skipped_suites`); else why
+    not. Raw lines, plain line rules — no JavaScript is parsed beyond bracket nesting.
     Named residuals: a string whose text is a whole test call (`"it('x')"`) declares `x`; a
     test inside a block comment whose lines start with neither `*` nor `//` still counts; a
     skip word inside a string counts as a skip (fail-closed); whether an `.each` row yields
@@ -1621,8 +1745,18 @@ def _other_status(text: str, file: str, name: str, rules: dict) -> str | None:
     # a setup of the file (setUp*, beforeEach/All, TestMain) that skips runs before each test
     if any(_OTHER_SKIP.search(ln) for d in decls if _SETUP.search(lines[d]) for ln in span(d)):
         return f"{file}: a setup (setUp/beforeEach/TestMain) skips at head"
-    if all(any(_OTHER_SKIP.search(ln) for ln in span(i)) for i in mine):
-        return f"{file}: {name!r} is marked or made to skip at head"
+    suites = _skipped_suites(text) if file.lower().endswith(_JS) else []
+    starts = [0]
+    for ln in text.splitlines(keepends=True):
+        starts.append(starts[-1] + len(ln))
+
+    def in_suite(i: int) -> bool:
+        at = starts[i] + _decl_col(lines[i], name)
+        return any(a < at < b for a, b in suites)
+
+    if all(any(_OTHER_SKIP.search(ln) for ln in span(i)) or in_suite(i) for i in mine):
+        where = " (inside a skipped describe/context)" if any(in_suite(i) for i in mine) else ""
+        return f"{file}: {name!r} is marked or made to skip at head{where}"
     return None
 
 
