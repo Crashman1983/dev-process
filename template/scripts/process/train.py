@@ -1607,7 +1607,7 @@ def _clear_worktree(root: Path, wt: Path) -> None:
 
 
 def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, timeout: float | None,
-              log) -> tuple[list[str], dict]:
+              log, preflight: str | None = None, preflight_timeout: float | None = None) -> tuple[list[str], dict]:
     """The preboard check (#386): `cmd`, a check of seconds, on base+candidate before the
     candidate boards — `(still aboard, checks)`, a new list in boarding order. The probe
     trees are `build_train`'s, in `<root>-train-preboard` on `train/<stamp>-preboard`: the
@@ -1615,9 +1615,20 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
     is checked (a broken host, a red main — never a candidate's fault). A candidate red on
     base+it runs once more on a rebuilt tree; red twice, it is reported blocked and stays
     off this train. Not judgeable (undefined, past `timeout`, a conflict, a tree that
-    cannot be built) boards, and says so: the full suite still judges it (AC-2)."""
+    cannot be built) boards, and says so: the full suite still judges it (AC-2).
+    Before anybody is reported, the base is checked once more and the host by `preflight`
+    on the base's tree (refute v2.89: a broken part of the host the base never exercised,
+    or a host that broke mid-check, blocked candidates before the preflight ran) — the
+    base no longer green: nobody dropped; the preflight red: `EnvironmentRed`, nobody
+    blamed."""
     wt = _preboard_worktree(root)
     probe_stamp = f"{stamp}{PREBOARD_SUFFIX}"
+    _clear_worktree(root, wt)  # a killed run's probe tree first: its branch is checked out there
+    # probe branches a killed run left (its `finally` never ran)
+    stale = (_out(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/train/") or "").split()
+    for old_branch in stale:
+        if old_branch.endswith(PREBOARD_SUFFIX):
+            _git(root, "branch", "-D", old_branch)
     checks: dict = {"checked": 0, "dropped": [], "unchecked": 0, "reason": None}
 
     def probe(subset: list[str]) -> str:
@@ -1651,10 +1662,7 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
                 state = probe([b])
             if state == "red":
                 checks["dropped"].append(b)
-                log(f"preboard red twice with {b} — dropped before boarding")
-                print(f"train: {b} did not board — the preboard check `{cmd}` is red on {base}+{b} twice; "
-                      "its worker owes a fix (report: blocked)", file=sys.stderr)
-                _write(root, "blocked", f"{TRAIN_DROP_NOTE} {stamp}: preboard red — {cmd}", b)
+                log(f"preboard red twice with {b} — held back, reported once base and host are confirmed")
                 continue
             kept.append(b)
             if state == "green":
@@ -1665,6 +1673,22 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
             log(f"preboard {b}: not pre-checked — {state}")
             print(f"train: {b}: not pre-checked — {state}", file=sys.stderr)
         checks["reason"] = "; ".join(unjudged) or None
+        if checks["dropped"]:
+            again = probe([])  # the base once more: a host or a check that turned red mid-way
+            if again != "green":
+                checks["reason"] = f"preboard on the base turned {again} — not pre-checked"
+                log(checks["reason"])
+                print(f"train: {checks['reason']}; nobody held back", file=sys.stderr)
+                checks["unchecked"] += len(checks["dropped"])
+                checks["dropped"] = []
+                return list(aboard), checks
+            if preflight and _sh(wt, preflight, log, preflight_timeout) != "green":
+                # the host cannot run what the candidates' check needs: nobody's fault
+                raise EnvironmentRed(f"the preflight `{preflight}` is red")
+            for b in checks["dropped"]:
+                print(f"train: {b} did not board — the preboard check `{cmd}` is red on {base}+{b} twice; "
+                      "its worker owes a fix (report: blocked)", file=sys.stderr)
+                _write(root, "blocked", f"{TRAIN_DROP_NOTE} {stamp}: preboard red — {cmd}", b)
         return kept, checks
     finally:
         _clear_worktree(root, wt)
@@ -1840,10 +1864,11 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     waiting = {c["branch"]: c.get("hours_waiting") or 0 for c in p["candidates"]}
     aboard.sort(key=lambda b: -waiting[b])
     if preboard:
-        # before the first round, in boarding order; the preflight stays where it is,
-        # in the first combined tree's judge — a broken host is red on the base check too
+        # before the first round, in boarding order; the preflight stays where it is, in
+        # the first combined tree's judge — pre_board runs it on the base only before it
+        # reports a candidate
         kept, checks = timed("preboard", pre_board, root, base, aboard, stamp, preboard,
-                             preboard_timeout, log)
+                             preboard_timeout, log, preflight, preflight_timeout)
         if outcome is not None:
             outcome["preboard_checks"] = checks
         if len(kept) != len(aboard):
