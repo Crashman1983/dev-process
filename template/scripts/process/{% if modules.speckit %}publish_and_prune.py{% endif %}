@@ -303,20 +303,24 @@ def _comment_bodies(gh: str, issue: str) -> list[str] | None:
         if r.returncode != 0:
             return None
         try:
-            bodies = [c.get("body") or "" for c in json.loads(r.stdout).get("comments", [])]
-        except (json.JSONDecodeError, AttributeError, TypeError):
+            bodies = [c.get("body") or "" for c in json.loads(r.stdout)["comments"]]
+        except (json.JSONDecodeError, AttributeError, TypeError, KeyError):
             return None
     return [_norm(b) for b in bodies]
 
 
 def _pages(out: str) -> list[list]:
-    """`gh api --paginate` prints one JSON array per page, back to back."""
+    """`gh api --paginate` prints one JSON array per page, back to back; an issue without
+    comments is one empty array. No page at all (#347: empty stdout at exit 0) is no
+    inventory, not an empty one."""
     pages, i, dec = [], 0, json.JSONDecoder()
     while (i := len(out) - len(out[i:].lstrip())) < len(out):
         page, i = dec.raw_decode(out, i)
         if not isinstance(page, list):
             raise TypeError("a page is no array")
         pages.append(page)
+    if not pages:
+        raise TypeError("no page")
     return pages
 
 
