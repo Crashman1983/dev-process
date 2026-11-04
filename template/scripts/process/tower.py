@@ -7,9 +7,10 @@ never narrated.
     uv run scripts/process/tower.py --stale-minutes 60
     uv run scripts/process/tower.py --remote   # other hosts: their branches on origin, their published reports
     uv run scripts/process/tower.py --json --section findings   # only these keys
-    uv run scripts/process/tower.py --wait --timeout 1800 --states pushed,blocked,stale
+    uv run scripts/process/tower.py --wait --timeout 1800 --states pushed,blocked,stale,prompt
                                                # block until a report line arrives, or a live
-                                               # session goes stale: exit 0, 3 on timeout
+                                               # session goes stale or sits at a permission
+                                               # prompt: exit 0, 3 on timeout
 
 What it assembles (all from state the process already keeps):
   worktrees  — every `git worktree` of this clone: branch, ahead/behind the
@@ -26,7 +27,8 @@ What it assembles (all from state the process already keeps):
   findings   — deterministic, each with a because: overlaps, a Tier 2+ plan
                without an issue, a plan without a Decisions ledger, a gate
                red for days, a worker with no report and no commit for an
-               hour, a branch far behind the integration branch
+               hour, a tmux worker at a permission prompt, a branch far
+               behind the integration branch
 
 The tower decides nothing. It is the input an orchestrating agent reads
 instead of the sessions themselves — compact, testable, and the same on
@@ -69,10 +71,17 @@ STALE_MINUTES = 60
 CLOCK_SKEW_SECONDS = 300  # a status stamp this far ahead is a wrong clock (#270)
 # a worker reporting these waits, it does not work; `failed` is over and has its own finding (#270)
 PARKED = ("review-pass", "done", "idle", "failed")
-# `stale` is synthetic: never a report line, written by --wait for a silent live session
-WAIT_STATES = _report.STATES + ("stale",)
+# a live tmux worker whose screen shows a dialog this long waits on a human,
+# not on the steward (#377) — unless --prompt-minutes, PROCESS_PROMPT_MINUTES
+# or the policy's `prompt_minutes` say otherwise
+PROMPT_MINUTES = 10
+PROMPT_LINES = 15  # the screen tail a dialog is looked for in: it spans several lines
+# `prompt` and `stale` are synthetic: never a report line, written by --wait for a
+# live session at a permission prompt or a silent one
+WAIT_STATES = _report.STATES + ("prompt", "stale")
 STALE_POLL_S = 60  # how often --wait looks at the live sessions
 STALE_SEEN = "stale-announced.json"  # beside the reports: the stale episodes --wait announced
+PROMPT_SEEN = "prompt-announced.json"  # likewise, the permission prompts
 
 
 def _git(root: Path, *args: str) -> str | None:
@@ -293,7 +302,7 @@ def sessions(root: Path) -> list[dict]:
     # model drift is read only where the policy names the harness's transcripts
     pattern = _dispatch.transcripts_pattern(root) if hasattr(_dispatch, "model_drift") else None
     for rec in _dispatch.records(root):
-        last, since = _dispatch.last_output(rec)
+        last, since, prompt = screen(_dispatch, rec)
         rep = _dispatch.session_report(rec, reports) if hasattr(_dispatch, "session_report") else None
         sid = _dispatch.handover_session(rec) if hasattr(_dispatch, "handover_session") else ""
         where = (f"another host (reports via origin{', session ' + sid if sid else ''})" if rec.get("remote") else
@@ -305,7 +314,7 @@ def sessions(root: Path) -> list[dict]:
                     "model_alias": bool(pattern) and _dispatch.is_alias(str(rec.get("model") or "")),
                     "defect": rec.get("defect"), "alive": rec["alive"], "state": rec["state"], "where": where,
                     "minutes_since_start": int((time.time() - int(rec.get("started") or time.time())) // 60),
-                    "last_output": last[-200:], "minutes_since_output": since,
+                    "last_output": last[-200:], "minutes_since_output": since, "prompt": prompt,
                     # the session's own word and whether its phase is over — dispatch's
                     # answer, the one chain acts on; asked of a quiet live worker and
                     # of one that ended (a finished phase is no dead worker)
@@ -315,6 +324,20 @@ def sessions(root: Path) -> list[dict]:
                                    if (not rec["alive"] or (since is not None and since >= WAIT_MINUTES))
                                    and hasattr(_dispatch, "phase_over") else None)})
     return out
+
+
+def screen(_dispatch, rec: dict) -> tuple[str, int | None, str | None]:
+    """A session's last printed line, the minutes since it wrote, and the line
+    of a dialog open on its screen (`dispatch.dialog_line`, the one
+    recogniser) — looked for only on a live tmux window: a detached `claude -p`
+    run never shows one, a tool it may not use is refused there (#377)."""
+    if not (rec.get("tmux_window") and rec.get("alive") and rec.get("runner") != "detached"
+            and hasattr(_dispatch, "dialog_line")):
+        last, since = _dispatch.last_output(rec)
+        return last, since, None
+    tail, since = _dispatch.last_output(rec, PROMPT_LINES)
+    lines = tail.splitlines()
+    return (lines[-1] if lines else ""), since, _dispatch.dialog_line(lines)
 
 
 def reviews_today(root: Path) -> dict:
@@ -538,19 +561,29 @@ def status_age(path: str | None, now: float) -> int | None:
 def resolve_stale_minutes(root: Path, given: int | None = None) -> int:
     """The quiet budget: `--stale-minutes`, else PROCESS_STALE_MINUTES, else
     the policy's `stale_minutes` (dispatch owns the policy), else 60."""
+    return _resolve_minutes(root, given, "PROCESS_STALE_MINUTES", "stale_minutes", STALE_MINUTES)
+
+
+def resolve_prompt_minutes(root: Path, given: int | None = None) -> int:
+    """How long a permission prompt may stand: `--prompt-minutes`, else
+    PROCESS_PROMPT_MINUTES, else the policy's `prompt_minutes`, else 10."""
+    return _resolve_minutes(root, given, "PROCESS_PROMPT_MINUTES", "prompt_minutes", PROMPT_MINUTES)
+
+
+def _resolve_minutes(root: Path, given: int | None, env_name: str, policy_key: str, default: int) -> int:
     if given is not None:
         return given
-    env = os.environ.get("PROCESS_STALE_MINUTES", "").strip()
+    env = os.environ.get(env_name, "").strip()
     if env:
         try:
             return int(env)
         except ValueError:
-            raise SystemExit(f"tower: PROCESS_STALE_MINUTES must be an integer, got {env!r}")
+            raise SystemExit(f"tower: {env_name} must be an integer, got {env!r}")
     try:
         import dispatch as _dispatch
     except ImportError:
-        return STALE_MINUTES
-    return (_dispatch.stale_minutes(root) if hasattr(_dispatch, "stale_minutes") else None) or STALE_MINUTES
+        return default
+    return (getattr(_dispatch, policy_key)(root) if hasattr(_dispatch, policy_key) else None) or default
 
 
 def _epoch_iso(epoch: int | None) -> str | None:
@@ -613,19 +646,66 @@ def stale_sessions(root: Path, stale_minutes: int) -> list[dict]:
     return out
 
 
+# no allowlist entry for a wait loop: the worker runs one simple command per
+# Bash call (dispatch.SHELL_FORM), and that command is what the list names
+PROMPT_REMEDY = ("approve it in the session (attach to its tmux window), or put that one simple command on "
+                 "the permission allowlist so the next run is not stopped")
+
+
+def prompt_sessions(root: Path, prompt_minutes: int) -> list[dict]:
+    """Live tmux sessions on this host whose screen shows a dialog (`screen`)
+    and printed nothing for `prompt_minutes`, while their phase is not over —
+    each as a synthetic `prompt` record naming the dialog line. The episode is
+    the session, its quiet start (the log's mtime) and the line: a prompt
+    answered and raised again after new output is a new one."""
+    try:
+        import dispatch as _dispatch
+    except ImportError:
+        return []
+    now = time.time()
+    reports = _report.read_reports(root)
+    out: list[dict] = []
+    for rec in _dispatch.records(root):
+        if not rec.get("alive") or rec.get("remote"):
+            continue
+        _last, since, line = screen(_dispatch, rec)
+        if line is None or since is None or since < prompt_minutes:
+            continue
+        if _dispatch.phase_over(root, rec, _dispatch.session_report(rec, reports), local=True) is True:
+            continue  # done with its phase, waiting to be stopped
+        log = Path(rec.get("log") or "")
+        quiet_since = int(log.stat().st_mtime) if rec.get("log") and log.is_file() else ""
+        out.append({
+            "state": "prompt", "worker": rec["branch"], "issue": rec.get("issue"), "phase": rec.get("phase"),
+            "host": _report.host_name(), "epoch": int(now), "minutes_quiet": since, "line": line[-200:],
+            "episode": f"{rec.get('started')}:{quiet_since}:{line}",
+            "note": f"at a permission prompt for {since} min — {PROMPT_REMEDY}",
+        })
+    return out
+
+
 def announce_stale(root: Path, seen_path: Path, stale_minutes: int) -> list[dict]:
     """The stale sessions not yet announced in their current episode. The
     file keeps exactly the episodes stale now: a session that commits or
     reports drops out, and its next silence is announced again — once."""
+    return _announce(seen_path, "stale", lambda: stale_sessions(root, stale_minutes))
+
+
+def announce_prompts(root: Path, seen_path: Path, prompt_minutes: int) -> list[dict]:
+    """The permission prompts not yet announced in their episode, as `announce_stale`."""
+    return _announce(seen_path, "prompt", lambda: prompt_sessions(root, prompt_minutes))
+
+
+def _announce(seen_path: Path, what: str, collect) -> list[dict]:
     try:
         seen = json.loads(seen_path.read_text(encoding="utf-8"))
         seen = seen if isinstance(seen, dict) else {}
     except (OSError, ValueError):
         seen = {}
     try:
-        stale = stale_sessions(root, stale_minutes)
+        stale = collect()
     except Exception as exc:  # noqa: BLE001 — one odd record must not end every watch at once
-        print(f"tower: stale check skipped ({type(exc).__name__}: {exc})", file=sys.stderr)
+        print(f"tower: {what} check skipped ({type(exc).__name__}: {exc})", file=sys.stderr)
         return []
     now_seen = {r["worker"]: r["episode"] for r in stale}
     if now_seen != seen:
@@ -640,7 +720,7 @@ def announce_stale(root: Path, seen_path: Path, stale_minutes: int) -> list[dict
 
 # --- findings -----------------------------------------------------------------------
 
-def findings(table: dict, stale_minutes: int) -> list[dict]:
+def findings(table: dict, stale_minutes: int, prompt_minutes: int = PROMPT_MINUTES) -> list[dict]:
     out: list[dict] = []
     b = table.get("balance")
     if b and b["commits"] >= BALANCE_MIN_COMMITS and b["process"] / b["commits"] > PROCESS_HEAVY_SHARE:
@@ -745,6 +825,16 @@ def findings(table: dict, stale_minutes: int) -> list[dict]:
             out.append({"kind": "session-defect", "severity": "high", "what": s["branch"],
                         "because": s["defect"]})
         quiet = s.get("minutes_since_output")
+        if s.get("prompt") and s.get("alive") and s.get("phase_over") is not True:
+            # a permission dialog waits on a human at the screen, not on the
+            # steward's answer: no question-unrouted beside it (#377)
+            if quiet is not None and quiet >= prompt_minutes:
+                out.append({"kind": "permission-prompt", "severity": "high",
+                            "what": f"{s['branch']} ({s.get('phase')}) sits at a permission prompt for "
+                                    f"{quiet} min: {s['prompt'][:160]}",
+                            "because": f"a tmux worker stops at a tool it may not use until someone answers — "
+                                       f"{PROMPT_REMEDY}"})
+            continue
         if not s.get("alive") or quiet is None or quiet < WAIT_MINUTES or s.get("phase_over") is True:
             continue
         # its phase end cannot be read (no plan of its own, origin not
@@ -873,7 +963,8 @@ def local_findings(root: Path) -> list[dict]:
 
 # --- assembly -------------------------------------------------------------------------
 
-def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
+def build(root: Path, stale_minutes: int = 60, *, remote: bool = False,
+          prompt_minutes: int = PROMPT_MINUTES) -> dict:
     fetch_ok = True
     if remote:
         fetch_ok = _git(root, "fetch", "--quiet", "origin") is not None and _report.fetch_reports(root)
@@ -900,7 +991,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False) -> dict:
         "reports": latest_reports(root, remote=remote),
         "remote_fetched": fetch_ok if remote else None,
     }
-    table["findings"] = findings(table, stale_minutes) + local_findings(root)
+    table["findings"] = findings(table, stale_minutes, prompt_minutes) + local_findings(root)
     try:
         table["findings"] += codex_findings(root, wts)
     except Exception as exc:  # noqa: BLE001 — a trace that cannot be read costs a finding, never the table
@@ -967,12 +1058,15 @@ def render(table: dict) -> str:
     return "\n".join(lines)
 
 
-def wait(root: Path, timeout: float, states: tuple[str, ...], stale_minutes: int = STALE_MINUTES) -> int:
+def wait(root: Path, timeout: float, states: tuple[str, ...], stale_minutes: int = STALE_MINUTES,
+         prompt_minutes: int = PROMPT_MINUTES) -> int:
     """Block until this host's reports file gains a line in `states`; print the
     matching records as JSON lines. With `stale` in `states`, a live
     dispatched session silent for `stale_minutes` (`stale_sessions`) ends the
     wait too, as a synthetic `stale` record — once per stale episode, so a
-    re-armed watch does not wake on the same silence again. Exit 0 on a
+    re-armed watch does not wake on the same silence again; with `prompt`, a
+    live tmux session at a permission prompt for `prompt_minutes`
+    (`prompt_sessions`), as a synthetic `prompt` record, likewise. Exit 0 on a
     match, 3 on timeout, 2 when `root` is not a git clone. A harness-neutral
     wake: the caller runs it in the background and treats its exit as the
     event. This host only."""
@@ -982,7 +1076,8 @@ def wait(root: Path, timeout: float, states: tuple[str, ...], stale_minutes: int
         return 2
     offset = path.stat().st_size if path.is_file() else 0
     deadline = time.monotonic() + timeout
-    next_stale = time.monotonic() if "stale" in states else None  # the first look at once
+    # the first look at once
+    next_stale = time.monotonic() if "stale" in states or "prompt" in states else None
     while time.monotonic() < deadline:
         time.sleep(1)
         size = path.stat().st_size if path.is_file() else 0
@@ -999,7 +1094,10 @@ def wait(root: Path, timeout: float, states: tuple[str, ...], stale_minutes: int
             hits = [r for r in _report._parse(text, _report.host_name()) if r["state"] in states]
         if not hits and next_stale is not None and time.monotonic() >= next_stale:
             next_stale = time.monotonic() + STALE_POLL_S
-            hits = announce_stale(root, path.parent / STALE_SEEN, stale_minutes)
+            if "prompt" in states:
+                hits += announce_prompts(root, path.parent / PROMPT_SEEN, prompt_minutes)
+            if "stale" in states:
+                hits += announce_stale(root, path.parent / STALE_SEEN, stale_minutes)
         if hits:
             for rec in hits:
                 print(json.dumps(rec, ensure_ascii=False))
@@ -1026,6 +1124,9 @@ def main(argv: list[str]) -> int:
     p.add_argument("--stale-minutes", type=int, default=None,
                    help="quiet budget for a worker (default: PROCESS_STALE_MINUTES, else the policy's "
                         "`stale_minutes`, else 60)")
+    p.add_argument("--prompt-minutes", type=int, default=None,
+                   help="how long a tmux worker may sit at a permission prompt (default: "
+                        "PROCESS_PROMPT_MINUTES, else the policy's `prompt_minutes`, else 10)")
     p.add_argument("--min-severity", choices=("high", "medium", "low"), default="low",
                    help="drop findings below this severity")
     p.add_argument("--remote", action="store_true", default=os.environ.get("PROCESS_TOWER_REMOTE") == "1",
@@ -1034,11 +1135,12 @@ def main(argv: list[str]) -> int:
                    help="with --json: print only these top-level keys (repeatable)")
     p.add_argument("--wait", action="store_true",
                    help="block until a report line arrives (or, with `stale` in --states, a live "
-                        "session goes stale); exit 0 on a match, 3 on timeout")
+                        "session goes stale; with `prompt`, a tmux session sits at a permission "
+                        "prompt); exit 0 on a match, 3 on timeout")
     p.add_argument("--timeout", type=float, default=1800, help="--wait: seconds before exit 3")
     p.add_argument("--states", type=_states, default=WAIT_STATES,
                    help="--wait: comma-separated report states that end the wait; `stale` adds "
-                        "silent live sessions")
+                        "silent live sessions, `prompt` tmux sessions at a permission prompt")
     p.add_argument("root", nargs="?", default=".")
     a = p.parse_args(argv)
     if a.section and not a.json:
@@ -1050,9 +1152,10 @@ def main(argv: list[str]) -> int:
     if top:
         root = Path(top.strip())
     stale_minutes = resolve_stale_minutes(root, a.stale_minutes)
+    prompt_minutes = resolve_prompt_minutes(root, a.prompt_minutes)
     if a.wait:
-        return wait(root, a.timeout, a.states, stale_minutes)
-    table = build(root, stale_minutes, remote=a.remote)
+        return wait(root, a.timeout, a.states, stale_minutes, prompt_minutes)
+    table = build(root, stale_minutes, remote=a.remote, prompt_minutes=prompt_minutes)
     keep = {"high": ("high",), "medium": ("high", "medium"), "low": ("high", "medium", "low")}[a.min_severity]
     table["findings"] = [f for f in table["findings"] if f["severity"] in keep]
     if a.section:
