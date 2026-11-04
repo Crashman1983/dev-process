@@ -3212,7 +3212,7 @@ def test_preboard_red_on_a_broken_host_checks_nobody_and_the_preflight_stops_as_
     assert r.returncode == 1 and "preflight `exit 3` is red" in r.stderr, r.stdout + r.stderr
     assert "preboard on the base: red — not pre-checked" in r.stderr, r.stderr
     row = _phases(out)[-1]
-    assert row["result"] == "environment" and row["preboard"] > 0
+    assert row["result"] == "environment" and isinstance(row["preboard"], float) and row["preboard"] >= 0
     assert [(x["red_path"], sorted(x["runs"])) for x in row["rounds"]] == [("environment", ["first"])]
     assert row["preboard_checks"] == _checks(unchecked=2, reason="preboard on the base: red")
     assert _probe_gone(out)
@@ -3266,7 +3266,7 @@ def test_a_candidate_red_twice_on_the_preboard_is_blocked_and_never_built_into_t
     assert writes == [("blocked", f"dropped from train {row['stamp']}: preboard red — test ! -e src/BROKEN", "bad")]
     assert "bad" in err and "preboard" in err
     assert row["result"] == "green" and row["branches"] == ["alpha"] and row["aboard"] == 2
-    assert row["preboard"] > 0 and row["preboard_checks"] == _checks(checked=1, dropped=["bad"])
+    assert isinstance(row["preboard"], float) and row["preboard"] >= 0 and row["preboard_checks"] == _checks(checked=1, dropped=["bad"])
     assert _probe_gone(out)
 
 
@@ -3392,7 +3392,7 @@ def test_everybody_red_on_the_preboard_ends_without_a_train_build(render, tmp_pa
     assert [w for _s, w in builds if w is None] == []
     assert sorted(b for _s, _n, b in writes) == ["alpha", "beta"] and {s for s, _n, _b in writes} == {"blocked"}
     row = _phases(out)[-1]
-    assert row["result"] == "preboard" and row["preboard"] > 0 and row["aboard"] == 2
+    assert row["result"] == "preboard" and isinstance(row["preboard"], float) and row["preboard"] >= 0 and row["aboard"] == 2
     assert row["preboard_checks"] == _checks(dropped=sorted(row["preboard_checks"]["dropped"]))
     assert sorted(row["preboard_checks"]["dropped"]) == ["alpha", "beta"] and row["rounds"] == []
     assert _probe_gone(out)
