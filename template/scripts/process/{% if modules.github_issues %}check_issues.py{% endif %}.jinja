@@ -350,7 +350,10 @@ def _old_matches(findings: list[dict], old: list[dict]) -> list[bool]:
         return {k: v for k, v in f.items() if k not in _BACKFILL}
 
     def fits(f: dict, o: dict) -> bool:
-        return core(f) == core(o) and all(k == "issue" or k not in o or o[k] == f.get(k) for k in _BACKFILL)
+        # `issue` and `origin` say where a finding is tracked and where it came from, not
+        # what it is: a changed value there keeps the finding old (#362)
+        return core(f) == core(o) and all(k in ("issue", "origin") or k not in o or o[k] == f.get(k)
+                                          for k in _BACKFILL)
 
     def exact(f: dict, o: dict) -> bool:
         return {k: v for k, v in f.items() if k != "issue"} == {k: v for k, v in o.items() if k != "issue"}

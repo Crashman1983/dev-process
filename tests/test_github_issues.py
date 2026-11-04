@@ -1153,7 +1153,7 @@ def test_restating_an_old_finding_with_origin_keeps_it_old(render, tmp_path):
 
 def test_another_changed_field_beside_origin_stays_new(render, tmp_path):
     """#362 AC-2: a field outside `issue`/`class`/`rule`/`at`/`origin` still makes the finding
-    new; so does an `origin=` that contradicts the one at the fork point (fail closed)."""
+    new. AC-1 holds for a changed `origin=` value too: draft → fix is the same finding."""
     out = _branch(_render(render, tmp_path), VALID_REPORT + OLD)
     for fields in ("origin=draft kind=implementation ", "origin=draft by=claude ", "kind=test-gap "):
         _report(out, "2026-10-20-old.md", VALID_REPORT + OLD.replace("issue=- ", f"issue=- {fields}"))
@@ -1167,7 +1167,7 @@ def test_another_changed_field_beside_origin_stays_new(render, tmp_path):
     out2 = _branch(_render(render, tmp_path / "two"), VALID_REPORT + drafted)
     _report(out2, "2026-10-20-old.md", VALID_REPORT + drafted.replace("origin=draft", "origin=fix"))
     r = _run(out2)
-    assert r.returncode == 1 and "without class= and at=" in r.stdout, r.stdout
+    assert r.returncode == 0 and NO_AT not in r.stdout and NO_CLASS not in r.stdout, r.stdout
 
 
 def test_a_same_title_recurrence_is_new(render, tmp_path):
