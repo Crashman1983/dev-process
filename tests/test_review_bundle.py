@@ -2210,6 +2210,8 @@ def test_an_unanswered_merge_check_is_named_with_its_base_never_clean(render, tm
     assert r.returncode == 0, r.stderr
     assert "could not check (" in r.stderr and main_tip in r.stderr, r.stderr
     assert "Review bundle" in r.stdout
+    # the reviewer reads the bundle, not stderr: the note is in it (refute v2.87)
+    assert "**MERGE WARNING:** conflict pre-check: could not check (" in r.stdout, r.stdout[:400]
 
 
 def test_a_stacked_branch_names_its_conflicting_parent(render, tmp_path):
@@ -2220,8 +2222,35 @@ def test_a_stacked_branch_names_its_conflicting_parent(render, tmp_path):
     (out / "gadget.py").write_text("g = 1\n")
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "child: gadget")
-    for args in ((), ("--base", "feat")):
-        r = _run(out, "--skip-preflight", *args)
-        assert r.returncode == 1, r.stderr
-        assert "widget.py" in r.stderr and "parent branch feat" in r.stderr, r.stderr
-        assert "rebase feat onto main" in r.stderr, r.stderr
+    # named with --base: asserted as the parent
+    r = _run(out, "--skip-preflight", "--base", "feat")
+    assert r.returncode == 1, r.stderr
+    assert "widget.py" in r.stderr and "parent branch feat" in r.stderr, r.stderr
+    assert "rebase feat onto main" in r.stderr, r.stderr
+    # found by the graph alone: a suspect, with both remedies (refute v2.87)
+    r = _run(out, "--skip-preflight")
+    assert r.returncode == 1, r.stderr
+    assert "widget.py" in r.stderr and "which feat carries too" in r.stderr, r.stderr
+    assert "if this branch is stacked on feat, rebase feat onto main" in r.stderr, r.stderr
+    assert "otherwise merge main into the branch" in r.stderr and "parent branch" not in r.stderr, r.stderr
+
+
+def test_a_child_or_a_backup_is_never_named_the_parent(render, tmp_path):
+    """Refute v2.87: a branch started from the reviewed one, or an older copy
+    of it, has the same graph as a parent — never asserted, never the only remedy."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _seed_repo(out)  # feat changes widget.py
+    _conflict_on_main(out)
+    feat_first = _git(out, "rev-list", "--reverse", "main..HEAD").stdout.split()[0]
+    _git(out, "branch", "feat-backup", feat_first)
+    _git(out, "checkout", "-q", "-b", "feat-followup", feat_first)
+    (out / "other.py").write_text("o = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "followup")
+    _git(out, "checkout", "-q", "feat")
+    (out / "more.py").write_text("m = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: more")
+    r = _run(out, "--skip-preflight")
+    assert r.returncode == 1 and "widget.py" in r.stderr, r.stderr
+    assert "parent branch" not in r.stderr and "merge main into the branch" in r.stderr, r.stderr

@@ -301,8 +301,9 @@ def sessions(root: Path) -> list[dict]:
     reports = _report.read_reports(root)
     # model drift is read only where the policy names the harness's transcripts
     pattern = _dispatch.transcripts_pattern(root) if hasattr(_dispatch, "model_drift") else None
+    input_line = _dispatch.prompt_pattern(root) if hasattr(_dispatch, "prompt_pattern") else None
     for rec in _dispatch.records(root):
-        last, since, prompt = screen(_dispatch, rec)
+        last, since, prompt = screen(_dispatch, rec, input_line)
         rep = _dispatch.session_report(rec, reports) if hasattr(_dispatch, "session_report") else None
         sid = _dispatch.handover_session(rec) if hasattr(_dispatch, "handover_session") else ""
         where = (f"another host (reports via origin{', session ' + sid if sid else ''})" if rec.get("remote") else
@@ -326,18 +327,20 @@ def sessions(root: Path) -> list[dict]:
     return out
 
 
-def screen(_dispatch, rec: dict) -> tuple[str, int | None, str | None]:
+def screen(_dispatch, rec: dict, pattern=None) -> tuple[str, int | None, str | None]:
     """A session's last printed line, the minutes since it wrote, and the line
     of a dialog open on its screen (`dispatch.dialog_line`, the one
-    recogniser) — looked for only on a live tmux window: a detached `claude -p`
-    run never shows one, a tool it may not use is refused there (#377)."""
+    recogniser, below the input line `pattern` — `dispatch.prompt_pattern`,
+    what `say` reads) — looked for only on a live tmux window: a detached
+    `claude -p` run never shows one, a tool it may not use is refused there (#377)."""
     if not (rec.get("tmux_window") and rec.get("alive") and rec.get("runner") != "detached"
             and hasattr(_dispatch, "dialog_line")):
         last, since = _dispatch.last_output(rec)
         return last, since, None
     tail, since = _dispatch.last_output(rec, PROMPT_LINES)
     lines = tail.splitlines()
-    return (lines[-1] if lines else ""), since, _dispatch.dialog_line(lines)
+    found = _dispatch.dialog_line(lines, pattern) if pattern is not None else _dispatch.dialog_line(lines)
+    return (lines[-1] if lines else ""), since, found
 
 
 def reviews_today(root: Path) -> dict:
@@ -571,14 +574,22 @@ def resolve_prompt_minutes(root: Path, given: int | None = None) -> int:
 
 
 def _resolve_minutes(root: Path, given: int | None, env_name: str, policy_key: str, default: int) -> int:
+    """A threshold in minutes from whichever source sets it. A negative one is
+    refused (refute v2.87: it read as "at once"); 0 is "at once" on purpose, a
+    look at every quiet worker now."""
     if given is not None:
+        if given < 0:
+            raise SystemExit(f"tower: --{policy_key.replace('_', '-')} must be 0 or more, got {given}")
         return given
     env = os.environ.get(env_name, "").strip()
     if env:
         try:
-            return int(env)
+            value = int(env)
         except ValueError:
             raise SystemExit(f"tower: {env_name} must be an integer, got {env!r}")
+        if value < 0:
+            raise SystemExit(f"tower: {env_name} must be 0 or more, got {value}")
+        return value
     try:
         import dispatch as _dispatch
     except ImportError:
@@ -665,10 +676,11 @@ def prompt_sessions(root: Path, prompt_minutes: int) -> list[dict]:
     now = time.time()
     reports = _report.read_reports(root)
     out: list[dict] = []
+    input_line = _dispatch.prompt_pattern(root) if hasattr(_dispatch, "prompt_pattern") else None
     for rec in _dispatch.records(root):
         if not rec.get("alive") or rec.get("remote"):
             continue
-        _last, since, line = screen(_dispatch, rec)
+        _last, since, line = screen(_dispatch, rec, input_line)
         if line is None or since is None or since < prompt_minutes:
             continue
         if _dispatch.phase_over(root, rec, _dispatch.session_report(rec, reports), local=True) is True:

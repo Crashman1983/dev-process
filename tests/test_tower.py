@@ -947,3 +947,28 @@ def test_prompt_minutes_resolve_like_the_stale_budget(render, tmp_path, monkeypa
     r = subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json"], cwd=out,
                        capture_output=True, text=True, env={**os.environ, "PROCESS_PROMPT_MINUTES": "ten"})
     assert r.returncode != 0 and "PROCESS_PROMPT_MINUTES" in r.stderr
+    # a negative threshold is no "at once" (refute v2.87); 0 is, on purpose
+    for env in ({"PROCESS_PROMPT_MINUTES": "-5"}, {"PROCESS_STALE_MINUTES": "-1"}):
+        r = subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json"], cwd=out,
+                           capture_output=True, text=True, env={**os.environ, **env})
+        assert r.returncode != 0 and "0 or more" in r.stderr, (env, r.stderr)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json", "--prompt-minutes", "-1"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode != 0 and "0 or more" in r.stderr, r.stderr
+    monkeypatch.setenv("PROCESS_PROMPT_MINUTES", "0")
+    assert tower.resolve_prompt_minutes(out) == 0
+
+
+def test_the_tower_reads_the_input_line_the_policy_names(render, tmp_path, monkeypatch):
+    """Refute v2.87: on a harness whose input line is not `>`, a question in the
+    worker's prose above it is no dialog — the tower reads `say_prompt` as `say` does."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    import dispatch as d
+    monkeypatch.setattr(tower._report, "read_reports", lambda _root: [])
+    prose = "● Done.\nDo you want to keep the old API (y/n)?\ncodex> \n"
+    _tmux_session(d, monkeypatch, prose, 11)
+    assert tower.sessions(out)[0]["prompt"] is not None  # the default input line is not on this screen
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"say_prompt": r"^codex> ?(.*)$"}))
+    assert tower.sessions(out)[0]["prompt"] is None
+    assert [k for k, _s in _prompt_kinds(tower, out)] == []

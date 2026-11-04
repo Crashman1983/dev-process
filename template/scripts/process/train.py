@@ -1861,8 +1861,12 @@ def conflict_hints(root: Path, cands: list[dict]) -> list[dict]:
     of the two tips sees them (`check_review._auto_merge`): {"branches": [a, b],
     "paths": [...]}, `paths` None where git could not tell — never read as clean.
     A note for `plan` only: `run` calls `plan()` and must not pay for it (#379);
-    the run itself drops the later of a conflicting pair (`build_train`)."""
-    aboard = [c["branch"] for c in cands if c["eligible"]]
+    the run itself drops the later of a conflicting pair (`build_train`). Pairs
+    come in boarding order — oldest first, the order `_run_batch` sorts by — so
+    "the later" is the one the run drops (refute v2.87: listing order named the
+    wrong branch)."""
+    aboard = [c["branch"] for c in sorted((c for c in cands if c["eligible"]),
+                                          key=lambda c: -(c.get("hours_waiting") or 0))]
     hints: list[dict] = []
     for i, first in enumerate(aboard):
         for second in aboard[i + 1:]:

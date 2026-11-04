@@ -1887,9 +1887,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
             _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch))
         plan_paths = uncleared_plans(root, tip, branch) if tip else []
     if phase == "review" and not plan_review:
-        tip = _remote_head(root, branch) if remote else (
-            _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}") or _remote_head(root, branch))
-        why = review_conflict(root, branch, tip)
+        # the tip the session will review — origin's, as `plan_review_due_plans` reads
+        # it — not a stale local ref the sync is about to move (refute v2.87)
+        why = review_conflict(root, branch, reviewed_tip(root, branch, remote=remote, fetch=not dry_run))
         if why:
             print(f"dispatch: not starting — {why}", file=sys.stderr)
             return 3
@@ -2244,6 +2244,24 @@ _DIALOG = re.compile(r"^\s*[❯>]?\s*\d+\.\s+(Yes|No)\b|Do you want to|^[\s│|]
                      re.IGNORECASE | re.MULTILINE)
 
 
+def prompt_pattern(root: Path) -> re.Pattern[str]:
+    """The worker's input line: the policy's `say_prompt` (with a group: what is
+    still typed), else the default — one reading for `say` and the tower, so a
+    harness whose input line is not `>` has its dialogs told from its prose by
+    both (refute v2.87)."""
+    try:
+        custom = load_policy(root).get("say_prompt")
+        if isinstance(custom, str) and custom:
+            compiled = re.compile(custom)
+            if compiled.groups >= 1:
+                return compiled
+            print("dispatch: say_prompt needs a group (what is still typed) — using the default",
+                  file=sys.stderr)
+    except (re.error, SystemExit):
+        pass
+    return _PROMPT_LINE
+
+
 def dialog_line(lines: list[str] | None, pattern: re.Pattern[str] = _PROMPT_LINE) -> str | None:
     """The line of an open dialog (the first that `_DIALOG` matches), else None.
     A dialog replaces or sits below the input line; the same words in the
@@ -2285,18 +2303,7 @@ def say(root: Path, branch: str, text: str) -> int:
     if state != "live":
         print(f"dispatch: {branch} is {state} — nobody is listening", file=sys.stderr)
         return 3
-    pattern = _PROMPT_LINE
-    try:
-        custom = load_policy(root).get("say_prompt")
-        if isinstance(custom, str) and custom:
-            compiled = re.compile(custom)
-            if compiled.groups >= 1:
-                pattern = compiled
-            else:
-                print("dispatch: say_prompt needs a group (what is still typed) — using the default",
-                      file=sys.stderr)
-    except (re.error, SystemExit):
-        pass
+    pattern = prompt_pattern(root)
     window = rec["tmux_window"]
     if _dialog_open(_screen(window), pattern):
         # typing now would answer the dialog, not reach the worker (refutation)
@@ -2624,23 +2631,38 @@ def _integration_base(root: Path, tip: str) -> str:
         return ""
 
 
-def review_conflict(root: Path, branch: str, tip: str) -> str | None:
+def review_conflict(root: Path, branch: str, tip: str | None) -> str | None:
     """Why a code review of `branch` at `tip` must not start — it does not merge
     into the integration ref (`check_review.integration_conflict`, #379) — or
-    None. A merge that cannot be checked is said, and does not refuse."""
-    refusal, note = _review.integration_conflict(root, tip or branch, branch)
+    None. A merge that cannot be checked is said, and does not refuse; without
+    a readable tip nothing is checked — never the local ref in its place (refute
+    v2.87: a stale local ref refused a branch whose origin tip merged cleanly)."""
+    if not tip:
+        print(f"dispatch: {branch}: conflict pre-check: could not check (no readable tip of the branch "
+              "the review reads) — not judged clean; the review bundle checks again", file=sys.stderr)
+        return None
+    refusal, note = _review.integration_conflict(root, tip, branch)
     if note:
         print(f"dispatch: {branch}: {note}", file=sys.stderr)
     return refusal
 
 
 def fork_problem(root: Path, tip: str) -> str | None:
-    """Why `tip` has no single fork point by the gate's rule, or None."""
+    """Why `tip` has no single fork point by the gate's rule, or None. No fork
+    point at all while an integration ref resolves (a shallow clone, missing
+    history) is a problem too: no fork reads as no own plan (refute v2.87, a
+    depth-50 cloud clone sent a branch with its plan to /quick). On the
+    integration ref itself, or without one, there is no range and no problem."""
     try:
-        _review.merge_base(root, tip)
+        if _review.merge_base(root, tip):
+            return None
     except _review.GitReadError as exc:
         return str(exc)
-    return None
+    refs = _review.forkless_refs(root, tip)
+    if not refs:
+        return None
+    fix = "git fetch --unshallow" if _review.is_shallow(root) else "fetch the missing history"
+    return f"{tip[:12]} shares no commit with {', '.join(refs)} here — no fork point ({fix})"
 
 
 def new_code_on_origin(root: Path, branch: str, *, fetch: bool = True) -> bool | None:
@@ -2917,6 +2939,25 @@ def plan_review_due(root: Path, branch: str, *, remote: bool = False, fetch: boo
     return due[0] if due else None
 
 
+def reviewed_tip(root: Path, branch: str, *, remote: bool = False, fetch: bool = True) -> str | None:
+    """The tip a review session of `branch` reads: origin's, where `sync_worktree`
+    brings the worktree — the local ref where it is ahead of origin or origin
+    lacks the branch (never for a `remote` session). None when origin cannot be
+    asked (#207); "" when no tip is here to read (without `fetch` nothing is
+    fetched)."""
+    tip = _remote_head_or_none(root, branch)
+    if tip is None:
+        return None
+    if tip and _git(root, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0 \
+            and (not fetch or _git(root, "fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0):
+        return ""
+    if not remote:
+        local = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}")
+        if not tip or (local and _git(root, "merge-base", "--is-ancestor", tip, local).returncode == 0):
+            tip = local
+    return tip or ""
+
+
 def plan_review_due_plans(root: Path, branch: str, *, remote: bool = False,
                           fetch: bool = True) -> tuple[str, list[str]] | None:
     """Why a review of `branch` is a plan review, or None for a code review
@@ -2935,16 +2976,7 @@ def plan_review_due_plans(root: Path, branch: str, *, remote: bool = False,
     the plan review. #207: an origin that cannot be asked is no absent branch;
     a `remote` session sees origin only, never a local lead; without `fetch`
     (`--dry-run`) nothing is fetched and an unseen tip is a code review."""
-    tip = _remote_head_or_none(root, branch)
-    if tip is None:
-        return None
-    if tip and _git(root, "cat-file", "-e", f"{tip}^{{commit}}").returncode != 0 \
-            and (not fetch or _git(root, "fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0):
-        return None
-    if not remote:
-        local = _out(root, "rev-parse", "--verify", "-q", f"{branch}^{{commit}}")
-        if not tip or (local and _git(root, "merge-base", "--is-ancestor", tip, local).returncode == 0):
-            tip = local
+    tip = reviewed_tip(root, branch, remote=remote, fetch=fetch)
     base = _integration_base(root, tip) if tip else ""
     if not tip or not base:
         return None

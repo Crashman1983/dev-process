@@ -1336,16 +1336,17 @@ def main(argv: list[str]) -> int:
     if extra:
         raise SystemExit(f"{USAGE} — unknown argument(s): {' '.join(extra)}")
     root = _repo_root(Path.cwd())
+    merge_note = None
     if not plan_review:
         # a code review of a branch that cannot merge is wasted (#379): asked
         # before the preflight, which takes minutes; a plan reviewer reads no code
         branch = (_git(root, "symbolic-ref", "-q", "--short", "HEAD") or "").strip()
-        refusal, note = _review_gate.integration_conflict(root, "HEAD", branch, base)
+        refusal, merge_note = _review_gate.integration_conflict(root, "HEAD", branch, base)
         if refusal:
             print(f"review bundle blocked: {refusal}", file=sys.stderr)
             return 1
-        if note:
-            print(f"make_review_bundle: {note}", file=sys.stderr)
+        if merge_note:
+            print(f"make_review_bundle: {merge_note}", file=sys.stderr)
     if not skip_preflight:
         ok, status, detail = _preflight(root)
         if not ok:
@@ -1353,6 +1354,9 @@ def main(argv: list[str]) -> int:
             return status
     included = _plans_under_review(root, _resolve_base(root, base), plan_filter)
     text = build(root, base, plan_filter, since, included, declared_tier, plan_review)
+    if merge_note:  # the reviewer reads the bundle, not this stderr (refute v2.87)
+        head, sep, rest = text.partition("\n")
+        text = f"{head}{sep}\n**MERGE WARNING:** {merge_note}\n{sep}{rest}"
     for warn in (ln for ln in text.splitlines() if ln.startswith(("**SIZE WARNING:**", "**REFUTE WARNING:**",
                                                                  "**FIX-PASS WARNING:**", "DELTA_TOUCHES "))):
         print("make_review_bundle: " + warn.replace("**", ""), file=sys.stderr)

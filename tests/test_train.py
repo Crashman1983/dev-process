@@ -2644,6 +2644,21 @@ def test_plan_names_conflicts_between_candidates_that_may_board(render, tmp_path
     assert "alpha" in line and "gamma" in line and "beta" not in line, text
 
 
+def test_conflict_hints_come_in_boarding_order(render, tmp_path, monkeypatch):
+    """Refute v2.87: the run boards oldest first and drops the later of a pair —
+    the hint names that one, not the alphabetically later."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    monkeypatch.setattr(train._review, "_auto_merge", lambda root, a, b: ("tree", {"src/a.py"}))
+    cands = [{"branch": "a", "eligible": True, "hours_waiting": 1},
+             {"branch": "z", "eligible": True, "hours_waiting": 30},
+             {"branch": "n", "eligible": False, "hours_waiting": 99}]
+    assert train.conflict_hints(out, cands) == [{"branches": ["z", "a"], "paths": ["src/a.py"]}]
+    text = train.render_plan({"base": "main", "ready": True, "why": "w", "candidates": [],
+                              "conflicts": train.conflict_hints(out, cands)})
+    assert "z × a conflict" in text and "drops a unless z" in text, text
+
+
 def test_run_does_not_compute_the_conflict_hints(render, tmp_path, monkeypatch, capsys):
     """#379: the hint is the plan's output only — `run` calls plan() and must stay as fast."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
