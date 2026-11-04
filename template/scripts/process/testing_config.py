@@ -53,8 +53,9 @@ def _lanes(raw) -> dict[str, dict]:
             raise ConfigError(f"lanes.{name} must be an object")
         wait = spec.get("wait", DEFAULT_LANES.get(name, {}).get("wait", 300.0))
         nice = spec.get("nice", 0)
-        if isinstance(wait, bool) or not isinstance(wait, (int, float)) or wait < 0:
-            raise ConfigError(f"lanes.{name}.wait must be seconds ≥ 0")
+        if isinstance(wait, bool) or not isinstance(wait, (int, float)) \
+                or not math.isfinite(wait) or wait < 0:
+            raise ConfigError(f"lanes.{name}.wait must be finite seconds ≥ 0")
         if isinstance(nice, bool) or not isinstance(nice, int) or not 0 <= nice <= 19:
             raise ConfigError(f"lanes.{name}.nice must be an integer 0-19")
         lanes[name] = {"wait": float(wait), "nice": nice}
@@ -95,8 +96,9 @@ def _stack(name: str, raw) -> dict:
     if unmapped not in UNMAPPED:
         raise ConfigError(f"{where}.unmapped must be one of {', '.join(UNMAPPED)}")
     timeout = raw.get("timeout", DEFAULT_TIMEOUT)
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
-        raise ConfigError(f"{where}.timeout must be seconds > 0")
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) \
+            or not math.isfinite(timeout) or timeout <= 0:
+        raise ConfigError(f"{where}.timeout must be finite seconds > 0")
     cwd = raw.get("cwd", ".")
     if not isinstance(cwd, str) or Path(cwd).is_absolute() or ".." in Path(cwd).parts:
         raise ConfigError(f"{where}.cwd must be a path inside the repository")
