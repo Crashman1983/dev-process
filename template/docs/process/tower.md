@@ -375,7 +375,9 @@ directory beforehand. An allowlist cannot match a Bash command with
 shell variables, `${…}`, `$(…)` or brace groups, and the worker waits on
 a confirmation (downstream, for hours; #323): every prompt of the Claude
 policy ends with a shell-form block — one simple command per Bash call,
-files through Write/Edit, reading through Read/Grep/Glob. The policy key
+files through Write/Edit, reading through Read/Grep/Glob, and a wait as a
+background job or one check per call, never an `until …; do sleep …; done`
+loop (#377: a review session stood at that loop's prompt for 155 minutes). The policy key
 `worker_shell_form` replaces it with the project's own string (copy the
 template's wording to extend it), `""` drops it; the Codex variant
 ignores the key, and a cell whose command is `codex` (the cross-model
