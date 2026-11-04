@@ -1499,6 +1499,27 @@ def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     return None
 
 
+def forkless_refs(root: Path, tip: str = "HEAD") -> list[str]:
+    """The integration refs that resolve when no fork point was found — empty when none
+    does or one contains tip (on the integration ref: no range, a note). Otherwise each
+    of them shares no commit with tip here: a shallow clone, or the fork not in history.
+    The gates that bound a branch range ask here before they note "no range" (#297, #302)."""
+    listed = _git_bytes(root, "for-each-ref", "--format=%(refname:short)",
+                        "refs/remotes/*/main", "refs/remotes/*/master")
+    candidates = dict.fromkeys([*integration_refs(root), *(listed or b"").decode(errors="replace").split()])
+    resolved = [ref for ref in candidates
+                if _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None]
+    if any(_git_bytes(root, "merge-base", "--is-ancestor", tip, ref) is not None for ref in resolved):
+        return []
+    return resolved
+
+
+def is_shallow(root: Path) -> bool:
+    """Is this clone shallow? A failed read answers False: the caller's remedy then names
+    the missing history, not `--unshallow`."""
+    return (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
+
+
 def full_round_base_problem(root: Path, base: str, head: str) -> str | None:
     """Why `base` cannot carry a FULL review round of `head` — None when it can.
 
@@ -2230,8 +2251,7 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     error = History(git_error=True)
     head_id = _commit_id(root, head)
     if not head_id:
-        shallow = (_git_bytes(root, "rev-parse", "--is-shallow-repository") or b"").strip() == b"true"
-        return History(shallow_missing=True) if shallow else History(in_history=False)
+        return History(shallow_missing=True) if is_shallow(root) else History(in_history=False)
     tip_id = _commit_id(root, tip)
     if not tip_id:
         return error
