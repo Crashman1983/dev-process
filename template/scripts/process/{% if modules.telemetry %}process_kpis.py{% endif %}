@@ -2409,7 +2409,7 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
     logs) and the merged works git holds (`merged_works`, #341); one both know counts
     once: git's merge time before the report's, the host's dispatch start before
     git's earliest author time, git's start before a report's. Escapes count from the
-    work's first merge (its deploy where a train row has it) on both paths."""
+    work's first merge (its deploy where that merge's own train row has it) on both paths."""
     import check_review as _review  # noqa: PLC0415
     import tower  # noqa: PLC0415 — the one owner of the integration branch
 
@@ -2567,7 +2567,17 @@ def flow_items(root: Path, *, issue: int | None = None, branch: str | None = Non
         escapes = None
         firsts = [t for t in (g["first"] if g else None, done[0] if done else None) if t is not None]
         first_merge = min(firsts) if firsts else None
-        first_deploy = _first_deploy(rows, bs, first_merge) if first_merge else deployed["value"]
+        # only the first merge's OWN train row moves the window to its deploy (#342): `bs` also
+        # names later phases, and a later phase's deploy would open it late and miss a fix in
+        # between — without that row (merged with `finish`) it opens at the merge, as on a clone
+        first_branches: set[str] = set()
+        if g and g["first"] == first_merge:
+            first_branches |= {e["branch"] for e in g["events"]
+                               if e["when"] == first_merge and e["kind"] == "train" and e["branch"]}
+        if done and done[0] == first_merge:
+            first_branches |= {r.get("worker") or r.get("branch") for r, t in mine
+                               if t == first_merge and r.get("state") == "done"}
+        first_deploy = _first_deploy(rows, first_branches, first_merge) if first_merge else deployed["value"]
         window_from = first_deploy or first_merge
         if window_from and regressions is not None:
             horizon = window_from + timedelta(days=follow_up_days)
@@ -3057,6 +3067,10 @@ def size_table(root: Path, lo: datetime = _ALL_TIME[0], hi: datetime = _ALL_TIME
                           "rounds_per_100_lines": per_100,
                           "process_per_product_line": round(sum(w["process"] for w in with_process) / product, 2)
                           if product else "n/a"}
+    if got["events"] is None:
+        # git not read: no work's lines are known, so no step holds a count — unknown, never 0 (#346)
+        buckets = {label: dict.fromkeys(("works", "rounds_median", "share_3plus", "rounds_per_100_lines",
+                                         "process_per_product_line")) for label in SIZE_STEPS}
     stacks = _stacks(root)
     spread: dict | str = stacks if isinstance(stacks, str) else {}
     if not isinstance(stacks, str):
@@ -3110,7 +3124,8 @@ def size(root: Path | None = None, window: tuple[datetime, datetime] | None = No
           f"{'rounds/100 lines':>16} {'process lines/product line':>26}")
     for label, c in t["buckets"].items():
         share = "—" if c["share_3plus"] is None else f"{round(100 * c['share_3plus'])} %"
-        print(f"  {label:<14} {c['works']:>5} {_num(c['rounds_median']):>13} {share:>10} "
+        count = "unknown" if c["works"] is None else c["works"]
+        print(f"  {label:<14} {count:>5} {_num(c['rounds_median']):>13} {share:>10} "
               f"{_num(c['rounds_per_100_lines']):>16} {_num(c['process_per_product_line']):>26}")
     if t["unknown_lines"]:
         print(f"  {t['unknown_lines']} work(s) with unknown product lines (a range without a lower bound)")
@@ -3129,7 +3144,8 @@ def size(root: Path | None = None, window: tuple[datetime, datetime] | None = No
         share = "—" if v["share"] is None else f"{round(100 * v['share'])} %"
         print(f"  vanished files: {v['lines']} of {v['of']} product lines ({share}) on files gone at the "
               "window's end (renames followed forward)")
-    n = sum(c["works"] for c in t["buckets"].values())
+    n = None if any(c["works"] is None for c in t["buckets"].values()) else sum(
+        c["works"] for c in t["buckets"].values())
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'where rounds and process lines per product line climb with size, cut plans smaller along their contracts (plan.md); where several stacks cost more rounds, cut at the boundary — a cut that only spreads process is no gain', thin='keep merging; judge after ~20 works per size step')}")
     return 0

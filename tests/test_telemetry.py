@@ -1742,6 +1742,59 @@ def test_stacked_phases_are_one_work_and_a_fix_after_the_first_merge_escaped(ren
     assert it["source"] == "both"
 
 
+def _train_row(out: Path, branch: str, ended: str, deployed: bool = True) -> None:
+    train = out / ".git/process-train"
+    train.mkdir(exist_ok=True)
+    with (train / "phases.jsonl").open("a") as fh:
+        fh.write(json.dumps({"stamp": branch, "result": "green", "aboard": 1, "branches": [branch],
+                             "deployed": deployed, "ended": ended}) + "\n")
+
+
+def test_a_first_phase_merged_by_finish_opens_the_escape_window_at_its_merge(render, tmp_path):
+    """#342 AC-1/AC-3: the first phase merged with `finish` (no train row), a later phase by
+    the train. The host opened the window at the later phase's deploy and missed a fix in
+    between; a clone, without train rows, opened it at the first merge. Both open it at the
+    first merge now and count the same escape."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _finish_merge(out, "9-one", [("feat: one (#9)", {"src/a.py": _lines(10),
+                                                    ".process-work/plans/2026-03-02-one.md": _plan_text(9)},
+                                  _at(2))], ["2026-03-02-one.md"], _at(3, 12))
+    _train_merge(out, "9-two", [("fix: guard the edge (#9)\n\nRegression-of: #9", {"src/b.py": _lines(4)}, _at(5))],
+                 "train: merge 9-two\n\nCloses #9", _at(6, 12))
+    clone = _clone(out, tmp_path)
+    (out / ".git/process-tower").mkdir()
+    _report(out, "2026-03-03T12:05:00", "done", "9-one", 9)
+    _report(out, "2026-03-06T12:05:00", "done", "9-two", 9)
+    _train_row(out, "9-two", _at(6, 13))
+    now = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    got = {}
+    for root in (clone, out):
+        it = _by_issue(_flow_module(root), root, now=now)[9]
+        got[root] = it["escapes"]["value"]
+        assert it["escapes"]["value"] == 1 and it["escapes"]["from"] == "merge", (root, it["escapes"])
+    assert got[clone] == got[out]
+
+
+def test_a_first_phase_with_its_own_deployed_train_row_opens_the_window_at_that_deploy(render, tmp_path):
+    """#342 AC-2: where the first merge's own train row deployed, the window opens there, as
+    before — a fix between that merge and its deploy is no escape, one after it is."""
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "9-one", [("feat: one (#9)", {"src/a.py": _lines(10)}, _at(2))],
+                 "train: merge 9-one\n\nRefs #9", _at(3, 12))
+    _train_merge(out, "9-two", [("fix: early (#9)\n\nRegression-of: #9", {"src/b.py": _lines(4)}, _at(3, 18)),
+                                ("fix: late (#9)\n\nRegression-of: #9", {"src/c.py": _lines(4)}, _at(5))],
+                 "train: merge 9-two\n\nCloses #9", _at(6, 12))
+    (out / ".git/process-tower").mkdir()
+    _report(out, "2026-03-03T12:05:00", "done", "9-one", 9)
+    _report(out, "2026-03-06T12:05:00", "done", "9-two", 9)
+    _train_row(out, "9-one", _at(4))
+    _train_row(out, "9-two", _at(6, 13))
+    it = _by_issue(_flow_module(out), out, now=datetime(2026, 10, 1, tzinfo=timezone.utc))[9]
+    assert it["escapes"]["value"] == 1 and it["escapes"]["from"] == "deploy", it["escapes"]
+
+
 def test_a_merge_of_two_issues_is_two_works_and_one_event(render, tmp_path):
     from datetime import datetime, timezone
     out = _merges_repo(render, tmp_path)
@@ -2497,6 +2550,25 @@ def test_size_steps_do_not_share_a_boundary_and_unreviewed_rounds_are_unknown(re
     b = m.size_table(out, *m._window(":"))["buckets"]
     assert (b["<200"]["works"], b["<200"]["rounds_per_100_lines"]) == (1, None)
     assert b["200-500"]["rounds_per_100_lines"] == "n/a"
+
+
+def test_size_bands_are_unknown_when_git_is_not_read(render, tmp_path, monkeypatch, capsys):
+    """#346: with the git history unread the header said `git not read`, yet every band row
+    printed 0 works — a failed git read is unknown, never zero."""
+    out = _alpha_beta(render, tmp_path)
+    m = _flow_module(out)
+    real = m._git_out
+    monkeypatch.setattr(m, "_git_out", lambda root, *args, **kw: None if args[:1] == ("log",)
+                        else real(root, *args, **kw))
+    m._EVENTS_READ.clear()
+    t = m.size_table(out, *m._window(":"))
+    assert t["population"]["why"], t["population"]
+    assert all(c["works"] is None for c in t["buckets"].values()), t["buckets"]
+    m.size(out)
+    text = capsys.readouterr().out
+    assert "git not read" in text, text
+    rows = [line.split() for line in text.splitlines() if line.split()[:1] and line.split()[0] in m.SIZE_STEPS]
+    assert len(rows) == 4 and all(r[1] == "unknown" for r in rows), text
 
 
 def test_size_follows_a_rename_of_a_file_first_merged_before_the_window(render, tmp_path):
