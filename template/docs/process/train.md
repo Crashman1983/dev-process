@@ -242,7 +242,7 @@ With `red_ids` configured (`testing.md`, "Red tests"), the entry also holds
 `red_tests`, read from pytest's own `lastfailed` after a suite-red first
 run, before anything else runs. It lists the red stages and, per red test,
 whether it already existed on the base. `true` means the test file is
-unchanged between the base and the board. `false` means the file, or the
+unchanged between the base and the board and defines the test itself. `false` means the file, or the
 test function, is new. `unknown` covers the rest.
 
 `train-phases` sorts the rounds into three classes, flake rounds apart from

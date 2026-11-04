@@ -1420,8 +1420,9 @@ def _on_base(node_id: str, rootdir: str, board: dict[str, str], base: dict[str, 
     """Was the red test `node_id` on the base already? True, False or "unknown". A
     parameter case `[...]` goes first, then the id splits at its first `::`: the file is
     `rootdir/<part before>`, the function the last part. False only for a file the base
-    lacks or a `def` the board tree adds; a changed file without one is unknown — a later
-    partial run picks functions, never single parameter cases."""
+    lacks or a `def` the board tree adds; True only for an unchanged file that defines the
+    function itself; anything else is unknown — a later partial run picks functions, never
+    single parameter cases."""
     if node_id.endswith("]") and "[" in node_id:
         node_id = node_id[:node_id.index("[")]
     part, sep, rest = node_id.partition("::")
@@ -1435,14 +1436,17 @@ def _on_base(node_id: str, rootdir: str, board: dict[str, str], base: dict[str, 
         return "unknown"
     if rel not in base:
         return False
-    if board[rel] == base[rel]:
-        return True
 
     def text(sha: str) -> str | None:
         if sha not in blobs:
             raw = _git_bytes(wt, "cat-file", "blob", sha)
             blobs[sha] = None if raw is None else raw.decode("utf-8", "replace")
         return blobs[sha]
+    if board[rel] == base[rel]:
+        # an unchanged file holds the test only where it defines it: an inherited mixin
+        # method or a star import may be new elsewhere (refute v2.88) — then unknown
+        same = text(board[rel])
+        return True if same is not None and _defines(same, name) else "unknown"
     new, old = text(board[rel]), text(base[rel])
     if new is None or old is None:
         return "unknown"

@@ -1980,10 +1980,10 @@ def _red_path_lines(rows: list[dict]) -> list[str]:
         lines.append(f"  red tests, flake rounds (flaky, gate-flaky): {len(flake)}, "
                      f"ids readable {sum(r for _, r in flake)} — {classes([c for c, _ in flake])}")
     if offender:
-        lines.append(f"  red tests, offender rounds (dropped, base-red): {len(offender)} — {classes(offender)}")
+        lines.append(f"  red tests, offender rounds (dropped, base-red, none-survived): {len(offender)} — {classes(offender)}")
     if other:
         lines.append(f"  {other} other round{'' if other == 1 else 's'} with red tests "
-                     f"(undefined, none-survived, …) not classed")
+                     f"(environment, push-rejected, aborted, …) not classed")
     if flake or offender:
         n = len(flake) + len(offender)
         lines.append(f"  {confidence(n)} — the saved suite seconds are an upper bound: "
