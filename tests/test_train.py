@@ -2760,3 +2760,351 @@ def test_run_does_not_compute_the_conflict_hints(render, tmp_path, monkeypatch, 
     assert calls == [] and "departing" in capsys.readouterr().out
     assert train.main(["plan", "--json", "--root", str(out)]) == 0
     assert calls == [1]
+
+
+# --- v2.88 (#378): measure the red path — runs per kind and round, red tests read only --
+
+LASTFAILED = ".pytest_cache/v/cache/lastfailed"
+
+
+def _measured(render, tmp_path, monkeypatch, *, sh, n=2, gates=None, retry=None, red_ids=None,
+              seen=False, conflicts=None):
+    """b1 (and b2) judged on real trees — main, one = [b1], both = [b1, b2] — with a fake
+    suite `sh(subset, cmd, nth)`. Returns the carrier, the `_sh` calls, the log and the rc
+    (None: the stub train/x cannot be fast-forwarded — the judging is done)."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    with (out / ".gitignore").open("a") as fh:
+        fh.write("\n.pytest_cache/\n")
+    _repo(out)
+    train = _load_train(out)
+    if seen:
+        train._remember_green_suite(out, train._suite_key(out, "s"))
+    for name, files in (("one", {"a.txt": "a\n"}),
+                        ("both", {"a.txt": "a\n", "tests/test_new.py": "def test_n():\n    pass\n"})):
+        _git(out, "checkout", "-q", "-b", name, "main")
+        for rel, text in files.items():
+            (out / rel).parent.mkdir(parents=True, exist_ok=True)
+            (out / rel).write_text(text)
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", name)
+    _git(out, "checkout", "-q", "main")
+    current, calls = [], []
+
+    def build(root, base, subset, stamp, log):
+        dropped = list((conflicts or (lambda s: []))(list(subset)))
+        merged = [b for b in subset if b not in dropped]
+        current[:] = merged
+        _git(out, "checkout", "-q", {0: "main", 1: "one", 2: "both"}[len(merged)])
+        return out, "train/x", merged, dropped
+
+    def fake_sh(cwd, cmd, log, *a):
+        calls.append((tuple(current), cmd))
+        time.sleep(0.01)
+        return sh(tuple(current), cmd, len(calls))
+    monkeypatch.setattr(train, "build_train", build)
+    gate = iter(gates) if gates is not None else None
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: next(gate, True) if gate else True)
+    monkeypatch.setattr(train, "_sh", fake_sh)
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    branches = ["b1", "b2"][:n]
+    p = {"base": "main", "candidates": [{"branch": b, "hours_waiting": 2 - i} for i, b in enumerate(branches)]}
+    measure: dict = {}
+    try:
+        rc = train._run_batch(out, "main", p, list(branches), "x", tmp_path / "t.log", suite="s", deploy=None,
+                              push=False, keep_branches=True, retry=retry, measure=measure, red_ids=red_ids)
+    except SystemExit:
+        rc = None
+    log = tmp_path / "t.log"
+    return measure, calls, log.read_text() if log.exists() else "", rc
+
+
+def _shape(measure: dict) -> list[tuple[str, dict[str, int]]]:
+    return [(r["red_path"], {k: v["n"] for k, v in r["runs"].items()}) for r in measure["rounds"]]
+
+
+def test_measure_a_gates_retry_and_its_suite_count_apart(render, tmp_path, monkeypatch):
+    """M1: the gates retry runs no suite; the suite behind it is a `retry_full`. Gates red
+    first: no red test can be read (`gates-red`)."""
+    m, calls, _log, _rc = _measured(render, tmp_path, monkeypatch, n=1, gates=[False, True],
+                                    sh=lambda sub, cmd, nth: "green",
+                                    red_ids=[{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}])
+    assert _shape(m) == [("gate-flaky", {"first": 1, "retry_gates": 1, "retry_full": 1})]
+    runs = m["rounds"][0]["runs"]
+    assert runs["first"]["suite_s"] == 0 and runs["retry_gates"]["suite_s"] == 0
+    assert runs["retry_full"]["suite_s"] > 0 and m["rounds"][0]["red_tests"] == "gates-red"
+    assert calls == [(("b1",), "s")]
+
+
+@pytest.mark.parametrize("retry, answer, shape, path", [
+    ("make retry", "green", {"first": 1, "retry_failed": 1}, "flaky"),
+    ("make retry", "undefined", {"first": 1, "retry_failed": 1, "retry_full": 1}, "flaky"),
+    (None, None, {"first": 1, "retry_full": 1}, "flaky")])
+def test_measure_the_retry_kinds(render, tmp_path, monkeypatch, retry, answer, shape, path):
+    """M1: `--retry` is `retry_failed`; its fallback to `undefined` rebuilds — one
+    `retry_full`, not a second `retry_failed`."""
+    def sh(sub, cmd, nth):
+        if cmd == "make retry":
+            return answer
+        return "red" if nth == 1 else "green"
+    m, _calls, _log, _rc = _measured(render, tmp_path, monkeypatch, n=1, retry=retry, sh=sh)
+    assert _shape(m) == [(path, shape)]
+    assert all(v["suite_s"] > 0 for v in m["rounds"][0]["runs"].values())
+    assert "red_tests" not in m["rounds"][0]  # no red_ids: nothing read
+
+
+def test_measure_the_base_in_the_undefined_path_and_none_survived(render, tmp_path, monkeypatch):
+    m, _calls, _log, rc = _measured(render, tmp_path, monkeypatch, n=1,
+                                    sh=lambda sub, cmd, nth: "undefined" if sub else "green")
+    assert rc == 1 and _shape(m) == [("none-survived", {"first": 1, "base": 1})]
+
+
+def test_measure_undefined_on_both(render, tmp_path, monkeypatch):
+    m, _calls, _log, rc = _measured(render, tmp_path, monkeypatch, n=1, sh=lambda sub, cmd, nth: "undefined")
+    assert rc == 1 and _shape(m) == [("undefined", {"first": 1, "base": 1})]
+
+
+def test_measure_a_memo_hit_a_probe_and_the_round_after_the_drop(render, tmp_path, monkeypatch):
+    """M1: the remembered base counts its build and gates, 0 s suite; the round after
+    the drop is a round of its own."""
+    m, calls, _log, _rc = _measured(render, tmp_path, monkeypatch, seen=True,
+                                    sh=lambda sub, cmd, nth: "red" if "b2" in sub else "green")
+    assert _shape(m) == [("dropped:b2", {"first": 1, "retry_full": 1, "base": 1, "probe": 1}),
+                         ("green", {"first": 1})]
+    base = m["rounds"][0]["runs"]["base"]
+    assert base["suite_s"] == 0 and base["build_gates_s"] > 0
+    # round 2: the probe saw this tree green — the first run ran no suite
+    assert m["rounds"][1]["runs"]["first"]["suite_s"] == 0 and calls[-1] == (("b1",), "s")
+
+
+def test_measure_the_real_base_run_behind_the_memo_and_a_red_base(render, tmp_path, monkeypatch):
+    m, _calls, _log, rc = _measured(render, tmp_path, monkeypatch, n=1, seen=True,
+                                    sh=lambda sub, cmd, nth: "red")
+    assert rc == 1 and _shape(m) == [("base-red", {"first": 1, "retry_full": 1, "base": 2})]
+
+
+def test_measure_a_probe_where_everybody_conflicts(render, tmp_path, monkeypatch):
+    m, _calls, _log, _rc = _measured(render, tmp_path, monkeypatch,
+                                     conflicts=lambda sub: sub if sub == ["b1"] else [],
+                                     sh=lambda sub, cmd, nth: "red" if "b2" in sub else "green")
+    assert _shape(m)[0] == ("dropped:b1", {"first": 1, "retry_full": 1, "base": 1, "probe": 1})
+    assert m["rounds"][0]["runs"]["probe"]["suite_s"] == 0
+
+
+def test_measure_a_first_run_where_everybody_conflicts(render, tmp_path, monkeypatch):
+    m, calls, _log, rc = _measured(render, tmp_path, monkeypatch, conflicts=lambda sub: sub,
+                                   sh=lambda sub, cmd, nth: "green")
+    assert rc == 1 and calls == [] and _shape(m) == [("conflicts", {"first": 1})]
+
+
+def test_measure_reaches_the_row_on_a_red_preflight(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "true", "--preflight", "exit 3")
+    assert r.returncode == 1, r.stderr
+    row = _phases(out)[-1]
+    assert row["result"] == "environment"
+    assert [(x["red_path"], sorted(x["runs"])) for x in row["rounds"]] == [("environment", ["first"])]
+
+
+def test_measure_reaches_the_row_on_a_rejected_push(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    hook = out / ".git/hooks/pre-push"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    r = _train(out, "run", "--force", "--push", "--suite", "true")
+    assert r.returncode == 1, r.stderr
+    row = _phases(out)[-1]
+    assert [(x["red_path"], x["runs"]["first"]["n"]) for x in row["rounds"]] == [("push-rejected", 1)]
+    # seconds are rounded in the row
+    assert row["rounds"][0]["runs"]["first"]["suite_s"] == round(row["rounds"][0]["runs"]["first"]["suite_s"], 1)
+
+
+def test_measure_reaches_the_row_when_the_run_aborts(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    train = _load_train(out)
+
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_sh", boom)
+    with pytest.raises(RuntimeError):
+        train.run(out, suite="s", deploy=None, push=False, min_candidates=1, max_wait_hours=0, force=True,
+                  keep_branches=True, dry_run=False)
+    row = _phases(out)[-1]
+    assert row["result"] == "red"
+    assert [(x["red_path"], x["runs"]["first"]["n"]) for x in row["rounds"]] == [("aborted", 1)]
+
+
+def test_stage_markers_is_the_one_marker_reader(render, tmp_path):
+    train_mod = _load_train(render(tmp_path / "probe", {"project_name": "d", "modules": {}}))
+    root = tmp_path / "r"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    assert train_mod.stage_markers(root) is None  # no stages file: no stages
+    folder = root / ".git/merge-suite"
+    folder.mkdir()
+    (folder / "stages").write_text("a b c\n")
+    (folder / "a.time").write_text("1 2 0\n")
+    (folder / "b.time").write_text("1 2 x\n")
+    assert train_mod.stage_markers(root) == {"a": (1, 2, 0), "b": None, "c": None}
+
+
+# M2: the red tests, read only from pytest's own cache
+
+def _red_repo(tmp_path) -> Path:
+    """main, and HEAD on `board` — the tree the train judged."""
+    r = tmp_path / "red"
+    files = {
+        "backend/tests/test_a.py": "def test_one():\n    pass\n",
+        "tests/test_b.py": "def test_x():\n    pass\n",
+        "tests/test_e.py": "def test_y():\n    assert 1\n",
+        "tests/test_f.py": "def test_x():\n    pass\n",
+        "tests/test_g.py": "def test_p():\n    pass\n",
+    }
+    r.mkdir()
+    _git(r, "init", "-q", "-b", "main")
+    _git(r, "config", "user.email", "t@t")
+    _git(r, "config", "user.name", "t")
+    for rel, text in files.items():
+        (r / rel).parent.mkdir(parents=True, exist_ok=True)
+        (r / rel).write_text(text)
+    _git(r, "add", "-A")
+    _git(r, "commit", "-q", "-m", "base")
+    _git(r, "checkout", "-q", "-b", "board")
+    (r / "tests/test_b.py").write_text("def test_x():\n    assert 2\n\n\ndef test_new():\n    pass\n\n\n"
+                                       "async def test_async_new():\n    pass\n\n\n"
+                                       "class TestK:\n    def test_meth(self):\n        pass\n")
+    (r / "tests/test_e.py").write_text("def test_y():\n    assert 2\n")
+    (r / "tests/test_f.py").write_text("def test_x():\n    pass\n\n\ndef test_p(v):\n    pass\n")
+    (r / "tests/test_c.py").write_text("def test_z():\n    pass\n")
+    _git(r, "add", "-A")
+    _git(r, "commit", "-q", "-m", "board")
+    return r
+
+
+def _lastfailed(root: Path, rel: str, ids) -> None:
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({i: True for i in ids}))
+
+
+def test_on_base_reads_each_id_by_file_and_def(render, tmp_path):
+    train = _load_train(render(tmp_path / "probe", {"project_name": "d", "modules": {}}))
+    r = _red_repo(tmp_path)
+    _lastfailed(r, LASTFAILED, [
+        "tests/test_b.py::test_new",              # new function in a changed file
+        "tests/test_b.py::test_async_new",        # an async one
+        "tests/test_b.py::TestK::test_meth",      # a new method
+        "tests/test_e.py::test_y",                # changed file, no new def
+        "tests/test_c.py::test_z",                # new file
+        "tests/test_c.py",                        # a collection error: no `::`
+        "tests/test_f.py::test_p[a::b]",          # the bracket goes first, then the first `::`
+        "tests/test_g.py::test_p[x]",             # unchanged file
+        "../outside.py::test_o",                  # outside the repository
+        "tests/test_gone.py::test_m",             # on neither tree
+    ])
+    _lastfailed(r, "backend/" + LASTFAILED, ["tests/test_a.py::test_one"])
+    got = train.red_tests(r, "main", [
+        {"lastfailed": LASTFAILED, "rootdir": ".", "stage": None},
+        {"lastfailed": "backend/" + LASTFAILED, "rootdir": "backend", "stage": None}], {})
+    # a project without stages: the whole suite is the one stage `suite`, red
+    assert got["stages"] == ["suite"]
+    assert got["sources"][0]["ids"] == {
+        "tests/test_b.py::test_new": False, "tests/test_b.py::test_async_new": False,
+        "tests/test_b.py::TestK::test_meth": False, "tests/test_e.py::test_y": "unknown",
+        "tests/test_c.py::test_z": False, "tests/test_c.py": "unknown",
+        "tests/test_f.py::test_p[a::b]": False, "tests/test_g.py::test_p[x]": True,
+        "../outside.py::test_o": "unknown", "tests/test_gone.py::test_m": "unknown"}
+    # node ids are relative to the rootdir (plan review: `backend/` read `false` otherwise)
+    assert got["sources"][1] == {"lastfailed": "backend/" + LASTFAILED, "rootdir": "backend", "stage": "suite",
+                                 "ids": {"tests/test_a.py::test_one": True}}
+
+
+def test_red_stages_come_from_the_markers_and_a_source_per_stage(render, tmp_path):
+    train = _load_train(render(tmp_path / "probe", {"project_name": "d", "modules": {}}))
+    r = _red_repo(tmp_path)
+    folder = r / ".git/merge-suite"
+    folder.mkdir()
+    (folder / "stages").write_text("unit e2e\n")
+    (folder / "unit.time").write_text("1 2 0\n")
+    (folder / "e2e.time").write_text("1 2 1\n")
+    _lastfailed(r, "e2e/lf", ["tests/test_g.py::test_p"])
+    _lastfailed(r, "many/lf", [f"tests/test_g.py::test_{i}" for i in range(201)])
+    got = train.red_tests(r, "main", [
+        {"lastfailed": "unit/lf", "rootdir": ".", "stage": "unit"},
+        {"lastfailed": "e2e/lf", "rootdir": ".", "stage": "e2e"},
+        {"lastfailed": "many/lf", "rootdir": ".", "stage": "e2e"},
+        {"lastfailed": "x/lf", "rootdir": ".", "stage": "lint"},
+        {"lastfailed": "y/lf", "rootdir": ".", "stage": None}], {})
+    assert got["stages"] == ["e2e"]
+    reasons = [s.get("reason") for s in got["sources"]]
+    assert reasons == ["stage not red", None, "too_many", "unknown stage", "unknown stage"]
+    assert got["sources"][1]["ids"] == {"tests/test_g.py::test_p": True}
+    assert got["sources"][2]["n"] == 201
+
+
+def _broken(kind: str):
+    def write(root: Path) -> None:
+        p = root / LASTFAILED
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if kind == "symlink":
+            (root / ".pytest_cache/elsewhere.json").write_text('{"tests/test_new.py::test_n": true}')
+            p.symlink_to(root / ".pytest_cache/elsewhere.json")
+        elif kind == "large":
+            p.write_text('{"tests/test_new.py::test_n": true}' + " " * (1 << 20))
+        elif kind == "deep":
+            p.write_text("[" * 100000)
+        elif kind == "not-utf8":
+            p.write_bytes(b'\xff\xfe{"a": true}')
+        elif kind == "not-object":
+            p.write_text('["tests/test_new.py::test_n"]')
+        elif kind == "fine":
+            p.write_text('{"tests/test_new.py::test_n": true}')
+    return write
+
+
+@pytest.mark.parametrize("kind, reason", [
+    ("symlink", "not a regular file"), ("large", "larger than 1 MiB"), ("deep", "unreadable: RecursionError"),
+    ("not-utf8", "not UTF-8"), ("not-object", "not a JSON object"), ("missing", "missing")])
+def test_an_unreadable_lastfailed_costs_a_field_never_the_run(render, tmp_path, monkeypatch, kind, reason):
+    """M2: whatever the file holds, the reader names a reason and the train runs the same
+    `_sh` calls as without red_ids."""
+    def run(red_ids, sub):
+        root = tmp_path / sub / "repo"
+
+        def sh(subset, cmd, nth):
+            if nth == 1:
+                _broken(kind)(root)
+            return "red" if "b2" in subset else "green"
+        return _measured(render, tmp_path / sub, monkeypatch, sh=sh, red_ids=red_ids)
+    plain, plain_calls, _l, plain_rc = run(None, "plain")
+    m, calls, _l, rc = run([{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}], "red")
+    assert calls == plain_calls and rc == plain_rc and _shape(m) == _shape(plain)
+    source = m["rounds"][0]["red_tests"]["sources"][0]
+    assert source.get("reason") == reason and "ids" not in source, source
+
+
+def test_the_red_ids_of_the_first_run_are_read_before_any_other_run(render, tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+
+    def sh(subset, cmd, nth):
+        _lastfailed(root, LASTFAILED, ["tests/test_new.py::test_n"] if nth == 1 else ["tests/test_other.py::t"])
+        return "red" if "b2" in subset else "green"
+    m, _calls, _log, _rc = _measured(render, tmp_path, monkeypatch, sh=sh,
+                                     red_ids=[{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}])
+    first, second = m["rounds"]
+    # the board tree is the first run's: the new test file is not on the base
+    assert first["red_tests"] == {"stages": ["suite"], "sources": [
+        {"lastfailed": LASTFAILED, "rootdir": ".", "stage": "suite", "ids": {"tests/test_new.py::test_n": False}}]}
+    assert second["red_path"] == "green" and "red_tests" not in second

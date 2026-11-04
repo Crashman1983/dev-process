@@ -89,6 +89,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -1288,6 +1289,28 @@ class EnvironmentRed(Exception):
     """`--preflight` failed: the host cannot run the suite — nobody aboard is to blame."""
 
 
+def stage_markers(wt: Path) -> dict[str, tuple[int, int, int] | None] | None:
+    """The `<stage>.time` markers the merge suite left in the merge-suite folder of
+    `wt`, for each stage its `stages` file names, in that order: `(start, end, exit)`,
+    or None for a missing or unreadable marker. None when the `stages` file or the
+    git dir cannot be read. The one marker reader: the stage times, the retry's
+    certificate and the red stages of the measure all ask here."""
+    gitdir = _out(wt, "rev-parse", "--absolute-git-dir")
+    names = certificate.run_stages(wt)
+    if not gitdir or names is None:
+        return None
+    folder = Path(gitdir) / "merge-suite"
+    markers: dict[str, tuple[int, int, int] | None] = {}
+    for name in names:
+        try:
+            t0, t1, verdict = (int(x) for x in (folder / f"{name}.time").read_text(encoding="utf-8").split())
+        except (OSError, ValueError):
+            markers[name] = None
+            continue
+        markers[name] = (t0, t1, verdict)
+    return markers
+
+
 def _collect_stage_times(wt: Path, stages: dict[str, dict], seen: set[tuple[str, int, int]],
                          log) -> None:
     """Folds the `<stage>.time` markers the merge suite left in the merge-suite
@@ -1295,14 +1318,14 @@ def _collect_stage_times(wt: Path, stages: dict[str, dict], seen: set[tuple[str,
     `skipped`, and a skip never overwrites what an earlier run of that stage said.
     `seen` keeps a run that is collected twice (suite, then retry) from counting twice;
     the state is the one of the last run, the seconds add up over all of them."""
-    gitdir = _out(wt, "rev-parse", "--absolute-git-dir")
-    names = certificate.run_stages(wt)
-    if not gitdir or names is None:
+    markers = stage_markers(wt)
+    if markers is None:
         return
-    folder = Path(gitdir) / "merge-suite"
-    for name in names:
+    for name, marker in markers.items():
         try:
-            t0, t1, verdict = (int(x) for x in (folder / f"{name}.time").read_text(encoding="utf-8").split())
+            if marker is None:
+                raise ValueError("no readable marker")
+            t0, t1, verdict = marker
             if t1 < t0:
                 raise ValueError("ends before it starts")
             start = _dt.datetime.fromtimestamp(t0).isoformat(timespec="seconds")
@@ -1326,36 +1349,188 @@ def _every_stage_green(wt: Path) -> bool:
     """Does every stage the run's `stages` file names carry a green `<stage>.time`
     marker in `wt`'s merge-suite folder? No stage list (a suite without stages) is no:
     then nothing tells which part a retry covered."""
-    gitdir = _out(wt, "rev-parse", "--absolute-git-dir")
-    names = certificate.run_stages(wt)
-    if not gitdir or not names:
+    markers = stage_markers(wt)
+    if not markers:
         return False
-    folder = Path(gitdir) / "merge-suite"
-    for name in names:
-        try:
-            _t0, _t1, verdict = (int(x) for x in (folder / f"{name}.time").read_text(encoding="utf-8").split())
-        except (OSError, ValueError):
-            return False
-        if verdict != 0:
-            return False
-    return True
+    return all(marker is not None and marker[2] == 0 for marker in markers.values())
+
+
+# The red tests of a suite-red run, read only from pytest's own `lastfailed` files
+# (`red_ids` in testing.local.json, v2.88 #378): what a later partial re-run would pick,
+# measured first. A measuring error costs a field, never the train.
+RED_IDS_MAX = 200
+RED_IDS_BYTES = 1 << 20
+IMPLICIT_STAGE = "suite"  # a suite without stages is one stage
+
+
+class _Unread(Exception):
+    """A `lastfailed` file the measure cannot use — the message is the field's reason."""
+
+
+def _lastfailed_ids(path: Path) -> list[str]:
+    """The node ids of a pytest `lastfailed` file: a regular file (no symlink), at most
+    1 MiB, a UTF-8 JSON object whose keys are the ids."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        raise _Unread("missing") from None
+    if not stat.S_ISREG(st.st_mode):
+        raise _Unread("not a regular file")
+    if st.st_size > RED_IDS_BYTES:
+        raise _Unread("larger than 1 MiB")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as fh:
+        raw = fh.read(RED_IDS_BYTES + 1)
+    if len(raw) > RED_IDS_BYTES:
+        raise _Unread("larger than 1 MiB")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise _Unread("not UTF-8") from None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        raise _Unread("not JSON") from None
+    if not isinstance(data, dict):
+        raise _Unread("not a JSON object")
+    return list(data)
+
+
+def _tree_blobs(wt: Path, ref: str) -> dict[str, str] | None:
+    """{path: blob sha} of the tree at `ref` — one `git ls-tree -r` per tree; None when
+    git cannot read it."""
+    raw = _git_bytes(wt, "ls-tree", "-r", "-z", ref)
+    if raw is None:
+        return None
+    blobs: dict[str, str] = {}
+    for entry in raw.split(b"\0"):
+        meta, sep, name = entry.partition(b"\t")
+        parts = meta.split()
+        if sep and len(parts) == 3 and parts[1] == b"blob":
+            blobs[name.decode("utf-8", "surrogateescape")] = parts[2].decode("ascii")
+    return blobs
+
+
+def _defines(text: str, name: str) -> bool:
+    return re.search(rf"^[ \t]*(?:async[ \t]+)?def[ \t]+{re.escape(name)}[ \t]*\(", text, re.MULTILINE) is not None
+
+
+def _on_base(node_id: str, rootdir: str, board: dict[str, str], base: dict[str, str], wt: Path,
+             blobs: dict[str, str | None]) -> bool | str:
+    """Was the red test `node_id` on the base already? True, False or "unknown". A
+    parameter case `[...]` goes first, then the id splits at its first `::`: the file is
+    `rootdir/<part before>`, the function the last part. False only for a file the base
+    lacks or a `def` the board tree adds; a changed file without one is unknown — a later
+    partial run picks functions, never single parameter cases."""
+    if node_id.endswith("]") and "[" in node_id:
+        node_id = node_id[:node_id.index("[")]
+    part, sep, rest = node_id.partition("::")
+    name = rest.rsplit("::", 1)[-1]
+    if not sep or not part or not name:
+        return "unknown"
+    rel = posixpath.normpath(posixpath.join(rootdir, part))
+    if rel.startswith(("/", "../")) or rel in ("..", "."):
+        return "unknown"
+    if rel not in board:
+        return "unknown"
+    if rel not in base:
+        return False
+    if board[rel] == base[rel]:
+        return True
+
+    def text(sha: str) -> str | None:
+        if sha not in blobs:
+            raw = _git_bytes(wt, "cat-file", "blob", sha)
+            blobs[sha] = None if raw is None else raw.decode("utf-8", "replace")
+        return blobs[sha]
+    new, old = text(board[rel]), text(base[rel])
+    if new is None or old is None:
+        return "unknown"
+    return False if _defines(new, name) and not _defines(old, name) else "unknown"
+
+
+def red_tests(wt: Path, base: str, entries: list[dict], cache: dict) -> dict:
+    """The red tests of the suite-red run just finished in `wt`: its red stages (from the
+    markers; without a `stages` file the stage `suite`), and per `red_ids` entry the ids
+    of its `lastfailed` file, each with `on_base` against `base` — or a `reason`. The
+    board tree is `wt`'s HEAD. `cache` keeps the base's blobs across rounds. Never raises."""
+    try:
+        markers = stage_markers(wt)
+        names = list(markers) if markers else [IMPLICIT_STAGE]
+        red = [n for n, m in (markers or {}).items() if m is not None and m[2] != 0]
+        if not markers or not red:
+            red = [IMPLICIT_STAGE]  # red, but no marker says where: the whole suite
+        board = base_blobs = None
+        sources: list[dict] = []
+        for e in entries:
+            stage = e.get("stage") or IMPLICIT_STAGE
+            src: dict = {"lastfailed": e["lastfailed"], "rootdir": e.get("rootdir") or ".", "stage": stage}
+            sources.append(src)
+            if stage not in names:
+                src["reason"] = "unknown stage"
+                continue
+            if stage not in red:
+                src["reason"] = "stage not red"
+                continue
+            try:
+                ids = _lastfailed_ids(wt / e["lastfailed"])
+                if len(ids) > RED_IDS_MAX:
+                    src.update(reason="too_many", n=len(ids))
+                    continue
+                if board is None:
+                    board = _tree_blobs(wt, "HEAD")
+                    if "base" not in cache:
+                        cache["base"] = _tree_blobs(wt, base)
+                    base_blobs = cache["base"]
+                if board is None or base_blobs is None:
+                    src["reason"] = "trees unreadable"
+                    continue
+                blobs = cache.setdefault("blobs", {})
+                src["ids"] = {i: _on_base(i, src["rootdir"], board, base_blobs, wt, blobs) for i in ids}
+            except _Unread as exc:
+                src["reason"] = str(exc)
+            except Exception as exc:  # noqa: BLE001 — a measuring error costs a field, never the train
+                src["reason"] = f"unreadable: {type(exc).__name__}"
+        return {"stages": red, "sources": sources}
+    except Exception as exc:  # noqa: BLE001 — a measuring error costs a field, never the train
+        return {"reason": f"unreadable: {type(exc).__name__}"}
+
+
+def _rounded_rounds(rounds: list[dict]) -> list[dict]:
+    """The measure's rounds for the phases row, the seconds to a tenth."""
+    out = []
+    for r in rounds:
+        runs = {kind: {"n": v["n"], "build_gates_s": round(v["build_gates_s"], 1),
+                       "suite_s": round(v["suite_s"], 1)} for kind, v in r.get("runs", {}).items()}
+        out.append({**r, "runs": runs})
+    return out
+
+
+def _end_round(measure: dict | None, red_path: str) -> None:
+    """How the last round's red path ended — set where the run ends it."""
+    rounds = (measure or {}).get("rounds")
+    if rounds:
+        rounds[-1]["red_path"] = red_path
 
 
 def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str, aboard: list[str],
-                   log, outcome: dict | None = None, stages: dict | None = None) -> None:
+                   log, outcome: dict | None = None, stages: dict | None = None,
+                   measure: dict | None = None) -> None:
     """One log line and one JSON line per run: where the train's time went.
     `result`: green, red or environment (a red preflight — no red train).
     `branches` are the ones that landed, `deployed` whether the deploy ran
     green (null: no deploy ran), `ended` when the run finished (UTC) — what
     ties a deploy to an issue for `process_kpis.py flow`. `stages`: the merge-suite
-    stage times (`_collect_stage_times`), `{}` when none were collected."""
+    stage times (`_collect_stage_times`), `{}` when none were collected. `rounds`: the
+    red path's runs per kind and round (`docs/process/train.md`), `[]` when none ran."""
     spent = {k: round(phases.get(k, 0.0), 1) for k in PHASES}
     log(f"phases ({result}): " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
     outcome = outcome or {}
     row = {"stamp": stamp, "result": result, "aboard": len(aboard), **spent,
            "stages": stages or {},
            "branches": list(outcome.get("branches") or []), "deployed": outcome.get("deployed"),
-           "ended": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")}
+           "ended": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
+           "rounds": _rounded_rounds((measure or {}).get("rounds") or [])}
     try:
         with (_train_dir(root) / PHASES_FILE).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row) + "\n")
@@ -1405,7 +1580,8 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool,
         retry: str | None = None, preflight: str | None = None,
         certificate_env: list[str] | None = None, preflight_timeout: float | None = None,
-        merge_scope: list[str] | None = None, suite_note: str | None = None) -> int:
+        merge_scope: list[str] | None = None, suite_note: str | None = None,
+        red_ids: list[dict] | None = None) -> int:
     local = local_integration(root)
     if local is None:
         print("train: no local main/master branch", file=sys.stderr)
@@ -1448,22 +1624,26 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     phases: dict[str, float] = {}
     outcome: dict = {}
     stages: dict[str, dict] = {}
+    measure: dict = {}  # the red path's rounds (v2.88): filled by _run_batch, ended here too
     rc = 1
     result = "red"
     try:
         rc = _run_batch(root, local, p, aboard, stamp, logfile, suite=suite, deploy=deploy, push=push,
                         keep_branches=keep_branches, retry=retry, preflight=preflight, phases=phases,
                         certificate_env=certificate_env or [], preflight_timeout=preflight_timeout,
-                        outcome=outcome, stages=stages, merge_scope=merge_scope)
+                        outcome=outcome, stages=stages, merge_scope=merge_scope, measure=measure,
+                        red_ids=red_ids)
         result = "green" if rc == 0 else "red"
         return rc
     except EnvironmentRed as env_red:
         result = "environment"
+        _end_round(measure, "environment")
         print(f"train: {env_red} — the environment cannot run the suite; "
               f"nobody is blamed, nothing merged, no retry (see {logfile})", file=sys.stderr)
         _cleanup(root, stamp)
         return rc
     except BaseException:
+        _end_round(measure, "aborted")
         wt = _train_worktree(root)
         if wt.exists():
             _git(root, "worktree", "remove", "--force", str(wt))
@@ -1474,7 +1654,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         def _log(line: str) -> None:
             with logfile.open("a", encoding="utf-8") as fh:
                 fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
-        _record_phases(root, stamp, phases, result, aboard, _log, outcome, stages)
+        _record_phases(root, stamp, phases, result, aboard, _log, outcome, stages, measure)
 
 
 def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
@@ -1482,7 +1662,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                retry: str | None = None, preflight: str | None = None,
                phases: dict[str, float] | None = None, certificate_env: list[str] | None = None,
                preflight_timeout: float | None = None, outcome: dict | None = None,
-               stages: dict | None = None, merge_scope: list[str] | None = None) -> int:
+               stages: dict | None = None, merge_scope: list[str] | None = None,
+               measure: dict | None = None, red_ids: list[dict] | None = None) -> int:
     def log(line: str) -> None:
         with logfile.open("a", encoding="utf-8") as fh:
             fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
@@ -1491,14 +1672,41 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     stages = {} if stages is None else stages
     stage_seen: set[tuple[str, int, int]] = set()
     searching = ""  # "retry" or "bisect": a judged tree's time counts there
+    # the red path's runs per kind and round (v2.88, #378) — counted, never steering
+    measure = {} if measure is None else measure
+    rounds: list[dict] = measure.setdefault("rounds", [])
+    run_now: dict[str, float] | None = None  # the run being counted: its suite and preflight seconds
+    red_cache: dict = {}  # the base's blobs, read once across rounds
 
     def timed(phase: str, fn, *args):
         started = time.monotonic()
         try:
             return fn(*args)
         finally:
+            spent = time.monotonic() - started
             name = searching if searching and phase in ("gates", "suite") else phase
-            phases[name] = phases.get(name, 0.0) + time.monotonic() - started
+            phases[name] = phases.get(name, 0.0) + spent
+            if run_now is not None and phase in ("suite", "retry", "preflight"):
+                key = "preflight" if phase == "preflight" else "suite"
+                run_now[key] += spent
+
+    @contextlib.contextmanager
+    def counted(kind: str):
+        """One run of the red path of the current round: build and gates apart from the
+        suite (a partial run saves only the suite); the preflight counts in neither."""
+        nonlocal run_now
+        run_now = {"suite": 0.0, "preflight": 0.0}
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            wall = time.monotonic() - started
+            if rounds:
+                entry = rounds[-1]["runs"].setdefault(kind, {"n": 0, "build_gates_s": 0.0, "suite_s": 0.0})
+                entry["n"] += 1
+                entry["suite_s"] += run_now["suite"]
+                entry["build_gates_s"] += max(0.0, wall - run_now["suite"] - run_now["preflight"])
+            run_now = None
 
     preflight_done = not preflight
 
@@ -1571,16 +1779,17 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             return "green"
         return full_suite(wt, key)
 
-    def attempt(subset: list[str], *, memo: bool = True) -> tuple[str, list[str], str]:
+    def attempt(subset: list[str], *, memo: bool = True, kind: str) -> tuple[str, list[str], str]:
         nonlocal last_wt
-        wt, br, merged, dropped = build_train(root, base, subset, stamp, log)
-        last_wt = wt
-        for d in dropped:
-            if d not in conflicted:
-                conflicted.append(d)
-        if not merged and subset:
-            return "red", merged, br  # everybody conflicted: nothing to judge
-        return judge(wt, bare_base=not subset, memo=memo), merged, br
+        with counted(kind):
+            wt, br, merged, dropped = build_train(root, base, subset, stamp, log)
+            last_wt = wt
+            for d in dropped:
+                if d not in conflicted:
+                    conflicted.append(d)
+            if not merged and subset:
+                return "red", merged, br  # everybody conflicted: nothing to judge
+            return judge(wt, bare_base=not subset, memo=memo), merged, br
 
     def _report_dropped() -> None:
         for b in conflicted:
@@ -1596,10 +1805,11 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     def check_base() -> str:
         nonlocal base_state
         if not base_state:
-            base_state = attempt([])[0]
+            base_state = attempt([], kind="base")[0]
         return base_state
 
     def _red_base() -> int:
+        _end_round(measure, "base-red")
         print("train: the combined tree is red and the base is red too — the "
               "integration branch itself is red (gates or suite fail with nobody aboard); "
               "no candidate blamed, "
@@ -1609,12 +1819,20 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         return 1
 
     while aboard:
-        state, merged, branch = attempt(aboard)
+        # a round: the first run, and each one after a drop
+        rounds.append({"red_path": None, "runs": {}})
+        state, merged, branch = attempt(aboard, kind="first")
         aboard = merged
         if state == "green" or not aboard:
+            _end_round(measure, "green" if state == "green" else "conflicts")
             break
+        if red_ids and state == "red":
+            # read only, before any other run rebuilds the worktree: the board tree is this one
+            rounds[-1]["red_tests"] = "gates-red" if red_in == "gates" else \
+                red_tests(last_wt, base, red_ids, red_cache)
         if state == "undefined":
             if check_base() == "undefined":
+                _end_round(measure, "undefined")
                 print(f"train: the suite `{suite}` does not exist on the combined tree — fix the suite "
                       "command (merge_suite in docs/process/testing.local.json, or --suite where none "
                       "is set); nothing merged", file=sys.stderr)
@@ -1651,29 +1869,33 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             ran = "full"
             if how == "gates" and last_wt is not None:
                 ran = "gates"
-                state = "green" if timed("gates", _run_gates, last_wt, log) else "red"
+                with counted("retry_gates"):
+                    state = "green" if timed("gates", _run_gates, last_wt, log) else "red"
                 if state == "green" and suite:
                     red_in = "suite"
                     # the suite never ran behind the red gates
-                    state = full_suite(last_wt, _suite_key(last_wt, suite, merge_scope))
+                    with counted("retry_full"):
+                        state = full_suite(last_wt, _suite_key(last_wt, suite, merge_scope))
             elif how == "failed" and last_wt is not None:
                 ran = "retry"
-                state = timed("retry", _sh, last_wt, retry, log)
-                _collect_stage_times(last_wt, stages, stage_seen, log)
-                noop = certificate.noop_problem()
-                if noop and state == "green":
-                    # `make -n` exits 0 having run nothing: no green to merge on (#265)
-                    raise EnvironmentRed(f"the retry ran under an environment that runs no recipe ({noop})")
+                with counted("retry_failed"):
+                    state = timed("retry", _sh, last_wt, retry, log)
+                    _collect_stage_times(last_wt, stages, stage_seen, log)
+                    noop = certificate.noop_problem()
+                    if noop and state == "green":
+                        # `make -n` exits 0 having run nothing: no green to merge on (#265)
+                        raise EnvironmentRed(f"the retry ran under an environment that runs no recipe ({noop})")
                 if state == "undefined":  # no such command on this tree: the whole suite, as before
                     log("the --retry command does not exist on this tree — rebuilding for the whole suite")
                     ran = "full"
-                    state, merged, branch = attempt(aboard)
+                    state, merged, branch = attempt(aboard, kind="retry_full")
                     aboard = merged
             else:
-                state, merged, branch = attempt(aboard)
+                state, merged, branch = attempt(aboard, kind="retry_full")
                 aboard = merged
             searching = ""
             if state == "green":
+                _end_round(measure, "gate-flaky" if ran == "gates" else "flaky")
                 if ran == "retry":
                     # the suite ran whole on this tree and the retry re-ran what failed, green:
                     # certified only when every stage of the scope has a green marker now — a
@@ -1719,7 +1941,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         lo, hi = 1, len(aboard)
         while lo < hi:
             mid = (lo + hi) // 2
-            pstate, pmerged, _br = attempt(aboard[:mid])
+            pstate, pmerged, _br = attempt(aboard[:mid], kind="probe")
             # a prefix without the passenger that defines the suite cannot be
             # judged by it — it is not the offender; where the base has the
             # suite, a prefix without it lost it: red
@@ -1735,7 +1957,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             # blamed (refutation: otherwise each one is dropped in turn)
             base_from_memo = False
             log("first passenger about to be blamed on a remembered base — running the base")
-            base_state = attempt([], memo=False)[0]
+            base_state = attempt([], memo=False, kind="base")[0]
             if base_state == "red":
                 return _red_base()
         offender = aboard[lo - 1]
@@ -1747,7 +1969,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         log(f"red with {offender} aboard — dropped, rebuilding")
         print(f"train: red with {offender} aboard — dropping it and rebuilding")
         aboard = [b for b in aboard if b != offender]
+        _end_round(measure, f"dropped:{offender}")
     if not aboard:
+        if rounds and str(rounds[-1]["red_path"]).startswith("dropped:"):
+            _end_round(measure, "none-survived")  # the last drop left nobody aboard
         print("train: nothing survived — see " + str(logfile), file=sys.stderr)
         _report_dropped()
         _cleanup(root, stamp)
@@ -1769,6 +1994,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         r = timed("push", lambda: _git(_train_worktree(root), "push", "origin", f"HEAD:{local}",
                                        env={MERGE_ROUTE_ENV: MERGE_ROUTE}))
         if r.returncode != 0:
+            _end_round(measure, "push-rejected")
             log(f"push of {branch} to origin/{local} rejected: {r.stderr.strip()}")
             _git(root, "worktree", "remove", "--force", str(_train_worktree(root)))
             said = "\n".join((r.stdout.strip() + "\n" + r.stderr.strip()).strip().splitlines()[-30:])
@@ -1987,6 +2213,7 @@ def main(argv: list[str]) -> int:
                dry_run=a.dry_run, retry=a.retry, preflight=preflight,
                certificate_env=cfg["certificate_env"] if cfg else [],
                merge_scope=cfg["merge_scope"] if cfg else None, suite_note=suite_note,
+               red_ids=cfg["red_ids"] if cfg else None,
                preflight_timeout=cfg["preflight_timeout"] if cfg else testing_config.DEFAULT_PREFLIGHT_TIMEOUT)
 
 
