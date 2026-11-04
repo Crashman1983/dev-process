@@ -471,3 +471,29 @@ def test_a_malformed_red_ids_is_a_broken_configuration(bad, says):
     tc = _testing_config()
     with pytest.raises(tc.ConfigError, match=says):
         tc.parse(bad)
+
+
+# --- v2.89 (#386): preboard — a check of seconds per candidate before it boards ------
+
+def test_preboard_parses_with_its_timeout_and_defaults():
+    tc = _testing_config()
+    assert tc.parse({})["preboard"] is None and tc.parse({})["preboard_timeout"] == 120.0
+    got = tc.parse({"preboard": ["make", "lint-fast"], "preboard_timeout": 30})
+    assert got["preboard"] == ["make", "lint-fast"] and got["preboard_timeout"] == 30.0
+    assert tc.parse({"preboard": ["true"]})["preboard_timeout"] == tc.DEFAULT_PREBOARD_TIMEOUT == 120.0
+
+
+@pytest.mark.parametrize("bad, says", [
+    ({"preboard_timeout": 5}, r"preboard_timeout without a preboard"),
+    ({"preboard": ["true"], "preboard_timeout": 0}, r"preboard_timeout must be finite seconds > 0"),
+    ({"preboard": ["true"], "preboard_timeout": float("inf")}, r"preboard_timeout must be finite seconds > 0"),
+    ({"preboard": ["true"], "preboard_timeout": "30"}, r"preboard_timeout must be finite seconds > 0"),
+    ({"preboard": ["true"], "preboard_timeout": True}, r"preboard_timeout must be finite seconds > 0"),
+    ({"preboard": "make lint"}, r"preboard must be a non-empty list"),
+    ({"preboard": []}, r"preboard must be a non-empty list")],
+    ids=["without-preboard", "zero", "inf", "string", "bool", "shell-string", "empty"])
+def test_a_malformed_preboard_is_a_broken_configuration(bad, says):
+    # as with the preflight: a timeout without a command times nothing, a typo is loud
+    tc = _testing_config()
+    with pytest.raises(tc.ConfigError, match=says):
+        tc.parse(bad)

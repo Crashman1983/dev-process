@@ -26,12 +26,14 @@ def _repo(out: Path) -> None:
 
 
 def _branch(out: Path, name: str, files: dict[str, str], *, tier: int = 2, reviewed: bool = True,
-            archive: bool = True) -> None:
+            archive: bool = True, delete: tuple[str, ...] = ()) -> None:
     _git(out, "checkout", "-q", "-b", name, "main")
     for rel, text in files.items():
         p = out / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text)
+    for rel in delete:
+        (out / rel).unlink()
     if archive:
         a = out / ".process-work/plans/archive"
         a.mkdir(parents=True, exist_ok=True)
@@ -3163,3 +3165,321 @@ def test_an_unchanged_file_that_does_not_define_the_test_is_unknown(render, tmp_
     _lastfailed(r, LASTFAILED, ["tests/test_impl.py::TestImpl::test_new_case"])
     got = train.red_tests(r, "main", [{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}], {})
     assert got["sources"][0]["ids"] == {"tests/test_impl.py::TestImpl::test_new_case": "unknown"}, got
+
+
+# --- v2.89 (#386): preboard — a check of seconds per candidate before it boards ----------
+
+def _probe_gone(out: Path) -> bool:
+    """Der Probebaum `<root>-train-preboard` und sein Branch `train/<stamp>-preboard` sind weg."""
+    wt = out.parent / f"{out.name}-train-preboard"
+    listed = _git(out, "worktree", "list", "--porcelain").stdout
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    return not wt.exists() and str(wt) not in listed and not [b for b in branches if b.endswith("-preboard")]
+
+
+def _checks(checked=0, dropped=(), unchecked=0, reason=None) -> dict:
+    return {"checked": checked, "dropped": list(dropped), "unchecked": unchecked, "reason": reason}
+
+
+def _preboard_run(train, out, monkeypatch, **kw):
+    """`run()` im Prozess, mit Spionen auf `build_train` (Teilmenge, Worktree) und `_write`."""
+    builds: list[tuple[list[str], object]] = []
+    writes: list[tuple[str, str, str]] = []
+    real_build, real_write = train.build_train, train._write
+
+    def build(root, base, subset, stamp, log, **k):
+        builds.append((list(subset), k.get("worktree")))
+        return real_build(root, base, subset, stamp, log, **k)
+
+    def write(root, state, note, worker):
+        writes.append((state, note, worker))
+        real_write(root, state, note, worker)
+    monkeypatch.setattr(train, "build_train", build)
+    monkeypatch.setattr(train, "_write", write)
+    rc = train.run(out, suite="true", deploy=None, push=False, min_candidates=1, max_wait_hours=0, force=True,
+                   keep_branches=True, dry_run=False, **kw)
+    return rc, builds, writes
+
+
+def test_preboard_red_on_a_broken_host_checks_nobody_and_the_preflight_stops_as_environment(render, tmp_path):
+    """Host kaputt: der Check ist schon auf der Basis rot — niemand wird geprüft; der Preflight
+    im ersten kombinierten Baum stoppt wie heute als `environment`."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "exit 1", "--preflight", "exit 3")
+    assert r.returncode == 1 and "preflight `exit 3` is red" in r.stderr, r.stdout + r.stderr
+    assert "preboard on the base: red — not pre-checked" in r.stderr, r.stderr
+    row = _phases(out)[-1]
+    assert row["result"] == "environment" and row["preboard"] > 0
+    assert [(x["red_path"], sorted(x["runs"])) for x in row["rounds"]] == [("environment", ["first"])]
+    assert row["preboard_checks"] == _checks(unchecked=2, reason="preboard on the base: red")
+    assert _probe_gone(out)
+
+
+def test_preboard_red_on_the_base_blames_nobody_and_everybody_boards(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "exit 1")
+    assert r.returncode == 0 and "not pre-checked" in r.stderr, r.stdout + r.stderr
+    row = _phases(out)[-1]
+    assert row["result"] == "green" and sorted(row["branches"]) == ["alpha", "beta"]
+    assert row["preboard_checks"] == _checks(unchecked=2, reason="preboard on the base: red")
+    assert "preboard red" not in (out / ".git/process-train").joinpath(f"{row['stamp']}.log").read_text()
+
+
+def test_preboard_judges_base_and_candidate_not_the_stale_tip(render, tmp_path):
+    """Veraltete Spitze: auf der Spitze ist der Check rot, main hat es behoben — base+Kandidat ist grün."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "stale.txt").write_text("x\n")
+    _repo(out)
+    _branch(out, "fresh", {"src/f.py": "f\n"})
+    _git(out, "rm", "-q", "stale.txt")
+    _git(out, "commit", "-q", "-m", "main: drop stale.txt")
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "test ! -e stale.txt")
+    assert r.returncode == 0, r.stdout + r.stderr
+    row = _phases(out)[-1]
+    assert row["branches"] == ["fresh"] and row["preboard_checks"] == _checks(checked=1)
+
+
+def test_a_candidate_red_twice_on_the_preboard_is_blocked_and_never_built_into_the_train(
+        render, tmp_path, monkeypatch, capsys):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "bad", {"src/BROKEN": "x\n"})
+    train = _load_train(out)
+    rc, builds, writes = _preboard_run(train, out, monkeypatch, preboard="test ! -e src/BROKEN",
+                                       preboard_timeout=60)
+    err = capsys.readouterr().err
+    assert rc == 0, err
+    row = _phases(out)[-1]
+    probe = out.parent / f"{out.name}-train-preboard"
+    # the base, each candidate on base+it, the red one once more on a rebuilt tree
+    assert sorted(s for s, w in builds if w == probe) == [[], ["alpha"], ["bad"], ["bad"]]
+    trained = [s for s, w in builds if w is None]
+    assert trained and all("bad" not in s for s in trained), builds
+    assert writes == [("blocked", f"dropped from train {row['stamp']}: preboard red — test ! -e src/BROKEN", "bad")]
+    assert "bad" in err and "preboard" in err
+    assert row["result"] == "green" and row["branches"] == ["alpha"] and row["aboard"] == 2
+    assert row["preboard"] > 0 and row["preboard_checks"] == _checks(checked=1, dropped=["bad"])
+    assert _probe_gone(out)
+
+
+def test_a_preboard_missing_everywhere_leaves_the_base_unjudged(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "no-such-preboard-check-386")
+    assert r.returncode == 0 and "preboard on the base: undefined — not pre-checked" in r.stderr, r.stderr
+    row = _phases(out)[-1]
+    assert row["branches"] == ["alpha"]
+    assert row["preboard_checks"] == _checks(unchecked=1, reason="preboard on the base: undefined")
+
+
+def test_a_candidate_that_deletes_the_preboard_script_is_unjudged_and_boards(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "check.sh").write_text("exit 0\n")
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "gone", {"src/g.py": "g\n"}, delete=("check.sh",))
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "sh check.sh")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "gone: not pre-checked — undefined" in r.stderr, r.stderr
+    row = _phases(out)[-1]
+    assert sorted(row["branches"]) == ["alpha", "gone"]
+    assert row["preboard_checks"] == _checks(checked=1, unchecked=1, reason="gone: undefined")
+
+
+def test_the_probe_tree_settles_plans_as_the_train_does(render, tmp_path):
+    """Ein Besitzer für das Mergen: ein Plan, den `_settle_plans` archiviert, macht den Lint
+    auf dem Probebaum nicht rot."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _active_plan_branch(out, "7-done", issue=7)
+    train = _load_train(out)
+    lines: list[str] = []
+    kept, checks = train.pre_board(out, "main", ["7-done"], "t1",
+                                   "test ! -e .process-work/plans/2026-09-20-7-done.md", 60, lines.append)
+    assert kept == ["7-done"] and checks == _checks(checked=1), lines
+    assert any("archived" in ln for ln in lines) and _probe_gone(out), lines
+
+
+@pytest.mark.parametrize("residue", [False, True], ids=["red-then-green", "residue-of-the-first-run"])
+def test_a_red_preboard_is_rerun_once_on_a_rebuilt_tree(render, tmp_path, tmp_path_factory, residue):
+    """Rot, dann grün: er boardet. Der Retry läuft auf einem neu gebauten Baum — ein Check, der
+    den Rückstand seines ersten Laufs ablehnt, ist dort grün."""
+    count = tmp_path_factory.mktemp("preboard") / "n"
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    # calls: the base (n=0, green), alpha (n=1, red), alpha again (n=2, green)
+    check = f'n=$(cat {count} 2>/dev/null || echo 0); echo $((n+1)) > {count}; [ "$n" != 1 ]'
+    if residue:
+        check = f"test ! -e residue || exit 1; touch residue; {check}"
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", check)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert count.read_text().strip() == "3"
+    row = _phases(out)[-1]
+    assert row["branches"] == ["alpha"] and row["preboard_checks"] == _checks(checked=1)
+
+
+def test_a_probe_tree_that_cannot_be_built_is_not_pre_checked_and_the_train_runs(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    # a file where the probe worktree goes: `worktree add` fails
+    blocker = out.parent / f"{out.name}-train-preboard"
+    blocker.write_text("not a worktree\n")
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "preboard on the base: not built — not pre-checked" in r.stderr, r.stderr
+    row = _phases(out)[-1]
+    assert row["branches"] == ["alpha"]
+    assert row["preboard_checks"] == _checks(unchecked=1, reason="preboard on the base: not built")
+
+
+def test_a_preboard_timeout_is_unjudged_while_the_preflight_timeout_stays_red(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps(
+        {"preboard": ["sh", "-c", "test ! -e slow.txt || sleep 30"], "preboard_timeout": 0.5}))
+    _repo(out)
+    _branch(out, "slow", {"slow.txt": "s\n"})
+    started = time.monotonic()
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0 and time.monotonic() - started < 25, r.stdout + r.stderr
+    row = _phases(out)[-1]
+    assert row["branches"] == ["slow"] and row["preboard_checks"] == _checks(unchecked=1, reason="slow: undefined")
+    # `_sh`: red past its time by default (preflight, suite, deploy), undefined where asked
+    train = _load_train(out)
+    lines: list[str] = []
+    assert train._sh(tmp_path, "sleep 5", lines.append, 0.3) == "red"
+    assert train._sh(tmp_path, "sleep 5", lines.append, 0.3, timeout_state="undefined") == "undefined"
+    assert lines == ["$ sleep 5 → killed after 0.3 s (red)", "$ sleep 5 → killed after 0.3 s (undefined)"]
+
+
+def test_a_conflict_on_the_probe_merge_is_not_pre_checked_and_boards(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "beta", {"shared.txt": "beta\n"})
+    (out / "shared.txt").write_text("main moved\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main: shared")
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "true")
+    # it boarded: the train's own build drops it as today
+    assert r.returncode == 1 and "merge conflict with the batch" in r.stdout, r.stdout + r.stderr
+    row = _phases(out)[-1]
+    assert row["preboard_checks"] == _checks(unchecked=1, reason="beta: conflict")
+    assert "preboard red" not in (out / ".git/process-train").joinpath(f"{row['stamp']}.log").read_text()
+    assert _probe_gone(out)
+
+
+def test_everybody_red_on_the_preboard_ends_without_a_train_build(render, tmp_path, monkeypatch, capsys):
+    """Alle rot: rc 1, kein `build_train` des Zugs, die Zeile sagt `preboard` — und train-phases
+    liest, was der Zug schreibt."""
+    out = render(tmp_path / "w", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/BROKEN": "a\n"})
+    _branch(out, "beta", {"src/BROKEN": "b\n"})
+    train = _load_train(out)
+    rc, builds, writes = _preboard_run(train, out, monkeypatch, preboard="test ! -e src/BROKEN",
+                                       preboard_timeout=60)
+    assert rc == 1, capsys.readouterr().err
+    assert [w for _s, w in builds if w is None] == []
+    assert sorted(b for _s, _n, b in writes) == ["alpha", "beta"] and {s for s, _n, _b in writes} == {"blocked"}
+    row = _phases(out)[-1]
+    assert row["result"] == "preboard" and row["preboard"] > 0 and row["aboard"] == 2
+    assert row["preboard_checks"] == _checks(dropped=sorted(row["preboard_checks"]["dropped"]))
+    assert sorted(row["preboard_checks"]["dropped"]) == ["alpha", "beta"] and row["rounds"] == []
+    assert _probe_gone(out)
+    text = _train_phases(render, tmp_path / "r", [row])
+    assert "preboard check: 0 checked, 2 dropped, 0 not pre-checked (in 1/1 runs)" in text, text
+    assert "1 ended at the preboard check (every candidate dropped)" in text, text
+
+
+def test_without_preboard_the_train_runs_as_before(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    train = _load_train(out)
+    calls: list[dict] = []
+    real_sh = train._sh
+
+    def sh(*a, **k):
+        calls.append(k)
+        return real_sh(*a, **k)
+    monkeypatch.setattr(train, "_sh", sh)
+    rc, builds, _writes = _preboard_run(train, out, monkeypatch)
+    assert rc == 0
+    assert calls and all("timeout_state" not in k for k in calls)
+    assert builds and all(w is None for _s, w in builds)
+    row = _phases(out)[-1]
+    assert row["preboard"] == 0 and "preboard_checks" not in row
+    text = (out / ".git/process-train").joinpath(f"{row['stamp']}.log").read_text()
+    assert not [ln for ln in text.splitlines() if ln.split(" ", 1)[-1].startswith("preboard")], text
+
+
+def test_dry_run_runs_no_preboard(render, tmp_path, tmp_path_factory):
+    marker = tmp_path_factory.mktemp("preboard") / "ran"
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--dry-run", "--suite", "true", "--preboard", f"touch {marker}")
+    assert r.returncode == 0 and "dry run" in r.stdout, r.stdout + r.stderr
+    assert not marker.exists() and _probe_gone(out)
+
+
+def test_the_configured_preboard_is_the_trains_default_and_an_empty_one_runs_none(render, tmp_path, tmp_path_factory):
+    marker = tmp_path_factory.mktemp("preboard") / "ran"
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps(
+        {"preboard": ["sh", "-c", f"echo x >> {marker}"]}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert marker.read_text().count("x") == 2  # the base and alpha
+    _branch(out, "beta", {"src/b.py": "b\n"})
+    r = _train(out, "run", "--force", "--suite", "true", "--preboard", "")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert marker.read_text().count("x") == 2 and "preboard_checks" not in _phases(out)[-1]
+
+
+def test_the_probe_tree_is_gone_after_an_exception(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    train = _load_train(out)
+    probe = out.parent / f"{out.name}-train-preboard"
+    seen: list[bool] = []
+
+    def boom(cwd, cmd, log, *a, **k):
+        seen.append(Path(cwd) == probe and probe.is_dir())
+        raise RuntimeError("boom")
+    monkeypatch.setattr(train, "_sh", boom)
+    with pytest.raises(RuntimeError):
+        _preboard_run(train, out, monkeypatch, preboard="true", preboard_timeout=60)
+    assert seen == [True] and _probe_gone(out)
+    assert _phases(out)[-1]["result"] == "red"
+
+
+def test_train_phases_prints_the_preboard_time_and_counts(render, tmp_path):
+    """AC-4: Sekunden aus `preboard`, Zahlen aus `preboard_checks`; `result: preboard` zählt
+    getrennt von rot; kaputte Felder kosten nur ihre eigene Zählung."""
+    rows = [{"stamp": "a", "result": "green", "preboard": 12.0,
+             "preboard_checks": _checks(checked=2, dropped=["x"])},
+            {"stamp": "b", "result": "preboard", "preboard": 8.0, "preboard_checks": _checks(dropped=["y", "z"])},
+            {"stamp": "c", "result": "red", "preboard": 4.0,
+             "preboard_checks": _checks(unchecked=3, reason="preboard on the base: red")},
+            {"stamp": "d", "result": "green"},
+            {"stamp": "e", "result": "green", "preboard_checks": "torn"},
+            {"stamp": "f", "result": "green", "preboard_checks": {"checked": "2", "dropped": "x", "unchecked": None}}]
+    out = _train_phases(render, tmp_path, rows)
+    assert "preboard  median      2 s, max     12 s (in 3/6 runs)" in out, out
+    assert ("preboard check: 2 checked, 3 dropped, 3 not pre-checked (in 4/6 runs; "
+            "last reason: preboard on the base: red)") in out, out
+    assert "1/6 runs ended red, 0 stopped by the preflight" in out, out
+    assert "1 ended at the preboard check (every candidate dropped)" in out, out

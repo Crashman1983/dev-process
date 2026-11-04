@@ -20,6 +20,7 @@ DEFAULT_LANES = {"scoped": {"wait": 300.0}, "full": {"wait": 3600.0, "nice": 10}
 UNMAPPED = ("full", "skip")
 DEFAULT_TIMEOUT = 3600.0
 DEFAULT_PREFLIGHT_TIMEOUT = 600.0
+DEFAULT_PREBOARD_TIMEOUT = 120.0
 
 
 def _finite(value) -> bool:
@@ -198,7 +199,7 @@ def parse(data) -> dict:
     if not isinstance(data, dict):
         raise ConfigError("the configuration must be a JSON object")
     known = {"lane_dir", "lanes", "certificate_env", "merge_suite", "merge_scope", "preflight",
-             "preflight_timeout", "stacks", "areas", "red_ids"}
+             "preflight_timeout", "preboard", "preboard_timeout", "stacks", "areas", "red_ids"}
     unknown = sorted(set(data) - known)
     if unknown:
         raise ConfigError(f"unknown key(s): {', '.join(unknown)} (known: {', '.join(sorted(known))})")
@@ -218,6 +219,12 @@ def parse(data) -> dict:
     if "preflight_timeout" in data and data.get("preflight") is None and not any(
             isinstance(s, dict) and s.get("preflight") is not None for s in stacks_raw.values()):
         raise ConfigError("preflight_timeout without a preflight times nothing")
+    preboard_timeout = data.get("preboard_timeout", DEFAULT_PREBOARD_TIMEOUT)
+    if isinstance(preboard_timeout, bool) or not isinstance(preboard_timeout, (int, float)) \
+            or not _finite(preboard_timeout) or preboard_timeout <= 0:
+        raise ConfigError("preboard_timeout must be finite seconds > 0")
+    if "preboard_timeout" in data and data.get("preboard") is None:
+        raise ConfigError("preboard_timeout without a preboard times nothing")
     return {
         "lane_dir": lane_dir,
         "lanes": _lanes(data.get("lanes")),
@@ -229,6 +236,9 @@ def parse(data) -> dict:
         # the environment check before any test runs: red is the host's, never a test's
         "preflight": _argv(data.get("preflight"), "preflight", required=False),
         "preflight_timeout": float(preflight_timeout),
+        # the train's check of seconds per candidate on base+candidate before it boards (#386)
+        "preboard": _argv(data.get("preboard"), "preboard", required=False),
+        "preboard_timeout": float(preboard_timeout),
         "stacks": [_stack(name, raw) for name, raw in stacks_raw.items()],
         "areas": _areas(data.get("areas", {})),
         # pytest's `lastfailed` files the train reads after a suite-red run (v2.88, #378)

@@ -968,10 +968,12 @@ def _echo(text: str, end: str = "\n") -> None:
         print(text.encode(enc, "replace").decode(enc), end=end, flush=True)
 
 
-def _sh(cwd: Path, cmd: str, log, timeout: float | None = None) -> str:
+def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state: str = "red") -> str:
     """Run cmd, streaming its output; "green", "red" or "undefined" (the
     command or make target does not exist on this tree) — `decide`'s verdict.
-    Past `timeout` seconds its whole process group is killed: red."""
+    Past `timeout` seconds its whole process group is killed: `timeout_state` —
+    red for the preflight, the suite and the deploy; the preboard check asks
+    for "undefined" (a slow check says nothing about the candidate, #386)."""
     _echo(f"train: $ {cmd}")
     # the lines that can carry a fact, over the whole run: those that make a
     # run red whatever follows without a cap, the others the last 400
@@ -1006,9 +1008,9 @@ def _sh(cwd: Path, cmd: str, log, timeout: float | None = None) -> str:
     if timer:
         timer.cancel()
     if expired.is_set():
-        log(f"$ {cmd} → killed after {timeout:g} s (red)")
+        log(f"$ {cmd} → killed after {timeout:g} s ({timeout_state})")
         _echo(f"train: `{cmd}` did not finish in {timeout:g} s — killed")
-        return "red"
+        return timeout_state
     state, why = decide(read_facts(cmd, rc, [*red, *kept], os.environ.get("MAKELEVEL", "0"),
                                    lambda p: (cwd / p).exists()))
     log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ' — ' + why + ', ' + _load()})")
@@ -1088,10 +1090,13 @@ def _train_worktree(root: Path) -> Path:
     return root.parent / f"{root.name}-train"
 
 
-def build_train(root: Path, base: str, aboard: list[str], stamp: str, log) -> tuple[Path, str, list[str], list[str]]:
-    """Merge candidates onto a fresh staging branch in its own worktree.
+def build_train(root: Path, base: str, aboard: list[str], stamp: str, log, *,
+                worktree: Path | None = None) -> tuple[Path, str, list[str], list[str]]:
+    """Merge candidates onto a fresh staging branch in its own worktree
+    (`worktree`, default the staging worktree `<root>-train`; the preboard
+    check builds its probe trees here too — one owner of the merge, #386).
     Returns (worktree, branch, merged, dropped_for_conflict)."""
-    wt = _train_worktree(root)
+    wt = worktree if worktree is not None else _train_worktree(root)
     branch = f"train/{stamp}"
     if wt.exists():
         _git(root, "worktree", "remove", "--force", str(wt))
@@ -1281,7 +1286,7 @@ def _changed_by_run(wt: Path) -> bool:
     return r.returncode != 0 or bool(r.stdout.strip())
 
 
-PHASES = ("preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+PHASES = ("preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
 PHASES_FILE = "phases.jsonl"
 
 
@@ -1521,12 +1526,15 @@ def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str
                    log, outcome: dict | None = None, stages: dict | None = None,
                    measure: dict | None = None) -> None:
     """One log line and one JSON line per run: where the train's time went.
-    `result`: green, red or environment (a red preflight — no red train).
+    `result`: green, red, environment (a red preflight — no red train) or
+    preboard (the preboard check dropped every candidate — nothing was built).
     `branches` are the ones that landed, `deployed` whether the deploy ran
     green (null: no deploy ran), `ended` when the run finished (UTC) — what
     ties a deploy to an issue for `process_kpis.py flow`. `stages`: the merge-suite
     stage times (`_collect_stage_times`), `{}` when none were collected. `rounds`: the
-    red path's runs per kind and round (`docs/process/train.md`), `[]` when none ran."""
+    red path's runs per kind and round (`docs/process/train.md`), `[]` when none ran.
+    `preboard_checks`: what the preboard check decided (`pre_board`) — only when it was
+    configured, so a row without it reads as before."""
     spent = {k: round(phases.get(k, 0.0), 1) for k in PHASES}
     log(f"phases ({result}): " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
     outcome = outcome or {}
@@ -1535,6 +1543,8 @@ def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str
            "branches": list(outcome.get("branches") or []), "deployed": outcome.get("deployed"),
            "ended": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
            "rounds": _rounded_rounds((measure or {}).get("rounds") or [])}
+    if "preboard_checks" in outcome:
+        row["preboard_checks"] = outcome["preboard_checks"]
     try:
         with (_train_dir(root) / PHASES_FILE).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row) + "\n")
@@ -1580,12 +1590,94 @@ def retry_plan(red_in: str, retry: str | None) -> tuple[str, str]:
     return "full", "the suite is red — no --retry: rebuild and run the whole suite again"
 
 
+PREBOARD_SUFFIX = "-preboard"
+
+
+def _preboard_worktree(root: Path) -> Path:
+    """The probe worktree of the preboard check, a sibling like `<root>-train`."""
+    return root.parent / f"{root.name}-train{PREBOARD_SUFFIX}"
+
+
+def _clear_worktree(root: Path, wt: Path) -> None:
+    """Remove `wt` and its registration: what an earlier build or a killed run left."""
+    if wt.exists():
+        _git(root, "worktree", "remove", "--force", str(wt))
+        shutil.rmtree(wt, ignore_errors=True)
+    _git(root, "worktree", "prune")
+
+
+def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, timeout: float | None,
+              log) -> tuple[list[str], dict]:
+    """The preboard check (#386): `cmd`, a check of seconds, on base+candidate before the
+    candidate boards — `(still aboard, checks)`, a new list in boarding order. The probe
+    trees are `build_train`'s, in `<root>-train-preboard` on `train/<stamp>-preboard`: the
+    train's own merge, plans settled. The base first: red or not judgeable there, nobody
+    is checked (a broken host, a red main — never a candidate's fault). A candidate red on
+    base+it runs once more on a rebuilt tree; red twice, it is reported blocked and stays
+    off this train. Not judgeable (undefined, past `timeout`, a conflict, a tree that
+    cannot be built) boards, and says so: the full suite still judges it (AC-2)."""
+    wt = _preboard_worktree(root)
+    probe_stamp = f"{stamp}{PREBOARD_SUFFIX}"
+    checks: dict = {"checked": 0, "dropped": [], "unchecked": 0, "reason": None}
+
+    def probe(subset: list[str]) -> str:
+        """green, red, undefined — or "conflict", "not built": not judged."""
+        _clear_worktree(root, wt)  # a fresh tree per check: no residue of the run before counts
+        try:
+            built, _br, merged, _dropped = build_train(root, base, subset, probe_stamp, log, worktree=wt)
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 — `_git(check=True)` exits
+            # a probe that cannot be built checks nothing, and never aborts the train
+            log(f"preboard: probe tree not built — {type(exc).__name__}: {exc}")
+            return "not built"
+        if any(b not in merged for b in subset):
+            return "conflict"  # boards: the train's own build drops it as before
+        return _sh(built, cmd, log, timeout, timeout_state="undefined")
+
+    try:
+        log(f"preboard `{cmd}` on the base")
+        state = probe([])
+        if state != "green":
+            checks.update(unchecked=len(aboard), reason=f"preboard on the base: {state}")
+            log(f"{checks['reason']} — not pre-checked")
+            print(f"train: {checks['reason']} — not pre-checked", file=sys.stderr)
+            return list(aboard), checks
+        kept: list[str] = []
+        unjudged: list[str] = []
+        for b in aboard:
+            log(f"preboard `{cmd}` on base+{b}")
+            state = probe([b])
+            if state == "red":
+                log(f"preboard red with {b} — once more on a rebuilt tree")
+                state = probe([b])
+            if state == "red":
+                checks["dropped"].append(b)
+                log(f"preboard red twice with {b} — dropped before boarding")
+                print(f"train: {b} did not board — the preboard check `{cmd}` is red on {base}+{b} twice; "
+                      "its worker owes a fix (report: blocked)", file=sys.stderr)
+                _write(root, "blocked", f"{TRAIN_DROP_NOTE} {stamp}: preboard red — {cmd}", b)
+                continue
+            kept.append(b)
+            if state == "green":
+                checks["checked"] += 1
+                continue
+            checks["unchecked"] += 1
+            unjudged.append(f"{b}: {state}")
+            log(f"preboard {b}: not pre-checked — {state}")
+            print(f"train: {b}: not pre-checked — {state}", file=sys.stderr)
+        checks["reason"] = "; ".join(unjudged) or None
+        return kept, checks
+    finally:
+        _clear_worktree(root, wt)
+        _git(root, "branch", "-D", f"train/{probe_stamp}")
+
+
 def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_candidates: int,
         max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool,
         retry: str | None = None, preflight: str | None = None,
         certificate_env: list[str] | None = None, preflight_timeout: float | None = None,
         merge_scope: list[str] | None = None, suite_note: str | None = None,
-        red_ids: list[dict] | None = None) -> int:
+        red_ids: list[dict] | None = None, preboard: str | None = None,
+        preboard_timeout: float | None = None) -> int:
     local = local_integration(root)
     if local is None:
         print("train: no local main/master branch", file=sys.stderr)
@@ -1636,8 +1728,9 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
                         keep_branches=keep_branches, retry=retry, preflight=preflight, phases=phases,
                         certificate_env=certificate_env or [], preflight_timeout=preflight_timeout,
                         outcome=outcome, stages=stages, merge_scope=merge_scope, measure=measure,
-                        red_ids=red_ids)
-        result = "green" if rc == 0 else "red"
+                        red_ids=red_ids, preboard=preboard, preboard_timeout=preboard_timeout)
+        # a result the batch names itself (preboard: nobody left to build) stands
+        result = outcome.get("result") or ("green" if rc == 0 else "red")
         return rc
     except EnvironmentRed as env_red:
         result = "environment"
@@ -1667,7 +1760,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                phases: dict[str, float] | None = None, certificate_env: list[str] | None = None,
                preflight_timeout: float | None = None, outcome: dict | None = None,
                stages: dict | None = None, merge_scope: list[str] | None = None,
-               measure: dict | None = None, red_ids: list[dict] | None = None) -> int:
+               measure: dict | None = None, red_ids: list[dict] | None = None,
+               preboard: str | None = None, preboard_timeout: float | None = None) -> int:
     def log(line: str) -> None:
         with logfile.open("a", encoding="utf-8") as fh:
             fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
@@ -1745,6 +1839,22 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     # blames by position, so the order must mean something
     waiting = {c["branch"]: c.get("hours_waiting") or 0 for c in p["candidates"]}
     aboard.sort(key=lambda b: -waiting[b])
+    if preboard:
+        # before the first round, in boarding order; the preflight stays where it is,
+        # in the first combined tree's judge — a broken host is red on the base check too
+        kept, checks = timed("preboard", pre_board, root, base, aboard, stamp, preboard,
+                             preboard_timeout, log)
+        if outcome is not None:
+            outcome["preboard_checks"] = checks
+        if len(kept) != len(aboard):
+            aboard = kept  # rebound, never changed in place: run() keeps the start count
+        if not aboard:
+            if outcome is not None:
+                outcome["result"] = "preboard"
+            log("preboard red for every candidate — nothing built")
+            print(f"train: every candidate is red on the preboard check `{preboard}` — nothing built, "
+                  f"nothing merged (see {logfile})", file=sys.stderr)
+            return 1
     blamed: list[str] = []
     conflicted: list[str] = []
     branch = ""
@@ -2171,6 +2281,9 @@ def main(argv: list[str]) -> int:
     r.add_argument("--preflight", help="an environment check run once before the gates; red stops the "
                                        "run without blaming anybody (default: preflight of "
                                        "docs/process/testing.local.json)")
+    r.add_argument("--preboard", help="a check of seconds run on base+candidate before each candidate "
+                                      "boards; red twice keeps it off the train (default: preboard of "
+                                      "docs/process/testing.local.json; \"\" runs none)")
     r.add_argument("--retry", help="after a red suite: re-run what failed and what did not run, on the same "
                                    "tree (default: the whole suite again)")
     r.add_argument("--deploy", help="run once after the fast-forward (and push)")
@@ -2212,13 +2325,18 @@ def main(argv: list[str]) -> int:
     checks = [first] if first.strip() else []
     checks += [shlex.join(s["preflight"]) for s in (cfg["stacks"] if cfg else []) if s.get("preflight")]
     preflight = " && ".join(checks) if checks else None
+    # the configured preboard check likewise; `--preboard ""` runs none for this run (#386)
+    preboard = a.preboard if a.preboard is not None else (
+        shlex.join(cfg["preboard"]) if cfg and cfg["preboard"] else "")
     return run(root, suite=suite, deploy=a.deploy, push=a.push, min_candidates=a.min_candidates,
                max_wait_hours=a.max_wait_hours, force=a.force, keep_branches=a.keep_branches,
                dry_run=a.dry_run, retry=a.retry, preflight=preflight,
                certificate_env=cfg["certificate_env"] if cfg else [],
                merge_scope=cfg["merge_scope"] if cfg else None, suite_note=suite_note,
                red_ids=cfg["red_ids"] if cfg else None,
-               preflight_timeout=cfg["preflight_timeout"] if cfg else testing_config.DEFAULT_PREFLIGHT_TIMEOUT)
+               preflight_timeout=cfg["preflight_timeout"] if cfg else testing_config.DEFAULT_PREFLIGHT_TIMEOUT,
+               preboard=preboard if preboard.strip() else None,
+               preboard_timeout=cfg["preboard_timeout"] if cfg else testing_config.DEFAULT_PREBOARD_TIMEOUT)
 
 
 if __name__ == "__main__":
