@@ -2380,6 +2380,97 @@ def _auto_merge_uncached(root: Path, ours: str, other: str) -> tuple[str, set[st
     return fields[0].strip(), set(fields[1:])
 
 
+def integration_conflict(root: Path, tip: str = "HEAD", branch: str = "",
+                         parent: str | None = None) -> tuple[str | None, str | None]:
+    """Does `tip` merge cleanly into the integration ref? (refusal, note) — the
+    one owner of the conflict pre-check before a code review (#379): the bundle,
+    `dispatch start --phase review` and the chain's pushed → review step ask
+    here. A refusal names the conflicted paths and the remedy; a note says the
+    merge could not be checked, against which base — never read as clean.
+    Both None: it merges. Checked against the first resolving integration ref,
+    never against an explicit review base: `parent` (a stacked branch's base)
+    is only a suspect for the cause, as is any other branch `tip` forked from
+    after main when none is named; `branch` is the reviewed branch's own name,
+    whose older copies are no parent."""
+    def commit(rev: str) -> str:
+        return (_git_bytes(root, "rev-parse", "--verify", "-q", f"{rev}^{{commit}}") or b"").decode().strip()
+
+    ref = next((r for r in integration_refs(root) if commit(r)), None)
+    if ref is None:
+        return None, "conflict pre-check: could not check (no integration ref resolves) — not judged clean"
+    base = commit(ref)
+    head = commit(tip)
+    merged = _auto_merge(root, base, head) if head else None
+    if merged is None:
+        why = f"{tip} names no commit here" if not head else _merge_tree_problem(root)
+        return None, (f"conflict pre-check: could not check ({why}); base checked: {ref} at {base} "
+                      f"— not judged clean")
+    conflicted = sorted(merged[1])
+    if not conflicted:
+        return None, None
+    shown = ", ".join(conflicted[:20]) + (f" and {len(conflicted) - 20} more" if len(conflicted) > 20 else "")
+    cause = _conflicting_parent(root, ref, base, head, set(conflicted), branch, parent)
+    who = f"{branch} ({head[:12]})" if branch else f"{tip} ({head[:12]})"
+    if cause:
+        return (f"{who} does not merge into {ref} ({base[:12]}): conflicts in {shown} — they come from "
+                f"its parent branch {cause}, which conflicts with {ref} itself; rebase {cause} onto "
+                f"{ref}, then this branch onto {cause}, then review"), None
+    return (f"{who} does not merge into {ref} ({base[:12]}): conflicts in {shown} — merge {ref} into "
+            f"the branch and resolve them, then review"), None
+
+
+def _merge_tree_problem(root: Path) -> str:
+    """Why `_auto_merge` had no answer, as far as git's version tells."""
+    found = re.search(rb"(\d+)\.(\d+)", _git_bytes(root, "version") or b"")
+    if found and (int(found[1]), int(found[2])) < (2, 38):
+        return f"git {found[1].decode()}.{found[2].decode()} has no `merge-tree --write-tree` (2.38+)"
+    return "`git merge-tree --write-tree` gave no answer: an error or a timeout"
+
+
+def _conflicting_parent(root: Path, ref: str, base: str, head: str, conflicted: set[str],
+                        branch: str, parent: str | None) -> str | None:
+    """The branch `head` is stacked on whose own merge into `ref` conflicts on
+    these paths, or None. A parent is a ref that `head` forked from later than
+    from `ref` (the fork points differ, `process_git.fork_point`): `head`
+    carries its commits. Of several, the nearest fork wins."""
+    try:
+        main_fork = fork_point(root, base, head)
+    except ValueError:
+        return None
+    integration = set(integration_refs(root))
+    if parent and parent not in integration:
+        names = [parent]
+    else:
+        listed = (_git_bytes(root, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes") or b"")
+        names = []
+        for full in listed.decode(errors="replace").split():
+            name = full.removeprefix("refs/heads/").removeprefix("refs/remotes/")
+            plain = name if full.startswith("refs/heads/") else name.split("/", 1)[-1]
+            if name not in integration and plain not in ("HEAD", branch):
+                names.append(name)
+
+    def ancestor(a: str, b: str) -> bool:
+        return _git_bytes(root, "merge-base", "--is-ancestor", a, b) is not None
+
+    best: tuple[str, str] | None = None
+    for name in names:
+        sha = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{name}^{{commit}}") or b"").decode().strip()
+        if not sha or ancestor(head, sha) or ancestor(sha, base):
+            continue  # the branch itself or one built on it; or already integrated
+        try:
+            fork = fork_point(root, sha, head)
+        except ValueError:
+            continue
+        if fork == main_fork or not ancestor(main_fork, fork):
+            continue  # forked from main where `head` did: no parent of it
+        theirs = _auto_merge(root, base, sha)
+        if theirs is None or not theirs[1] & conflicted:
+            continue
+        if best is None or ancestor(best[1], fork):
+            best = (name, fork)
+    return best[0] if best else None
+
+
 def name_status(out: bytes | None) -> list[tuple[str, str, str]] | None:
     """`--name-status -z` read as (status letter, source, path): the source is
     the old name of a rename or copy, else "". The one reader of that format —
