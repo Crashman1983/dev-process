@@ -205,6 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.branches < 2 or args.plans < 1 or args.runs < 1:
         parser.error("--branches must be at least 2, --plans and --runs positive")
+    if args.workdir and args.workdir.exists() and any(args.workdir.iterdir()):
+        parser.error(f"--workdir {args.workdir} is not empty: a kept build is not rebuilt; name a new directory")
     with tempfile.TemporaryDirectory() as temp:
         work = args.workdir or Path(temp)
         work.mkdir(parents=True, exist_ok=True)
