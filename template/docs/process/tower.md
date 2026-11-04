@@ -139,8 +139,8 @@ types a line into a tmux worker (the owner's answer to a question, a
 redirect) and checks that it left the input line — a busy worker leaves
 typed text sitting there, so `say` presses Enter again and exits non-zero,
 naming the branch, when the text still has not gone; an input line it
-cannot read (no `say_prompt` match) is no success either — exit 6, the
-text may be unsent. `say` types only into an input line it can read and
+cannot read after Enter (no `say_prompt` match) is no success either —
+exit 6. `say` types only into an input line it can read and
 that is empty: one screen before typing answers both — a dialog is exit 5,
 an unreadable line exit 6 (nothing typed; set `say_prompt`), a line that
 already holds text exit 7 (nothing typed). Before Enter it reads the line

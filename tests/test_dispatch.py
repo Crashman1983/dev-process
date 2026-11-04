@@ -2962,3 +2962,10 @@ def test_say_reports_nothing_delivered_when_the_typed_text_never_showed(render, 
     assert mod.say(out, "w1", "the lane is free") == 6
     assert pane.keys == ["the lane is free", "C-u"]
     assert "does not show the typed text" in capsys.readouterr().err
+
+
+def test_typed_text_that_starts_like_a_list_item_is_the_input_line(render, tmp_path, monkeypatch):
+    """DeepSeek v2.90: `❯ 1. do this` with no dialog on screen is typed text, not an option."""
+    text = "1. do this first"
+    out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [_tui(), _tui(text), _tui()])
+    assert mod.say(out, "w1", text) == 0 and pane.keys == [text, "Enter"]

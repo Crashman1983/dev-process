@@ -119,7 +119,7 @@ A local branch boards when it is ahead of the integration branch and
   run saw.
 - **After the merge.** A branch that moved since boarding is kept, with no
   `done` and no cleanup. Origin's copy is deleted only with a lease on the
-  boarded SHA.
+  boarded SHA, or on an older origin SHA that the boarded one contains.
 - **Holds before the push.** The train reads the reports again before it
   pushes. A passenger whose worker reported `blocked` during the run, even
   if a release followed, leaves the batch, together with any passenger
