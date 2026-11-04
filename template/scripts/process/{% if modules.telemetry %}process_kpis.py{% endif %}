@@ -1894,25 +1894,27 @@ _FLAKE_PATHS = ("flaky", "gate-flaky")
 
 
 def _round_sources(red_tests: object) -> tuple[list, bool] | None:
-    """The red stages' verdicts of one round's `red_tests` and whether every red stage has a
-    readable source with at least one id. None when there is nothing to class by id:
-    `gates-red`, no red stage, or a malformed field."""
+    """The red stages' verdicts of one round's `red_tests` — as train.py writes it:
+    `{"stages": [...], "sources": [{"stage", "ids": {id: true|false|"unknown"}} | {"stage",
+    "reason"}]}` — and whether every red stage has a readable source with at least one id.
+    None when there is nothing to class by id: `gates-red`, no red stage, a malformed field."""
     if not isinstance(red_tests, dict):
         return None
-    stages, sources = red_tests.get("red_stages"), red_tests.get("sources")
-    if not isinstance(stages, list) or not stages or not isinstance(sources, dict):
+    stages, sources = red_tests.get("stages"), red_tests.get("sources")
+    if not isinstance(stages, list) or not stages or not isinstance(sources, list):
         return None
     verdicts: list = []
     readable = True
     for stage in stages:
-        source = sources.get(stage) if isinstance(stage, str) else None
-        ids = source.get("ids") if isinstance(source, dict) else None
-        on_base = source.get("on_base") if isinstance(source, dict) else None
-        if (not isinstance(ids, list) or not ids or not isinstance(on_base, list)
-                or len(on_base) != len(ids)):
-            readable = False  # no source, an error, too_many, an empty or a torn list
-            continue
-        verdicts.extend(on_base)
+        mine = [src for src in sources if isinstance(src, dict) and src.get("stage") == stage]
+        if not mine:
+            readable = False  # a red stage without a source
+        for src in mine:
+            ids = src.get("ids")
+            if not isinstance(ids, dict) or not ids:
+                readable = False  # a reason (too_many, unreadable, …) or an empty list
+                continue
+            verdicts.extend(ids.values())
     return verdicts, readable
 
 
@@ -1966,7 +1968,7 @@ def _red_path_lines(rows: list[dict]) -> list[str]:
         if path in _FLAKE_PATHS:
             read = _round_sources(red)
             flake.append((_red_class(red), read is not None and read[1]))
-        elif path == "base-red" or (isinstance(path, str) and path.startswith("dropped:")):
+        elif path in ("base-red", "none-survived") or (isinstance(path, str) and path.startswith("dropped:")):
             offender.append(_red_class(red))
         else:
             other += 1

@@ -2399,8 +2399,21 @@ def _train_phases(render, tmp_path, rows: list, *args: str) -> str:
 
 
 def _red(**sources) -> dict:
-    """red_tests einer Runde: jede genannte Stage ist rot, ihr Wert die Quelle."""
-    return {"red_stages": list(sources), "sources": {k: v for k, v in sources.items() if v is not None}}
+    """red_tests einer Runde, wie train.py es schreibt: jede genannte Stage ist rot, ihr Wert
+    die Quelle (`ids`/`on_base` als Listen, `error`, `too_many`; None: keine Quelle)."""
+    out = []
+    for stage, v in sources.items():
+        if v is None:
+            continue
+        if "too_many" in v:
+            out.append({"stage": stage, "reason": "too_many", "n": v["too_many"]})
+        elif "error" in v:
+            out.append({"stage": stage, "reason": v["error"]})
+        elif isinstance(v.get("on_base"), list) and len(v["on_base"]) == len(v["ids"]):
+            out.append({"stage": stage, "ids": dict(zip(v["ids"], v["on_base"]))})
+        else:
+            out.append({"stage": stage, "ids": "torn"})
+    return {"stages": list(sources), "sources": out}
 
 
 def test_train_phases_counts_red_path_runs_per_kind_with_their_median_suite(render, tmp_path):
@@ -2465,7 +2478,7 @@ def test_train_phases_reads_rows_without_or_with_broken_rounds(render, tmp_path)
     broken = old + [{"stamp": "x", "result": "red", "rounds": "torn"},
                     {"stamp": "y", "result": "red", "rounds": [
                         "torn", {"runs": {"first": {"n": "2", "suite_s": None}, "base": "x"}},
-                        {"red_path": "dropped:b", "runs": [], "red_tests": {"red_stages": "unit", "sources": []}},
+                        {"red_path": "dropped:b", "runs": [], "red_tests": {"stages": "unit", "sources": []}},
                         {"red_path": "flaky", "red_tests": _red(unit={"ids": ["a"], "on_base": "true"})},
                         {"red_path": "flaky", "red_tests": _red(unit={"ids": ["a", "b"], "on_base": [True]})}]}]
     out = _train_phases(render, tmp_path / "b", broken)
@@ -3108,3 +3121,19 @@ def test_the_red_ids_of_the_first_run_are_read_before_any_other_run(render, tmp_
     assert first["red_tests"] == {"stages": ["suite"], "sources": [
         {"lastfailed": LASTFAILED, "rootdir": ".", "stage": "suite", "ids": {"tests/test_new.py::test_n": False}}]}
     assert second["red_path"] == "green" and "red_tests" not in second
+
+
+def test_train_phases_reads_what_the_train_writes(render, tmp_path, monkeypatch):
+    """v2.88: writer (M1/M2) and reader (M3) share one format — the round the train records
+    is the round train-phases classes, without a hand-made fixture between them."""
+    root = tmp_path / "w" / "repo"
+
+    def sh(subset, cmd, nth):
+        _lastfailed(root, LASTFAILED, ["tests/test_new.py::test_n"])
+        return "red" if "b2" in subset else "green"
+    m, _calls, _log, _rc = _measured(render, tmp_path / "w", monkeypatch, sh=sh,
+                                     red_ids=[{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}])
+    assert m["rounds"][0]["red_path"].startswith("dropped:"), m["rounds"]
+    row = {"stamp": "a", "result": "green", "rounds": json.loads(json.dumps(m["rounds"]))}
+    out = _train_phases(render, tmp_path / "r", [row])
+    assert "offender rounds (dropped, base-red): 1 — capable 0, not capable 1, undetermined 0" in out, out
