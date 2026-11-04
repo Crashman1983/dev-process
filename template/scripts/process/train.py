@@ -80,7 +80,9 @@ is new — that is why the batch, not the branch, earns the full run
 gates, suite, retry, bisect, push, deploy) and appends them, with the
 branches that landed, whether the deploy ran green and when the run ended,
 to `<git-common-dir>/process-train/phases.jsonl` (`process_kpis.py
-train-phases`, `flow`).
+train-phases`, `flow`). Every run names who stays behind and why, as `plan`
+does (#399); the departing one in its log, a holding one or one with nothing
+to do over `<git-common-dir>/process-train/last-hold.log`.
 
 Run from the root worktree on the integration branch with a clean tree.
 The train never reviews, never certifies by itself: it merges what the
@@ -1392,6 +1394,7 @@ def _changed_by_run(wt: Path) -> bool:
 
 PHASES = ("plan", "preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
 PHASES_FILE = "phases.jsonl"
+LAST_HOLD_FILE = "last-hold.log"  # the last run that did not depart: when, why, who stayed behind
 
 
 class EnvironmentRed(Exception):
@@ -1832,6 +1835,21 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
         _git(root, "branch", "-D", f"train/{probe_stamp}")
 
 
+def _stay(root: Path, said: str, behind: list[str]) -> None:
+    """A run that does not depart (#399): what it says and who stays behind, and why —
+    printed, and written over `last-hold.log`, never appended: a polled `run` floods
+    no log. A lost file costs the record, never the run."""
+    print(said)
+    for line in behind:
+        print(line)
+    now = _dt.datetime.now().isoformat(timespec="seconds")
+    try:
+        (_train_dir(root) / LAST_HOLD_FILE).write_text(
+            "".join(f"{line}\n" for line in [f"{now} {said}", *behind]), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_candidates: int,
         max_wait_hours: float, force: bool, keep_branches: bool, dry_run: bool,
         retry: str | None = None, preflight: str | None = None,
@@ -1859,15 +1877,18 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     p = plan(root, min_candidates=min_candidates, max_wait_hours=max_wait_hours)
     planned = time.monotonic() - started  # a departing run logs it as `plan`, the others print it
     aboard = [c["branch"] for c in p["candidates"] if c["eligible"]]
+    behind = left_behind(p)
     if not aboard:
-        print(f"train: {p['why']} — nothing to do (planning took {planned:.1f} s)")
+        _stay(root, f"train: {p['why']} — nothing to do (planning took {planned:.1f} s)", behind)
         return 0
     if not p["ready"] and not force:
-        print(f"train: holding — {p['why']} (--force departs now; planning took {planned:.1f} s)")
+        _stay(root, f"train: holding — {p['why']} (--force departs now; planning took {planned:.1f} s)", behind)
         return 0
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M")
     logfile = _train_dir(root) / f"{stamp}.log"
     print(f"train {stamp}: departing with {', '.join(aboard)} ({p['why']})")
+    for line in behind:
+        print(line)
     if not suite:
         print("train: no --suite — only the process gates run; the batch merges without "
               "its full suite (docs/process/train.md)", file=sys.stderr)
@@ -1876,10 +1897,12 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     if dry_run:
         print("train: dry run — no merge, no suite")
         return 0
-    if suite_note:
-        # the deliberate exception stays on the run's record, beside what it ran
+    # the deliberate exception stays on the run's record, beside what it ran; and who
+    # stays behind, and why (#399), before the first build
+    if record := ([suite_note] if suite_note else []) + behind:
+        now = _dt.datetime.now().isoformat(timespec="seconds")
         with logfile.open("a", encoding="utf-8") as fh:
-            fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {suite_note}\n")
+            fh.writelines(f"{now} {line}\n" for line in record)
     phases: dict[str, float] = {"plan": planned}
     outcome: dict = {}
     stages: dict[str, dict] = {}
@@ -2497,17 +2520,33 @@ def conflict_hints(root: Path, cands: list[dict]) -> list[dict]:
     return hints
 
 
+def _candidate_lines(c: dict) -> list[str]:
+    """One candidate as `plan` shows it: its line, then its reasons."""
+    mark = "✓" if c["eligible"] else "·"
+    extra = f" — {c['by']}" if c.get("by") and c["eligible"] else ""
+    held = c.get("keeps_open") or []
+    keeps = f", keeps {', '.join(f'#{n}' for n in held)} open" if held else ""
+    line = (f"  {mark} {c['branch']} (+{c['ahead']}/-{c['behind']}, {c.get('files', 0)} file(s), "
+            f"{c.get('hours_waiting', '?')} h, {c.get('deviations', 0)} DoD deviation(s){keeps}){extra}")
+    return [line] + [f"      - {r}" for r in c["reasons"]]
+
+
+def _no_lead_lines(p: dict) -> list[str]:
+    n = p.get("no_lead") or 0
+    return [f"  {n} branch(es) without a lead on {p['base']} — merged or empty, not candidates"] if n else []
+
+
+def left_behind(p: dict) -> list[str]:
+    """Who does not board, and why (#399): every candidate that is not eligible, as
+    `render_plan` shows it, and the branches without a lead."""
+    return [line for c in p["candidates"] if not c["eligible"] for line in _candidate_lines(c)] + _no_lead_lines(p)
+
+
 def render_plan(p: dict) -> str:
     lines = [f"train plan — base {p['base']}: {'READY' if p['ready'] else 'hold'} ({p['why']})"]
     for c in p["candidates"]:
-        mark = "✓" if c["eligible"] else "·"
-        extra = f" — {c['by']}" if c.get("by") and c["eligible"] else ""
-        held = c.get("keeps_open") or []
-        keeps = f", keeps {', '.join(f'#{n}' for n in held)} open" if held else ""
-        lines.append(f"  {mark} {c['branch']} (+{c['ahead']}/-{c['behind']}, {c.get('files', 0)} file(s), "
-                     f"{c.get('hours_waiting', '?')} h, {c.get('deviations', 0)} DoD deviation(s){keeps}){extra}")
-        for r in c["reasons"]:
-            lines.append(f"      - {r}")
+        lines += _candidate_lines(c)
+    lines += _no_lead_lines(p)
     for h in p.get("conflicts") or []:
         first, second = h["branches"]
         if h["paths"] is None:

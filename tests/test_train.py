@@ -4129,3 +4129,64 @@ def test_a_recreated_plan_renamed_on_an_unstacked_branch_is_two_plans(render, tm
     unreadable: list[str] = []
     assert train._stacked_renames(out, base, ["o", "b"], new_by, unreadable, tips) == {}
     assert unreadable == []
+
+
+def _three_left_behind(out: Path) -> list[str]:
+    """Drei Kandidaten, die nicht einsteigen, und ein gemergter Branch; die Gründe und die
+    `no_lead`-Zeile, wie `plan` sie zeigt."""
+    _branch(out, "beta", {"src/b.py": "b\n"}, reviewed=False)                  # no pass
+    _branch(out, "delta", {"src/d.py": "d\n"}, archive=False, reviewed=False)  # not finished
+    _branch(out, "omega", {"src/o.py": "o\n"})                                 # an open question
+    _git(out, "checkout", "-q", "omega")
+    a = out / ".process-work/plans/archive/2026-09-20-omega.md"
+    a.write_text(a.read_text() + "- DECISION NEEDED 2026-09-21 omega: drop the flag? — options: A, B\n")
+    _git(out, "commit", "-q", "-am", "question")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "branch", "merged-one", "main")
+    text = _train(out, "plan").stdout
+    said = [line for line in text.splitlines() if line.startswith("      - ") or "without a lead" in line]
+    assert len([line for line in said if line.startswith("      - ")]) >= 3, text
+    assert any("1 branch" in line and "without a lead" in line for line in said), text
+    return said
+
+
+@pytest.mark.parametrize("exit_, args", [("nothing to do", ()), ("holding", ("--min-candidates", "5")),
+                                         ("departing", ("--force",))])
+def test_every_exit_says_who_stays_behind_and_why(render, tmp_path, exit_, args):
+    """#399 AC-1/2 (R1): „nothing to do“ (der Fall aus #399), „holding“ und „departing“ drucken
+    die Gründe jedes Kandidaten, der nicht einsteigt, wortgleich mit `plan`, und die
+    `no_lead`-Zeile; ein abfahrender Lauf schreibt sie vor dem ersten Build ins Zug-Log."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    if exit_ != "nothing to do":
+        _branch(out, "alpha", {"src/a.py": "a\n"})
+    said = _three_left_behind(out)
+    r = _train(out, "run", "--suite", "true", *args)
+    assert r.returncode == 0 and exit_ in r.stdout, r.stdout + r.stderr
+    printed = r.stdout.splitlines()
+    assert all(line in printed for line in said), (said, r.stdout)
+    train_dir = out / ".git/process-train"
+    if exit_ == "departing":
+        log = next(train_dir.glob("2*.log")).read_text()
+        before_build = log[:log.index("merged alpha")]  # build_train's first line
+        assert all(line in before_build for line in said), log
+        assert not (train_dir / "last-hold.log").exists()
+    else:
+        held = (train_dir / "last-hold.log").read_text()
+        assert exit_ in held.splitlines()[0] and re.match(r"\d{4}-\d\d-\d\dT", held), held
+        assert all(line in held.splitlines() for line in said), held
+
+
+def test_a_second_holding_run_overwrites_the_hold_log(render, tmp_path):
+    """R1: `last-hold.log` wird überschrieben, nicht angehängt — zwei Läufe hinterlassen den
+    Stand des zweiten."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _three_left_behind(out)
+    for wanted in ("5", "6"):
+        r = _train(out, "run", "--suite", "true", "--min-candidates", wanted)
+        assert "holding" in r.stdout, r.stdout + r.stderr
+    held = (out / ".git/process-train/last-hold.log").read_text()
+    assert "waiting for 6" in held and "waiting for 5" not in held, held
+    assert held.count("holding") == 1, held
