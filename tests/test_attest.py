@@ -1031,3 +1031,23 @@ def test_blocked_round_at_walks_through_a_pure_archive_commit(render, tmp_path):
         sys.path.remove(str(out / "scripts/process"))
         for name in names:
             sys.modules.pop(name, None)
+
+
+def test_a_gap_in_the_block_rounds_still_counts_past_the_highest(render, tmp_path):
+    """#397 (Kenni 2322-plan): block rounds {1, 3} — a round-2 block was written and
+    replaced before commit. Counted as 1 + len, the next verdict lands in round 3 and a
+    pass ties with the block; it must go to round 4 and clear the work."""
+    out, base, head = _repo(render, tmp_path)
+    ab = ("--base", base, "--head", head)
+    assert _attest(out, *ab, "--verdict", "block").returncode == 0
+    shard = next((out / ".process-work/journal").rglob("*.md"))
+    first = next(ln for ln in shard.read_text().splitlines() if "verdict=block" in ln)
+    shard.write_text(shard.read_text() + first.replace("round=1", "round=3") + "\n")
+    _commit_path(out, shard)
+    plan = out / ".process-work/plans/2026-09-10-widget.md"
+    plan.write_text(plan.read_text() + "\nROOT-CAUSE work=widget round=1: x — test_x\n"
+                    "ROOT-CAUSE work=widget round=3: y — test_y\n")
+    _commit_path(out, plan)
+    r = _attest(out, *ab, "--verdict", "pass", "--round", "4")
+    assert r.returncode == 0, r.stderr
+    assert "verdict=pass round=4" in _journal(out), _journal(out)

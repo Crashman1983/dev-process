@@ -394,7 +394,9 @@ def round_problems(args, root: Path, journal_dir: Path, records: list | None = N
     # write their block line — that is one round (observed downstream: 21
     # duplicated block lines would have over-counted)
     blocks = sorted({r for r, _line in _block_lines(texts, mine)})
-    counted = 1 + len(blocks)
+    # past the highest block round, gaps included (#397): 1 + len undercounts after a
+    # replaced round, and a pass then ties with the block it should clear
+    counted = (blocks[-1] if blocks else 0) + 1
     last = blocks[-1] if blocks else None
     notes: list[str] = []
     refusals: list[str] = []
