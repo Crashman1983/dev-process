@@ -761,14 +761,15 @@ def find_branch(root: Path, issue: int) -> str | None:
     return None
 
 
-def branch_issues(root: Path, branch: str) -> set[str]:
+def branch_issues(root: Path, branch: str, placed: dict[int, str] | None = None) -> set[str]:
     """The issues a branch belongs to: the number its name leads with, and
     every issue dispatch placed on it (`issues_of`). Boarding, the plans
     counted as the branch's own and the issues its merge closes all ask this
     one question (refutation: the train boarded a package branch on its
-    issue, then closed the epic's)."""
+    issue, then closed the epic's). `placed`: `_placed(root)`, read once by a
+    caller that asks for many branches (#398); without it, read here."""
     issue = _review.branch_issue(branch)
-    return ({issue} if issue else set()) | {str(i) for i in issues_of(root, branch)}
+    return ({issue} if issue else set()) | {str(i) for i in issues_of(root, branch, placed)}
 
 
 def review_issues(root: Path, branch: str) -> set[str]:
@@ -784,13 +785,15 @@ def review_issues(root: Path, branch: str) -> set[str]:
     return {issue} if issue else set()
 
 
-def issues_of(root: Path, branch: str) -> set[int]:
+def issues_of(root: Path, branch: str, placed: dict[int, str] | None = None) -> set[int]:
     """The issues dispatch placed on `branch` — exactly those find_branch
     resolves to it (refutation: a record left from before a re-dispatch kept
     an issue on its old branch). A branch can carry another issue than the
     number its name leads with: a package of a larger issue is dispatched
-    onto `<epic>-<package>-…`. Reading creates nothing and asks no worker."""
-    return {issue for issue, b in _placed(root).items() if b == branch}
+    onto `<epic>-<package>-…`. Reading creates nothing and asks no worker.
+    `placed`: `_placed(root)` as the caller read it; without it, read here."""
+    placed = _placed(root) if placed is None else placed
+    return {issue for issue, b in placed.items() if b == branch}
 
 
 def forget_branch(root: Path, branch: str) -> None:
