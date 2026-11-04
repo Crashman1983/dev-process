@@ -925,6 +925,35 @@ def _slug_in_name(slug: str, stem: str) -> bool:
     return stem == slug or re.search(rf"(?:^|-){re.escape(slug)}(?:-|$)", stem) is not None
 
 
+def _shared_lead(name: str, slug: str, numbers: set[int]) -> int:
+    """How many leading dash-separated parts `name` shares with `slug`, after
+    a leading issue number of this work (`2257-`) is dropped from both — the
+    number is what phases of one issue share, not what tells them apart."""
+    def parts(s: str) -> list[str]:
+        p = s.split("-")
+        return p[1:] if p and p[0].isascii() and p[0].isdigit() and int(p[0]) in numbers else p
+    n = 0
+    for a, b in zip(parts(name), parts(slug)):
+        if a != b:
+            break
+        n += 1
+    return n
+
+
+def _names_sibling(rel: str, head: dict[str, list[str]], slugs: list[str],
+                   siblings: list[str], numbers: set[int]) -> bool:
+    """The report's file name or a `review:`/`work:` value is closer to a
+    sibling work's slug (another plan of the same issue) than to any of this
+    work's — `2257-b-plan-r1` is phase `2257-b-…`'s, not `2257-c-…`'s (#345).
+    A name only the issue ties to both (`2257-plan-r1`) names no sibling."""
+    names = [DATE_PREFIX.sub("", Path(rel).stem), *head.get("review", []),
+             *(w for w in head.get("work", []) if issue_key(w) is None)]
+
+    def best(keys: list[str]) -> int:
+        return max((_shared_lead(n, k, numbers) for n in names for k in keys), default=0)
+    return best(siblings) > best(slugs)
+
+
 def report_header(text: str) -> dict[str, list[str]]:
     """The `review:`/`audit:`/`work:`/`phase:`/`round:` values of a report's header
     block — the lines from the top to the first blank one
@@ -961,7 +990,8 @@ def report_artifact(text: str) -> dict[str, str]:
     return {}
 
 
-def report_of(candidates: list[tuple[str, str]], slugs, issues) -> tuple[str, str] | None:
+def report_of(candidates: list[tuple[str, str]], slugs, issues,
+              siblings=()) -> tuple[str, str] | None:
     """The previous round's report of THIS work item among (path, text)
     candidates — never another one's; the one owner of that rule.
 
@@ -972,14 +1002,23 @@ def report_of(candidates: list[tuple[str, str]], slugs, issues) -> tuple[str, st
     whole slug part; or the `review:` value equals a plan slug. Issues are
     tried before slugs; the newest by name wins. Taking simply the newest
     report put an unrelated item's findings into a delta bundle (observed
-    downstream), and so did a slug matched inside another word."""
+    downstream), and so did a slug matched inside another word.
+
+    `siblings`: the slugs of other plans that share one of these issues (stacked
+    phases of one issue). A report whose name or header is closer to one of
+    them than to `slugs` is that phase's, whatever issue it names — the shared
+    number took phase b's report for phase c's round (#345)."""
     slugs = [s for s in dict.fromkeys(slugs) if s]
+    siblings = [s for s in dict.fromkeys(siblings) if s and s not in slugs]
     issues = list(issues)
     bare = {n for repo, n in issues if repo is None}
+    numbers = {n for _repo, n in issues}
     by_issue: list[tuple[str, str]] = []
     by_slug: list[tuple[str, str]] = []
     for rel, text in sorted(candidates):
         head = report_header(text)
+        if siblings and _names_sibling(rel, head, slugs, siblings, numbers):
+            continue  # another phase's report of the same issue
         works = head.get("work", [])
         if works:
             if any(issue_key(w) in issues for w in works):
@@ -997,7 +1036,8 @@ def report_of(candidates: list[tuple[str, str]], slugs, issues) -> tuple[str, st
     return hits[-1] if hits else None
 
 
-def prior_report(root: Path, slugs, issues, since: str, head: str) -> tuple[str, str] | None:
+def prior_report(root: Path, slugs, issues, since: str, head: str,
+                 siblings=()) -> tuple[str, str] | None:
     """(path, text) of the previous round's report of this work, as committed.
 
     Candidates: the reports present at `since` (that version), and a report
@@ -1023,7 +1063,7 @@ def prior_report(root: Path, slugs, issues, since: str, head: str) -> tuple[str,
             text = _show(root, first[0], rel)
         if text is not None:
             candidates.append((rel, text))
-    return report_of(candidates, slugs, issues)
+    return report_of(candidates, slugs, issues, siblings)
 
 
 def _commit_sha(root: Path, ref: str) -> str | None:

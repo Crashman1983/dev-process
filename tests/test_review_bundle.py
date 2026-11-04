@@ -1058,6 +1058,68 @@ def test_another_repositorys_issue_is_not_this_repos(render, tmp_path):
     assert "stranger" not in _findings(_bundle(out, "--base", "main", "--since", "HEAD").stdout)
 
 
+def _stacked_phases(out, reports: dict[str, str]):
+    """#345: two stacked phases of issue #2257, each its own plan; `reports`
+    (name -> text) committed as round 1's, then a fix of phase c's plan.
+    Returns the commit round 1 reviewed."""
+    _seed_repo(out)
+    plans = out / ".process-work/plans"
+    (plans / "2026-10-27-2257-b-office-edit-draft.md").write_text(
+        "# Plan\n\ntier: 2\nissue: #2257\n\nPhase b: the draft.\n")
+    phase_c = plans / "2026-10-28-2257-c-office-edit-publish.md"
+    phase_c.write_text("# Plan\n\ntier: 2\nissue: #2257\n\nPhase c: publish.\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "plans")
+    reviewed = _git(out, "rev-parse", "HEAD").stdout.strip()
+    folder = out / ".process-work/reviews"
+    folder.mkdir(parents=True)
+    for name, text in reports.items():
+        (folder / name).write_text(text)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "plan reviews round 1")
+    phase_c.write_text(phase_c.read_text() + "Fixed: publish only after the draft.\n")
+    _git(out, "commit", "-q", "-am", "fix plan c")
+    return reviewed
+
+
+def test_a_delta_takes_the_previous_round_of_this_phase_not_a_sibling_phase(render, tmp_path):
+    # #345 AC-1: both phases declare #2257; phase b's report (newer by name, a later
+    # round of b) must not stand in for phase c's round 1
+    out = render(tmp_path / "headed", {"project_name": "d", "modules": {}})
+    reviewed = _stacked_phases(out, {
+        "2026-10-27-2257-c-plan-r1.md":
+            "review: 2257-c-plan-r1\nwork: #2257\nphase: plan\n\nFINDING phase c's own finding\n",
+        "2026-10-28-2257-b-plan-r2.md":
+            "review: 2257-b-plan-r2\nwork: #2257\nphase: plan\n\nFINDING phase b's finding\n",
+    })
+    t = _bundle(out, "--base", "main", "--plan", "2257-c-office-edit-publish", "--since", reviewed).stdout
+    found = _findings(t)
+    assert "phase c's own finding" in found and "phase b" not in found, found
+    # without a header the file name decides the same way
+    out2 = render(tmp_path / "plain", {"project_name": "d", "modules": {}})
+    reviewed = _stacked_phases(out2, {"2026-10-27-2257-c-plan-r1.md": "FINDING phase c's own finding\n",
+                                      "2026-10-28-2257-b-plan-r2.md": "FINDING phase b's finding\n"})
+    found = _findings(_bundle(out2, "--base", "main", "--plan", "2257-c-office-edit-publish",
+                              "--since", reviewed).stdout)
+    assert "phase c's own finding" in found and "phase b" not in found, found
+
+
+def test_a_delta_without_this_phases_report_says_so_rather_than_take_a_siblings(render, tmp_path):
+    # #345 AC-2: only phase b has a report — the bundle names the gap
+    out = render(tmp_path / "sibling-only", {"project_name": "d", "modules": {}})
+    reviewed = _stacked_phases(out, {"2257-b-plan-r1.md": "FINDING phase b's finding\n"})
+    t = _bundle(out, "--base", "main", "--plan", "2257-c-office-edit-publish", "--since", reviewed).stdout
+    assert "phase b" not in _findings(t)
+    assert "no review report for this work item (2257-c-office-edit-publish, #2257)" in t
+    # a report named by the issue alone still counts: it names no other phase
+    out2 = render(tmp_path / "bare", {"project_name": "d", "modules": {}})
+    reviewed = _stacked_phases(out2, {"2257-b-plan-r1.md": "FINDING phase b's finding\n",
+                                      "2257-plan-r1.md": "FINDING the issue's finding\n"})
+    found = _findings(_bundle(out2, "--base", "main", "--plan", "2257-c-office-edit-publish",
+                              "--since", reviewed).stdout)
+    assert "the issue's finding" in found and "phase b" not in found, found
+
+
 def _delta_repo(out):
     """widget (#9) with round 1 reviewed at `reviewed`, then a fix round of
     gate code."""
