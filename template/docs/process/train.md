@@ -108,6 +108,26 @@ A local branch boards when it is ahead of the integration branch and
   host it cannot reach, or a clone without origin, leaves a note and
   boards on the reports this clone has;
 
+**What boarding read stays what the train merges (#391, #335).**
+- **One snapshot.** Boarding takes a snapshot of every branch's SHA and
+  the base's in one `for-each-ref`. Every content read (diffs, plans, review
+  coverage, the template-update check) and every build of the run use that
+  snapshot; a branch's identity (its issues, its work ids) is still read by
+  name.
+- **New commits.** A commit that arrives during the run rides a later
+  train. Probes and the rebuild after a drop see exactly the trees the red
+  run saw.
+- **After the merge.** A branch that moved since boarding is kept, with no
+  `done` and no cleanup. Origin's copy is deleted only with a lease on the
+  boarded SHA.
+- **Holds before the push.** The train reads the reports again before it
+  pushes. A passenger whose worker reported `blocked` during the run, even
+  if a release followed, leaves the batch, together with any passenger
+  stacked on it. The rest is rebuilt and judged again, and the phase line
+  names them in `held`. The train compares report sets, never another
+  host's clock. A hold written while the push's own pre-push gates run is
+  the one window left.
+
 (The clone's red ledger naming no red gate is a *departure* condition for
 the whole train, not a per-candidate reason.)
 

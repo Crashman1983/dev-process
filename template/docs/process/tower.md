@@ -39,6 +39,7 @@ conversations.
 - **permission-prompt** (high) — a live `runner: tmux` worker whose screen shows a permission dialog (its last 15 lines below the input line: `Do you want to …`, `Allow …?`, `(y/n)`, numbered Yes/No — `dispatch.dialog_line`, the recogniser `say` uses) and printed nothing for 10 minutes (`--prompt-minutes`, else `PROCESS_PROMPT_MINUTES`, else the policy's `prompt_minutes`); names the dialog line; approve it in the session or put that one simple command on the allowlist — never a wait loop, a worker runs one simple command per Bash call. No `question-unrouted` for that session: a prompt is no question for the steward. A detached `claude -p` run never shows a prompt (a tool it may not use is refused there), so it never has this finding
 - **remote-unreachable** — `--remote` could not fetch; the table may be stale
 - **remote-residue** — unmerged branches on origin untouched for 14 days, counted not listed
+- **train-hold** (medium) — a live local branch ahead of the base that the train holds by its own rule (`tower.train_holds`, the one owner the train reads too), while a later report (`idle`, `planned`) hides the hold from the reports list; a `blocked` that is the latest report is the `blocked` finding instead
 - **blocked** — a worker that reported `blocked` an hour ago and nothing since
 - **process-heavy** (low) — more than 40% of at least 20 commits in the last 7 days touch only process records: look where the rounds go and whether bookkeeping is batched
 - **far-behind** — 50+ commits behind the integration branch
