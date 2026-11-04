@@ -56,6 +56,66 @@ def test_clean_render_and_a_good_plan_pass(render, tmp_path):
     assert r.returncode == 0 and "plan-structure: OK" in r.stdout, r.stdout
 
 
+def test_a_shallow_clone_without_a_fork_point_refuses(render, tmp_path):
+    """#302: a shallow clone holds origin/main but not the commit the branch forked from —
+    which plans the branch adds is unknown, so the gate fails closed and names the remedy
+    instead of noting no range and checking nothing. With the history fetched it checks."""
+    src = _repo(render(tmp_path / "src", {"project_name": "demo"}))
+    _git(src, "checkout", "-q", "main")
+    (src / "m.txt").write_text("m\n")
+    _git(src, "add", "-A")
+    _git(src, "commit", "-qm", "main moves on")
+    _git(src, "checkout", "-q", "feature")
+    _plan(src, GOOD.replace("shall keep", "keeps"))  # a finding the gate must not miss
+    _git(src, "add", "-A")
+    _git(src, "commit", "-qm", "plan")
+    _git(src, "checkout", "-q", "main")  # the remote's default branch is main
+    dst = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "--no-single-branch", "-b", "feature",
+                    f"file://{src}", str(dst)], check=True, capture_output=True)
+    r = _run(dst)
+    assert r.returncode == 1 and "no fork point with origin/main" in r.stdout \
+        and "git fetch --unshallow" in r.stdout and "no branch range" not in r.stdout, r.stdout
+    _git(dst, "fetch", "-q", "--unshallow")
+    r = _run(dst)
+    assert r.returncode == 1 and "AC-1 has 0 ×" in r.stdout and "no fork point" not in r.stdout, r.stdout
+
+
+def test_an_integration_ref_with_no_shared_history_refuses(render, tmp_path):
+    """#302: not shallow, but the branch shares no commit with main (an orphan, or the fork
+    not fetched): the ref is named, no `--unshallow` is offered to a full clone."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    _git(out, "checkout", "-q", "--orphan", "orphan")
+    _git(out, "commit", "-qm", "unrelated")
+    _plan(out, GOOD)
+    r = _run(out)
+    assert r.returncode == 1 and "no fork point with main" in r.stdout \
+        and "--unshallow" not in r.stdout and "no branch range" not in r.stdout, r.stdout
+
+
+def test_no_integration_ref_or_on_it_stays_a_note(render, tmp_path):
+    """#302 bound: without any integration ref (a new repo) or on the ref itself — a shallow
+    clone of main included — there is no branch range and no plan is new: a note, no refusal."""
+    out = render(tmp_path / "nomain", {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "dev")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "base")
+    _plan(out, GOOD.replace("shall keep", "keeps"))
+    r = _run(out)
+    assert r.returncode == 0 and "no branch range against an integration ref" in r.stdout, r.stdout
+    src = _repo(render(tmp_path / "src", {"project_name": "demo"}))
+    _git(src, "checkout", "-q", "main")
+    _plan(src, GOOD.replace("shall keep", "keeps"))
+    r = _run(src)
+    assert r.returncode == 0 and "no branch range against an integration ref" in r.stdout, r.stdout
+    dst = tmp_path / "shallow-main"
+    subprocess.run(["git", "clone", "-q", "--depth", "1", "-b", "main", f"file://{src}", str(dst)],
+                   check=True, capture_output=True)
+    _plan(dst, GOOD.replace("shall keep", "keeps"))
+    r = _run(dst)
+    assert r.returncode == 0 and "no branch range against an integration ref" in r.stdout, r.stdout
+
+
 def test_a_criterion_needs_exactly_one_shall(render, tmp_path):
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     _plan(out, GOOD.replace("shall keep the cursor", "shall keep the cursor and shall scroll"))

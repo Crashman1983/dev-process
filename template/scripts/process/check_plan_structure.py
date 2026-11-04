@@ -39,7 +39,9 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
 
 Bound are only plans the branch ADDS — absent at the integration ref, or below
 Tier 2 there (a stub raised here) — so a plan merged before this gate is
-history, not a new duty. A Spec Kit plan (`specs/<name>/plan.md`) is bound by
+history, not a new duty. An integration ref without a fork point here (a shallow
+clone, the fork not fetched) leaves that unknown: HARD, naming the remedy (#302);
+no integration ref at all, or on it, is a NOTE. A Spec Kit plan (`specs/<name>/plan.md`) is bound by
 the same rule when it is Tier 2+; it answers for its Transitions
 section only. Project data,
 `docs/process/plan-structure.local.json`, is read at the integration ref like
@@ -71,8 +73,10 @@ from check_review import (  # noqa: E402  (one owner for plan grammar and fences
     TRANSITIONS_HEADING,
     GitReadError,
     fenced_lines,
+    forkless_refs,
     integration_push,
     integration_ref,
+    is_shallow,
     plan_tier,
     uncommented,
 )
@@ -485,6 +489,14 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     except GitReadError as exc:
         return [f"cannot read the integration ref: {exc}"], soft
     if ref is None:
+        # #302: an integration ref without a fork point (a shallow clone, the fork not
+        # fetched) is no "no range" — which plans the branch adds is unknown: fail closed
+        forkless = forkless_refs(root)
+        if forkless:
+            remedy = ("this clone is shallow: `git fetch --unshallow`" if is_shallow(root)
+                      else f"fetch the history of {forkless[0]} the branch forked from")
+            return [f"no fork point with {', '.join(forkless)} in this history — which plans this "
+                    f"branch adds is unknown, so none is checked; {remedy}"], soft
         # on the integration branch itself, or no integration ref at all: there is no
         # branch range, so no plan is new here — old plans are history, not a new duty
         return hard, ["no branch range against an integration ref — no plan is checked"]
