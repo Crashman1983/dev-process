@@ -176,20 +176,33 @@ def record_texts(root: Path, kinds: tuple[str, ...] = RECORD_KINDS, *,
             except OSError:
                 continue
         return out
-    names = _git_bytes(root, "ls-tree", "-r", "-z", "--name-only", ref, "--",
-                       JOURNAL_DIR, PLANS_ACTIVE, SPECS_DIR)
-    if names is None:
+    blobs = _record_blobs(root, kinds, ref)
+    return None if blobs is None else [(rel, text) for rel, _sha, text in blobs]
+
+
+def _record_blobs(root: Path, kinds: tuple[str, ...], ref: str) -> list[tuple[str, str, str]] | None:
+    """(path, blob id, text) of every record file of `kinds` at `ref`: one `ls-tree`,
+    the texts by blob id (`_blob_texts`, once per run — #398: every branch and every
+    clearing pass read all plans anew). One object that is missing or no blob (a
+    gitlink) makes the whole answer None, as one path left out would hide a record."""
+    listing = _git_pure(root, (ref,), "ls-tree", "-r", "-z", ref, "--", JOURNAL_DIR, PLANS_ACTIVE, SPECS_DIR)
+    if listing is None:
         return None
-    out = []
-    for raw in names.split(b"\0"):
-        rel = raw.decode("utf-8", errors="surrogateescape")
-        if not raw or record_kind(rel) not in kinds:
+    entries: list[tuple[str, str]] = []
+    for raw in listing.split(b"\0"):
+        meta, tab, name = raw.partition(b"\t")
+        rel = name.decode("utf-8", errors="surrogateescape")
+        if not tab or record_kind(rel) not in kinds:
             continue
-        blob = _git_bytes(root, "cat-file", "blob", f"{ref}:{rel}")
-        if blob is None:
+        parts = meta.split()
+        if len(parts) != 3 or parts[1] != b"blob":
             return None
-        out.append((rel, blob.decode("utf-8", errors="replace")))
-    return out
+        entries.append((rel, parts[2].decode()))
+    try:
+        texts = _blob_texts(root, [sha for _rel, sha in entries])
+    except GitReadError:
+        return None
+    return [(rel, sha, texts[sha]) for rel, sha in entries]
 
 REQUIRED = {"work", "tier", "reviewer", "model", "independence", "verdict", "round"}
 # the reviewed range — both or none (a partial claim is malformed)
@@ -865,7 +878,6 @@ def work_key(work: str):
     return ("#", k[1]) if k is not None else work
 
 
-@functools.lru_cache(maxsize=64)
 def _plans_at_ref(root_s: str, ref: str) -> tuple[tuple[str, str], ...] | None:
     texts = record_texts(Path(root_s), PLAN_KINDS + ("plan-archive",), ref=ref)
     return None if texts is None else tuple(texts)
@@ -1751,27 +1763,28 @@ def _journal_blobs(root: Path, commit: str, *, strict: bool) -> list[tuple[str, 
 
 
 def _blob_texts(root: Path, shas: list[str]) -> dict[str, str]:
-    """The text of each blob, read in ONE `cat-file --batch` (a base holds hundreds of shards)."""
-    if not shas:
-        return {}
-    try:
-        result = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"],
-                                input="".join(f"{sha}\n" for sha in shas).encode(),
-                                capture_output=True, timeout=60, check=False, env=git_environment())
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise GitReadError(f"git cat-file failed ({type(exc).__name__})") from exc
-    if result.returncode != 0:
-        raise GitReadError("git cat-file failed")
-    texts, data = {}, result.stdout
-    for sha in shas:
-        header, _nl, data = data.partition(b"\n")
-        parts = header.split()
-        if len(parts) != 3 or parts[1] != b"blob":
-            raise GitReadError(f"git cat-file cannot read the blob {sha}")
-        size = int(parts[2])
-        texts[sha] = data[:size].decode("utf-8", errors="replace")
-        data = data[size + 1:]
-    return texts
+    """The text of each blob, read in ONE `cat-file --batch` (a base holds hundreds of shards)
+    — once per run: a blob id names its content (`_PURE`, #398)."""
+    todo = [sha for sha in dict.fromkeys(shas) if ("blob", str(root), sha) not in _PURE]
+    if todo:
+        try:
+            result = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"],
+                                    input="".join(f"{sha}\n" for sha in todo).encode(),
+                                    capture_output=True, timeout=60, check=False, env=git_environment())
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise GitReadError(f"git cat-file failed ({type(exc).__name__})") from exc
+        if result.returncode != 0:
+            raise GitReadError("git cat-file failed")
+        data = result.stdout
+        for sha in todo:
+            header, _nl, data = data.partition(b"\n")
+            parts = header.split()
+            if len(parts) != 3 or parts[1] != b"blob" or not parts[2].isdigit() or len(data) <= int(parts[2]):
+                raise GitReadError(f"git cat-file cannot read the blob {sha}")
+            size = int(parts[2])
+            _PURE[("blob", str(root), sha)] = data[:size].decode("utf-8", errors="replace")
+            data = data[size + 1:]
+    return {sha: _PURE[("blob", str(root), sha)] for sha in shas}  # type: ignore[misc]
 
 
 def range_records(root: Path, base: str, tip: str) -> RangeRecords:
@@ -2542,12 +2555,24 @@ def _reviewed_heads(passes: list[dict], tier: int, known: set[str]) -> tuple[tup
 
 
 def _known_work(root: Path, *, ref: str | None = None) -> set[str]:
-    """Every work id any plan names — active, archived or Spec Kit."""
+    """Every work id any plan names — active, archived or Spec Kit. At a `ref`, a
+    plan's ids are kept per path and blob (#398): the stem comes from the path."""
+    kinds = PLAN_KINDS + ("plan-archive",)
+    if ref is None:
+        return set().union(*(_named_work(rel, text) for rel, text in record_texts(root, kinds) or []))
     known: set[str] = set()
-    for rel, text in record_texts(root, PLAN_KINDS + ("plan-archive",), ref=ref) or []:
-        stem = Path(rel).parent.name if rel.startswith(SPECS_DIR + "/") else Path(rel).stem
-        known |= _plan_work_ids(stem, _unfenced(text), include_dedated=True)  # an example is no id
+    for rel, sha, text in _record_blobs(root, kinds, ref) or []:
+        key = ("ids", str(root), rel, sha)
+        if key not in _PURE:
+            _PURE[key] = _named_work(rel, text)
+        known |= _PURE[key]  # type: ignore[operator]
     return known
+
+
+def _named_work(rel: str, text: str) -> frozenset[str]:
+    """The work ids the plan at `rel` names."""
+    stem = Path(rel).parent.name if rel.startswith(SPECS_DIR + "/") else Path(rel).stem
+    return frozenset(_plan_work_ids(stem, _unfenced(text), include_dedated=True))  # an example is no id
 
 
 _OWN_FAMILY_RULES: dict[tuple[str, str], tuple[int, dict, str]] = {}
