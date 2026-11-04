@@ -1858,7 +1858,7 @@ def share(weeks: int = 4) -> int:
 
 
 # --- train-phases: where the merge train's time goes ---------------------------
-_TRAIN_PHASES = ("preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+_TRAIN_PHASES = ("plan", "preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
 
 
 def _preboard_lines(rows: list[dict]) -> list[str]:
@@ -2056,7 +2056,7 @@ def train_phases(runs: int = 20) -> int:
           f"{results.count('environment')} stopped by the preflight (the host, not a passenger)"
           + (f", {stopped} ended at the preboard check (every candidate dropped)" if stopped else ""))
     n = len(rows)
-    print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'shorten the phase with the largest median first: suite → test selection and certificates, bisect → smaller batches, retry → flaky tests (failure-catalog.md)', thin='let more trains run before acting on a phase')}")
+    print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'shorten the phase with the largest median first: plan → fewer unmerged stale branches to read (tidy.py), suite → test selection and certificates, bisect → smaller batches, retry → flaky tests (failure-catalog.md)', thin='let more trains run before acting on a phase')}")
     for line in _red_path_lines(rows):
         print(line)
     return 0

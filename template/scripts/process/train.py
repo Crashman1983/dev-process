@@ -76,7 +76,7 @@ worker gets a `done` report, and `--deploy` runs once. A branch that moved
 since boarding merged at its boarded SHA and stays: no delete, no `done`,
 its dispatch records kept — its new commits need their own review. The combination
 is new — that is why the batch, not the branch, earns the full run
-(`docs/process/testing.md`). Each run logs its phase times (preflight,
+(`docs/process/testing.md`). Each run logs its phase times (plan, preflight,
 gates, suite, retry, bisect, push, deploy) and appends them, with the
 branches that landed, whether the deploy ran green and when the run ended,
 to `<git-common-dir>/process-train/phases.jsonl` (`process_kpis.py
@@ -1366,7 +1366,7 @@ def _changed_by_run(wt: Path) -> bool:
     return r.returncode != 0 or bool(r.stdout.strip())
 
 
-PHASES = ("preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+PHASES = ("plan", "preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
 PHASES_FILE = "phases.jsonl"
 
 
@@ -1831,13 +1831,15 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         # before any worktree or base check is paid for
         print(f"train: gate runner not runnable — {not_runnable_reason(root)}", file=sys.stderr)
         return 2
+    started = time.monotonic()
     p = plan(root, min_candidates=min_candidates, max_wait_hours=max_wait_hours)
+    planned = time.monotonic() - started  # a departing run logs it as `plan`, the others print it
     aboard = [c["branch"] for c in p["candidates"] if c["eligible"]]
     if not aboard:
-        print(f"train: {p['why']} — nothing to do")
+        print(f"train: {p['why']} — nothing to do (planning took {planned:.1f} s)")
         return 0
     if not p["ready"] and not force:
-        print(f"train: holding — {p['why']} (--force departs now)")
+        print(f"train: holding — {p['why']} (--force departs now; planning took {planned:.1f} s)")
         return 0
     stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M")
     logfile = _train_dir(root) / f"{stamp}.log"
@@ -1854,7 +1856,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         # the deliberate exception stays on the run's record, beside what it ran
         with logfile.open("a", encoding="utf-8") as fh:
             fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {suite_note}\n")
-    phases: dict[str, float] = {}
+    phases: dict[str, float] = {"plan": planned}
     outcome: dict = {}
     stages: dict[str, dict] = {}
     measure: dict = {}  # the red path's rounds (v2.88): filled by _run_batch, ended here too

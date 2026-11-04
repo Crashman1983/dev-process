@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -4015,3 +4016,30 @@ def test_the_dispatch_records_are_read_once_per_planning(render, tmp_path, monke
     for branch in ("70-p1-slice", "alpha"):
         assert dispatch.branch_issues(out, branch) == dispatch.branch_issues(out, branch, placed)
     assert dispatch.branch_issues(out, "70-p1-slice") == {"70", "71"}
+
+
+def test_a_departing_run_logs_its_planning_time_as_the_plan_phase(render, tmp_path):
+    """#398 AC-3 (S4): die Phase `plan` steht in der Zeile des abfahrenden Laufs, und
+    `train-phases` zeigt sie."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    row = _phases(out)[-1]
+    assert row["plan"] > 0, row
+    text = _train_phases(render, tmp_path / "kpis", [{"stamp": "s", "result": "green", "plan": 12.0, "suite": 5.0}])
+    assert "plan      median     12 s, max     12 s (in 1/1 runs)" in text, text
+
+
+@pytest.mark.parametrize("args, said", [(("--min-candidates", "5"), "holding"), ((), "nothing to do")])
+def test_a_holding_run_prints_its_planning_time_and_logs_no_phases(render, tmp_path, args, said):
+    """S4: ein haltender Lauf und einer mit „nothing to do“ drucken ihre Planungszeit und
+    schreiben keine Zeile in `phases.jsonl` — ein häufig abgefragtes `run` flutet nichts."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"}, reviewed=said == "holding")
+    r = _train(out, "run", "--suite", "true", *args)
+    assert r.returncode == 0 and said in r.stdout, r.stdout + r.stderr
+    assert re.search(r"planning took \d+\.\d s", r.stdout), r.stdout
+    assert not (out / ".git/process-train/phases.jsonl").exists()
