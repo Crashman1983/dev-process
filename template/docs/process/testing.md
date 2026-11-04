@@ -344,6 +344,26 @@ run whose `stages` file is missing or empty certifies nothing — the scope is
 read from the run, never recomputed after it (`certificate.run_evidence`). A
 suite without stages writes neither file; nothing changes for it.
 
+**Red tests.** To measure whether re-running only the red tests could
+shorten the train's red path (`train.md`, "The red path, measured"), a
+project names its pytest stages' own record in `testing.local.json`:
+
+    "red_ids": [{"stage": "backend", "rootdir": "backend",
+                 "lastfailed": "backend/.pytest_cache/v/cache/lastfailed"}]
+
+- `rootdir` is pytest's rootdir, relative to the repository; node ids are
+  relative to it.
+- `stage` names the stage of `<stage>.time`. A suite without stages counts
+  as one stage, `suite`.
+- Paths are relative, without `..`. One `lastfailed` file for two entries
+  is refused: two pytest stages with one rootdir each need their own
+  `cache_dir`, or one stage's file names the other's tests.
+
+The merge suite must not switch the cache off (`-p no:cacheprovider`) and
+must keep `cache_dir` where the entry points. The train only reads the file
+and never changes what runs. A stage without an entry — a non-pytest
+runner — leaves its red rounds undetermined.
+
 **The net under a selection.** A `merge_scope` that skips a stage trades a
 run for a guess about who reads a path; nothing in the merge path notices
 the wrong guess. A project that configures one also schedules a full run of
