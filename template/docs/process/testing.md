@@ -362,7 +362,8 @@ project names its pytest stages' own record in `testing.local.json`:
 The merge suite must not switch the cache off (`-p no:cacheprovider`) and
 must keep `cache_dir` where the entry points. The train only reads the file
 and never changes what runs. A stage without an entry — a non-pytest
-runner — leaves its red rounds undetermined.
+runner — leaves its red rounds undetermined; an entry must cover everything
+its stage runs, or a red round reads fit on part of its red tests.
 
 **The net under a selection.** A `merge_scope` that skips a stage trades a
 run for a guess about who reads a path; nothing in the merge path notices

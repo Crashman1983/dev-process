@@ -2456,7 +2456,7 @@ def test_train_phases_classes_red_tests_apart_for_flake_and_offender_rounds(rend
     out = _train_phases(render, tmp_path, rows)
     assert ("red tests, flake rounds (flaky, gate-flaky): 4, ids readable 3"
             " — capable 1, not capable 1, undetermined 2") in out, out
-    assert "red tests, offender rounds (dropped, base-red): 5 — capable 1, not capable 1, undetermined 3" in out, out
+    assert "red tests, offender rounds (dropped, base-red, none-survived): 5 — capable 1, not capable 1, undetermined 3" in out, out
     assert "confidence: low" in out and "upper bound" in out, out
 
 
@@ -2465,7 +2465,7 @@ def test_train_phases_counts_too_many_red_ids_as_undetermined(render, tmp_path):
         {"red_path": "dropped:beta", "runs": {}, "red_tests": _red(unit={"too_many": 431})},
         {"red_path": "flaky", "runs": {}, "red_tests": _red(unit={"too_many": 250})}]}]
     out = _train_phases(render, tmp_path, rows)
-    assert "offender rounds (dropped, base-red): 1 — capable 0, not capable 0, undetermined 1" in out, out
+    assert "offender rounds (dropped, base-red, none-survived): 1 — capable 0, not capable 0, undetermined 1" in out, out
     assert "flake rounds (flaky, gate-flaky): 1, ids readable 0 — capable 0, not capable 0, undetermined 1" in out, out
 
 
@@ -2483,7 +2483,7 @@ def test_train_phases_reads_rows_without_or_with_broken_rounds(render, tmp_path)
                         {"red_path": "flaky", "red_tests": _red(unit={"ids": ["a", "b"], "on_base": [True]})}]}]
     out = _train_phases(render, tmp_path / "b", broken)
     assert "red path: 4 rounds in 1/4 trains" in out, out
-    assert "offender rounds (dropped, base-red): 1 — capable 0, not capable 0, undetermined 1" in out, out
+    assert "offender rounds (dropped, base-red, none-survived): 1 — capable 0, not capable 0, undetermined 1" in out, out
     assert "flake rounds (flaky, gate-flaky): 2, ids readable 0 — capable 0, not capable 0, undetermined 2" in out, out
 
 
@@ -3136,4 +3136,28 @@ def test_train_phases_reads_what_the_train_writes(render, tmp_path, monkeypatch)
     assert m["rounds"][0]["red_path"].startswith("dropped:"), m["rounds"]
     row = {"stamp": "a", "result": "green", "rounds": json.loads(json.dumps(m["rounds"]))}
     out = _train_phases(render, tmp_path / "r", [row])
-    assert "offender rounds (dropped, base-red): 1 — capable 0, not capable 1, undetermined 0" in out, out
+    assert "offender rounds (dropped, base-red, none-survived): 1 — capable 0, not capable 1, undetermined 0" in out, out
+
+
+def test_an_unchanged_file_that_does_not_define_the_test_is_unknown(render, tmp_path):
+    """Refute v2.88: a test inherited from a mixin, or star-imported, is new elsewhere —
+    the unchanged file that runs it is no proof it was on the base."""
+    train = _load_train(render(tmp_path / "probe", {"project_name": "d", "modules": {}}))
+    r = tmp_path / "inh"
+    r.mkdir()
+    _git(r, "init", "-q", "-b", "main")
+    _git(r, "config", "user.email", "t@t")
+    _git(r, "config", "user.name", "t")
+    (r / "tests").mkdir()
+    (r / "tests/cases.py").write_text("class Cases:\n    def test_old(self):\n        pass\n")
+    (r / "tests/test_impl.py").write_text("from tests.cases import Cases\n\n\nclass TestImpl(Cases):\n    pass\n")
+    _git(r, "add", "-A")
+    _git(r, "commit", "-q", "-m", "base")
+    _git(r, "checkout", "-q", "-b", "board")
+    (r / "tests/cases.py").write_text("class Cases:\n    def test_old(self):\n        pass\n\n"
+                                      "    def test_new_case(self):\n        pass\n")
+    _git(r, "add", "-A")
+    _git(r, "commit", "-q", "-m", "board")
+    _lastfailed(r, LASTFAILED, ["tests/test_impl.py::TestImpl::test_new_case"])
+    got = train.red_tests(r, "main", [{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}], {})
+    assert got["sources"][0]["ids"] == {"tests/test_impl.py::TestImpl::test_new_case": "unknown"}, got
