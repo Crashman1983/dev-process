@@ -2796,3 +2796,43 @@ def test_the_chain_queues_no_review_of_a_branch_that_conflicts_with_main(render,
     monkeypatch.setattr(mod, "queue_add", lambda root, **kw: started.append(kw["phase"]))
     mod.chain(work)
     assert stopped == [] and started == []
+
+
+def test_a_code_review_start_judges_origins_tip_not_a_stale_local_ref(render, tmp_path):
+    """Refute v2.87: local `feat` still conflicts, origin's `feat` merged main in —
+    the session reviews origin's tip, so that decides; a stale ref never refuses."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _conflicting_branch(out, "feat")
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(out, "remote", "add", "origin", str(bare))
+    stale = _git(out, "rev-parse", "feat").stdout.strip()
+    _git(out, "checkout", "-q", "feat")
+    _git(out, "merge", "-q", "-X", "theirs", "main", "-m", "merge main")
+    _git(out, "push", "-q", "origin", "main", "feat")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "branch", "-f", "feat", stale)  # the local ref lags behind origin
+    r = _dispatch(out, "start", "--issue", "5", "--phase", "review", "--tier", "2", "--branch", "feat", "--dry-run")
+    assert r.returncode == 0 and "would start review" in r.stdout, r.stdout + r.stderr
+    assert "widget.py" not in r.stderr
+
+
+def test_a_tier_1_start_refuses_in_a_clone_without_the_fork(render, tmp_path, monkeypatch, capsys):
+    """Refute v2.87: a shallow clone has no fork point — no fork reads as no
+    plan, so a branch carrying its own plan went to /quick."""
+    src = render(tmp_path / "src", {"project_name": "d", "modules": {}})
+    _planned_branch(src, 1, plan_pass=False)
+    _git(src, "checkout", "-q", "main")
+    for i in range(4):
+        _commit_file(src, f"m{i}.py", f"m = {i}\n", f"main {i}")
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "clone", "-q", "--bare", str(src), str(bare)], check=True)
+    out = tmp_path / "shallow"
+    subprocess.run(["git", "clone", "-q", "--depth", "2", "--single-branch", "-b", "main",
+                    f"file://{bare}", str(out)], check=True)
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    mod = _load_dispatch(src)
+    quick, why = mod.quick_start(out, "b")
+    assert not quick and why and "no fork point" in why and "--unshallow" in why, why

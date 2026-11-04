@@ -69,11 +69,15 @@ place.
 A code-review bundle is refused before its gate preflight when the branch does
 not merge cleanly into the integration ref (`check_review.integration_conflict`,
 #379): the refusal names the conflicting paths and the fix — merge main, then
-review — and, on a stacked branch whose parent already conflicts, the parent
-and its rebase. A check that cannot run says "could not check" with the base
+review. When the conflicting commits are shared with another branch the
+reviewed one forked from later than from main, the refusal names that branch
+as a suspect with both remedies (rebase it first if it is the parent); only a
+parent named with `--base` is asserted, since a parent, a child and a backup
+copy look the same in the graph. A check that cannot run says "could not check" with the base
 SHA and never counts as clean. `dispatch.py start --phase review` and the
 chain's pushed → review step ask the same question before a session starts;
-a plan review (`--plan`) is not checked — it reads no code.
+a plan review (`--plan-review`) is not checked — it reads no code. When the
+check cannot run, the bundle carries the note as a `**MERGE WARNING:**` line.
 
 The checklist can be scoped to the diff (#281):
 `docs/process/review-sections.local.json`, read at the base, maps path classes

@@ -2409,12 +2409,20 @@ def integration_conflict(root: Path, tip: str = "HEAD", branch: str = "",
     if not conflicted:
         return None, None
     shown = ", ".join(conflicted[:20]) + (f" and {len(conflicted) - 20} more" if len(conflicted) > 20 else "")
-    cause = _conflicting_parent(root, ref, base, head, set(conflicted), branch, parent)
+    found = _conflicting_parent(root, ref, base, head, set(conflicted), branch, parent)
     who = f"{branch} ({head[:12]})" if branch else f"{tip} ({head[:12]})"
-    if cause:
-        return (f"{who} does not merge into {ref} ({base[:12]}): conflicts in {shown} — they come from "
-                f"its parent branch {cause}, which conflicts with {ref} itself; rebase {cause} onto "
-                f"{ref}, then this branch onto {cause}, then review"), None
+    if found:
+        cause, fork = found
+        if cause == parent:
+            return (f"{who} does not merge into {ref} ({base[:12]}): conflicts in {shown} — they come from "
+                    f"its parent branch {cause}, which conflicts with {ref} itself; rebase {cause} onto "
+                    f"{ref}, then this branch onto {cause}, then review"), None
+        # a branch found by the graph alone: a parent, a child or a backup copy look the
+        # same there (refute v2.87) — named as a suspect, with both remedies
+        return (f"{who} does not merge into {ref} ({base[:12]}): conflicts in {shown} — the commits up to "
+                f"{fork[:12]}, which {cause} carries too, already conflict; if this branch is stacked on "
+                f"{cause}, rebase {cause} onto {ref}, then this branch onto it; otherwise merge {ref} into "
+                f"the branch and resolve them; then review"), None
     return (f"{who} does not merge into {ref} ({base[:12]}): conflicts in {shown} — merge {ref} into "
             f"the branch and resolve them, then review"), None
 
@@ -2428,11 +2436,14 @@ def _merge_tree_problem(root: Path) -> str:
 
 
 def _conflicting_parent(root: Path, ref: str, base: str, head: str, conflicted: set[str],
-                        branch: str, parent: str | None) -> str | None:
-    """The branch `head` is stacked on whose own merge into `ref` conflicts on
-    these paths, or None. A parent is a ref that `head` forked from later than
-    from `ref` (the fork points differ, `process_git.fork_point`): `head`
-    carries its commits. Of several, the nearest fork wins."""
+                        branch: str, parent: str | None) -> tuple[str, str] | None:
+    """(ref, fork) of the branch `head` may be stacked on, whose shared commits
+    with `head` already conflict with `ref` on these paths, or None. A suspect
+    is a ref that `head` forked from later than from `ref` (the fork points
+    differ, `process_git.fork_point`); the conflict must lie in the shared
+    commits up to that fork, not in the suspect's own later work. Of several,
+    the nearest fork wins. The graph cannot tell a parent from a child or a
+    backup copy: only a named `parent` is asserted (refute v2.87)."""
     try:
         main_fork = fork_point(root, base, head)
     except ValueError:
@@ -2463,12 +2474,12 @@ def _conflicting_parent(root: Path, ref: str, base: str, head: str, conflicted: 
             continue
         if fork == main_fork or not ancestor(main_fork, fork):
             continue  # forked from main where `head` did: no parent of it
-        theirs = _auto_merge(root, base, sha)
+        theirs = _auto_merge(root, base, fork)
         if theirs is None or not theirs[1] & conflicted:
             continue
         if best is None or ancestor(best[1], fork):
             best = (name, fork)
-    return best[0] if best else None
+    return best
 
 
 def name_status(out: bytes | None) -> list[tuple[str, str, str]] | None:

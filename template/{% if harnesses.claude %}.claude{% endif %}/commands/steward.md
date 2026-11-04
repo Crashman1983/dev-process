@@ -98,8 +98,9 @@ tower run. Owner messages are a third wake. On each wake:
    recipe (e.g. `make train`) may wrap it. Pass no other `--suite`: one that
    differs from `merge_suite` is refused, since its certificate would never
    match the push. `--suite-differs-ok` is only for a passenger that changes
-   `merge_suite` itself. A conflict note from `plan` names a pair aboard; tell
-   the later branch's worker to rebase. A dropped
+   `merge_suite` itself. A conflict note from `plan` names a pair aboard in
+   boarding order and the branch the run would drop; tell that branch's
+   worker to rebase. A dropped
    offender is a finding for its worker, not for you to fix.
 4. Assign: the next Ready issue (DoR, `docs/process/definition-of-ready-and-done.md`)
    to a session of its own, one phase at a time, with the model the
