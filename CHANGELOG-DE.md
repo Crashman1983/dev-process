@@ -18,6 +18,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
   - **Zuerst auf der Basis.** Ist sie dort rot oder nicht ausführbar — ein kaputter Host, oder main selbst fällt durch —, wird niemand geprüft, und der Zug läuft wie ohne sie. Der Preflight bleibt, wo er war: auf dem ersten kombinierten Baum.
   - **Dann je Kandidat,** auf der Basis mit diesem Kandidaten gemergt. Den Baum baut `build_train` selbst, in einem zweiten Worktree; Pläne werden also wie im echten Merge archiviert.
   - **Zweimal rot** — beim zweiten Mal auf einem neu gebauten Baum — heißt: Der Kandidat steigt nicht ein und wird `blocked` gemeldet. Ein Kandidat mit Konflikt, Timeout oder nicht ausführbarer Prüfung steigt ein, im Log steht „not pre-checked“.
+  - Bevor jemand gemeldet wird, prüft der Zug die Basis noch einmal und lässt den Preflight auf ihrem Baum laufen. Ein Host, der während der Prüfung bricht oder dem fehlt, was nur die Prüfung eines Kandidaten braucht, hält niemanden zurück.
   - Steigen alle aus, wird nichts gebaut, und der Lauf endet mit dem Ergebnis `preboard`.
 - **Zeiten und Zahlen:** `phases.jsonl` trägt die Phase `preboard` (Sekunden) und `preboard_checks` (geprüft, ausgestiegen, nicht geprüft, Grund). `train-phases` druckt beides, damit eine Prüfung, die nie läuft, auffällt.
 

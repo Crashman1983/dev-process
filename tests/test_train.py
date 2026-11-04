@@ -3514,6 +3514,9 @@ def test_a_tool_missing_on_the_host_stops_as_environment_blaming_nobody(render, 
     row = _phases(out)[-1]
     assert row["result"] == "environment", row
     assert "did not board" not in r.stderr, r.stderr
+    # the stop reaches the row: an environment round and the counts (DeepSeek v2.89)
+    assert [r["red_path"] for r in row["rounds"]] == ["environment"], row["rounds"]
+    assert row["preboard_checks"]["dropped"] == ["usestool"] and "preflight_s" not in row["preboard_checks"], row
 
 
 def test_a_killed_runs_probe_branch_is_removed(render, tmp_path):
@@ -3527,3 +3530,20 @@ def test_a_killed_runs_probe_branch_is_removed(render, tmp_path):
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert kept == ["alpha"] and not wt.exists()
     assert not [b for b in branches if b.endswith("-preboard")], branches
+
+
+
+def test_a_dispatch_worktree_on_the_probe_path_is_left_alone(render, tmp_path):
+    """Refute v2.89: dispatch names a branch `train-preboard`'s worktree like the probe —
+    it is never removed; the check is skipped as not pre-checked."""
+    out = render(tmp_path / "w", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "branch", "train-preboard", "main")
+    wt = out.parent / f"{out.name}-train-preboard"
+    _git(out, "worktree", "add", "-q", str(wt), "train-preboard")
+    (wt / "wip.txt").write_text("uncommitted work\n")
+    train = _load_train(out)
+    kept, checks = train.pre_board(out, "main", ["alpha"], "20261104-1200", "true", 60, lambda s: None)
+    assert (wt / "wip.txt").read_text() == "uncommitted work\n"
+    assert kept == ["alpha"] and checks["unchecked"] == 1 and "train-preboard" in checks["reason"], checks

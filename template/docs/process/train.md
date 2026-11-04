@@ -59,8 +59,10 @@ Before a candidate is reported, the train checks the base once more and
 runs the preflight on the base's tree: a host that broke during the check,
 or lacks what only the candidates' check uses, holds nobody back. The probe
 worktree's path is `<root>-train-preboard`, like `<root>-train` for the
-staging tree; a dispatched branch named `train-preboard` (or `train`) would
-share it and lose its worktree, so do not name work branches that way.
+staging tree. A dispatched branch named `train-preboard` would share it:
+the train then leaves that worktree alone and skips the check as not
+pre-checked. A branch named `train` still collides with `<root>-train`, so
+do not name work branches that way.
 
 ## Boarding — computed, never claimed
 

@@ -19,6 +19,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
   - **On the base first.** If it is red or cannot run there — a broken host, or main itself failing it — nobody is checked and the train goes on as without it. The preflight stays where it was, on the first combined tree.
   - **Then per candidate,** on the base merged with that candidate. The tree is built by `build_train` itself, in a second worktree, so plans are settled as in the real merge.
   - **Red twice** — the second time on a freshly rebuilt tree — means the candidate does not board and is reported `blocked`. A candidate that conflicts, times out or cannot run the check boards and is logged "not pre-checked".
+  - Before anybody is reported, the base is checked once more and the preflight runs on its tree. A host that broke during the check, or lacks what only a candidate's check uses, holds nobody back.
   - When every candidate is dropped, nothing is built, and the run ends with result `preboard`.
 - **Times and counts:** `phases.jsonl` carries the phase `preboard` (seconds) and `preboard_checks` (checked, dropped, not checked, reason). `train-phases` prints both, so a check that never runs is visible.
 
