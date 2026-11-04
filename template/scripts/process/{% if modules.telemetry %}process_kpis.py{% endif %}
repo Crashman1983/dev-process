@@ -1858,7 +1858,27 @@ def share(weeks: int = 4) -> int:
 
 
 # --- train-phases: where the merge train's time goes ---------------------------
-_TRAIN_PHASES = ("preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+_TRAIN_PHASES = ("preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+
+
+def _preboard_lines(rows: list[dict]) -> list[str]:
+    """What the preboard check decided (`preboard_checks` of a phases line, #386): checked,
+    dropped and not pre-checked candidates over the window, and the last reason it could
+    not check — a check that never judges anybody shows here, not as a silent green.
+    A malformed field counts nothing; rows without the key never ran the check."""
+    def count(value: object) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+    found = [row["preboard_checks"] for row in rows if isinstance(row.get("preboard_checks"), dict)]
+    if not found:
+        return []
+    checked = sum(count(c.get("checked")) for c in found)
+    dropped = sum(len(c["dropped"]) for c in found if isinstance(c.get("dropped"), list))
+    unchecked = sum(count(c.get("unchecked")) for c in found)
+    reasons = [c["reason"] for c in found if isinstance(c.get("reason"), str) and c["reason"]]
+    last = f"; last reason: {reasons[-1]}" if reasons else ""
+    return [f"  preboard check: {checked} checked, {dropped} dropped, {unchecked} not pre-checked "
+            f"(in {len(found)}/{len(rows)} runs{last})"]
 
 
 def _stage_lines(rows: list[dict]) -> list[str]:
@@ -2025,11 +2045,16 @@ def train_phases(runs: int = 20) -> int:
         if ran:
             print(f"  {phase:<9} median {statistics.median(values):>6.0f} s, max {max(values):>6.0f} s "
                   f"(in {len(ran)}/{len(rows)} runs)")
+    for line in _preboard_lines(rows):
+        print(line)
     for line in _stage_lines(rows):
         print(line)
     results = [row.get("result") for row in rows]
+    # `preboard`: the preboard check dropped every candidate — no red train, nothing built
+    stopped = results.count("preboard")
     print(f"  {results.count('red')}/{len(rows)} runs ended red, "
-          f"{results.count('environment')} stopped by the preflight (the host, not a passenger)")
+          f"{results.count('environment')} stopped by the preflight (the host, not a passenger)"
+          + (f", {stopped} ended at the preboard check (every candidate dropped)" if stopped else ""))
     n = len(rows)
     print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'shorten the phase with the largest median first: suite → test selection and certificates, bisect → smaller batches, retry → flaky tests (failure-catalog.md)', thin='let more trains run before acting on a phase')}")
     for line in _red_path_lines(rows):
