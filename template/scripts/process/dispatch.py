@@ -189,9 +189,10 @@ def load_policy(root: Path, harness: str | None = None) -> dict:
     if not isinstance(data.get("command"), str) or "{prompt}" not in data["command"]:
         raise SystemExit(f"dispatch: {name} needs a `command` template containing {{prompt}}")
     _check_env(data.get("env"), "env")
-    quiet = data.get("stale_minutes")
-    if quiet is not None and (isinstance(quiet, bool) or not isinstance(quiet, int) or quiet <= 0):
-        raise SystemExit(f"dispatch: {name} `stale_minutes` must be a positive integer, got {quiet!r}")
+    for key in ("stale_minutes", "prompt_minutes"):
+        quiet = data.get(key)
+        if quiet is not None and (isinstance(quiet, bool) or not isinstance(quiet, int) or quiet <= 0):
+            raise SystemExit(f"dispatch: {name} `{key}` must be a positive integer, got {quiet!r}")
     for key in ("phases", "tiers", "default"):
         if not isinstance(data.get(key) or {}, dict):
             raise SystemExit(f"dispatch: {name} `{key}` must be an object")
@@ -603,12 +604,22 @@ def stale_minutes(root: Path) -> int | None:
     steward on it). None without a policy or the key — the tower's default
     then applies; an invalid value is refused by `load_policy` — and said, never
     swallowed (downstream: a typo in the value silently fell back to the default)."""
+    return _policy_minutes(root, "stale_minutes", "stale")
+
+
+def prompt_minutes(root: Path) -> int | None:
+    """The policy's `prompt_minutes`: how long a tmux worker may sit at a
+    permission prompt before the tower says so (#377); read as `stale_minutes`."""
+    return _policy_minutes(root, "prompt_minutes", "permission-prompt")
+
+
+def _policy_minutes(root: Path, key: str, what: str) -> int | None:
     if not (root / POLICY).is_file():
         return None  # no policy is no error: the default is meant
     try:
-        return load_policy(root).get("stale_minutes")
+        return load_policy(root).get(key)
     except SystemExit as err:
-        print(f"dispatch: ignoring the policy for the stale threshold ({err}); the tower's "
+        print(f"dispatch: ignoring the policy for the {what} threshold ({err}); the tower's "
               f"default applies", file=sys.stderr)
         return None
 
@@ -2193,18 +2204,31 @@ def _input_line(lines: list[str] | None, pattern: re.Pattern[str]) -> str | None
 _PASTED = re.compile(r"^\[Pasted text")
 
 
-_DIALOG = re.compile(r"^\s*[❯>]?\s*\d+\.\s+(Yes|No)\b|Do you want to|\(y/n\)|\[y/N\]", re.IGNORECASE | re.MULTILINE)
+_DIALOG = re.compile(r"^\s*[❯>]?\s*\d+\.\s+(Yes|No)\b|Do you want to|^[\s│|]*Allow\b[^\n]*\?|\(y/n\)|\[y/N\]",
+                     re.IGNORECASE | re.MULTILINE)
+
+
+def dialog_line(lines: list[str] | None, pattern: re.Pattern[str] = _PROMPT_LINE) -> str | None:
+    """The line of an open dialog (the first that `_DIALOG` matches), else None.
+    A dialog replaces or sits below the input line; the same words in the
+    transcript above it are the worker's text (a question asked in prose, an
+    earlier message) — answering those is what `say` is for (refutation).
+    The one recogniser: `say` asks it before typing, the tower of a live
+    tmux screen (#377)."""
+    if not lines:
+        return None
+    last_prompt = max((k for k, ln in enumerate(lines) if pattern.match(ln)), default=-1)
+    below = "\n".join(lines[last_prompt + 1:] if last_prompt >= 0 else lines[-12:])
+    m = _DIALOG.search(below)
+    if not m:
+        return None
+    start = below.rfind("\n", 0, m.start()) + 1
+    end = below.find("\n", m.start())
+    return below[start:end if end >= 0 else None].strip(" │|\t")
 
 
 def _dialog_open(lines: list[str] | None, pattern: re.Pattern[str] = _PROMPT_LINE) -> bool:
-    """A dialog replaces or sits below the input line; the same words in the
-    transcript above it are the worker's text (a question asked in prose, an
-    earlier message) — answering those is what `say` is for (refutation)."""
-    if not lines:
-        return False
-    last_prompt = max((k for k, ln in enumerate(lines) if pattern.match(ln)), default=-1)
-    below = lines[last_prompt + 1:] if last_prompt >= 0 else lines[-12:]
-    return bool(_DIALOG.search("\n".join(below)))
+    return dialog_line(lines, pattern) is not None
 
 
 def _still_typed(line: str, text: str) -> bool:

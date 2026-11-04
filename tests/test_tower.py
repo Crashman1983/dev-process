@@ -847,3 +847,103 @@ def test_a_failed_worker_is_no_stale_worker_too(render, tmp_path):
              "reports": [{"worker": "w", "state": "failed", "minutes_ago": 80, "note": "timeout"}]}
     kinds = [f["kind"] for f in tower.findings(table, 60)]
     assert "failed" in kinds and "stale-worker" not in kinds, kinds
+
+
+# --- #377: a tmux session stuck at a permission prompt ---
+
+# the dialog as a live tmux screen shows it (test_dispatch's say refutation), under its transcript
+PROMPT_SCREEN = ("● Bash(gh pr view 12)\n> earlier\nBash command\n  gh pr view 12\n"
+                 "Do you want to proceed?\n❯ 1. Yes\n  2. No\n")
+
+
+def _tmux_session(d, monkeypatch, screen, quiet, tmux=True):
+    """One live dispatched session whose screen tail is `screen`, `quiet` minutes
+    since it wrote; `tmux=False` is a detached `claude -p` run (a pid, no window)."""
+    rec = {"branch": "7-work", "phase": "execute", "issue": 7, "alive": True, "state": "live", "started": 100,
+           **({"tmux_window": "@1", "tmux_session": "workers", "tmux_name": "7-work", "runner": "tmux"}
+              if tmux else {"pid": 1, "runner": "detached"})}
+    monkeypatch.setattr(d, "records", lambda _root: [dict(rec)])
+    monkeypatch.setattr(d, "last_output", lambda _rec, lines=1: (
+        "\n".join([ln for ln in screen.splitlines() if ln.strip()][-lines:]), quiet))
+    monkeypatch.setattr(d, "phase_over", lambda *_a, **_k: False)
+
+
+def _prompt_kinds(tower, out):
+    return [(f["kind"], f["severity"]) for f in tower.findings(_table(tower.sessions(out)), 60)
+            if f["kind"] in ("permission-prompt", "question-unrouted", "waiting-for-input")]
+
+
+def test_a_tmux_session_at_a_permission_prompt_is_a_high_finding(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    import dispatch as d
+    monkeypatch.setattr(tower._report, "read_reports", lambda _root: [])
+    _tmux_session(d, monkeypatch, PROMPT_SCREEN, 11)
+    s = tower.sessions(out)[0]
+    assert s["prompt"] == "Do you want to proceed?" and s["last_output"] == "  2. No"
+    f = [x for x in tower.findings(_table([s]), 60) if x["kind"] == "permission-prompt"]
+    assert len(f) == 1 and f[0]["severity"] == "high"
+    assert "7-work" in f[0]["what"] and "11 min" in f[0]["what"] and "Do you want to proceed?" in f[0]["what"]
+    assert "approve" in f[0]["because"] and "allowlist" in f[0]["because"]
+    # a prompt is no question for the steward: quiet long enough for one, still only the prompt
+    _tmux_session(d, monkeypatch, PROMPT_SCREEN, 45)
+    assert _prompt_kinds(tower, out) == [("permission-prompt", "high")]
+    # the other shapes of the one recogniser: `Allow …?` and `(y/n)`
+    for screen in ("> earlier\nAllow Bash(gh pr view 12)?\n", "> earlier\nOverwrite the file? (y/n)\n"):
+        _tmux_session(d, monkeypatch, screen, 11)
+        assert _prompt_kinds(tower, out) == [("permission-prompt", "high")], screen
+
+
+def test_no_dialog_a_short_wait_or_a_detached_run_is_no_permission_prompt(render, tmp_path, monkeypatch):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    import dispatch as d
+    monkeypatch.setattr(tower._report, "read_reports", lambda _root: [])
+    idle = "● Done.\nDo you want to proceed? I asked above.\n> \n? for shortcuts\n"  # the words above the input line
+    _tmux_session(d, monkeypatch, idle, 11)
+    assert _prompt_kinds(tower, out) == [] and tower.sessions(out)[0]["prompt"] is None
+    _tmux_session(d, monkeypatch, idle, 45)
+    assert _prompt_kinds(tower, out) == [("question-unrouted", "high")]  # unchanged without a dialog
+    _tmux_session(d, monkeypatch, PROMPT_SCREEN, 9)
+    assert _prompt_kinds(tower, out) == []  # below PROMPT_MINUTES
+    # a detached `claude -p` run never shows a prompt, whatever its log says
+    _tmux_session(d, monkeypatch, PROMPT_SCREEN, 11, tmux=False)
+    assert _prompt_kinds(tower, out) == [] and tower.sessions(out)[0]["prompt"] is None
+
+
+def test_wait_wakes_on_a_permission_prompt_once(render, tmp_path, monkeypatch, capsys):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    tower = _load_tower(out)
+    import dispatch as d
+    monkeypatch.setattr(tower._report, "read_reports", lambda _root: [])
+    _tmux_session(d, monkeypatch, PROMPT_SCREEN, 11)
+    assert tower.main(["--wait", "--timeout", "5", "--states", "prompt", str(out)]) == 0
+    rec = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert rec["state"] == "prompt" and rec["worker"] == "7-work" and rec["issue"] == 7
+    assert rec["line"] == "Do you want to proceed?" and rec["minutes_quiet"] == 11
+    assert "approve" in rec["note"]
+    # the same prompt wakes a re-armed watch no second time
+    assert tower.main(["--wait", "--timeout", "3", "--states", "prompt", str(out)]) == 3
+    # without `prompt` in --states no screen is looked at
+    _tmux_session(d, monkeypatch, PROMPT_SCREEN.replace("proceed", "continue"), 11)
+    assert tower.main(["--wait", "--timeout", "3", "--states", "pushed", str(out)]) == 3
+    # below the threshold: no wake
+    _tmux_session(d, monkeypatch, PROMPT_SCREEN.replace("proceed", "go on"), 9)
+    assert tower.main(["--wait", "--timeout", "3", "--states", "prompt", str(out)]) == 3
+
+
+def test_prompt_minutes_resolve_like_the_stale_budget(render, tmp_path, monkeypatch):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    tower = _load_tower(out)
+    monkeypatch.delenv("PROCESS_PROMPT_MINUTES", raising=False)
+    assert tower.resolve_prompt_minutes(out) == tower.PROMPT_MINUTES == 10
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"prompt_minutes": 3}))
+    assert tower.resolve_prompt_minutes(out) == 3
+    monkeypatch.setenv("PROCESS_PROMPT_MINUTES", "7")
+    assert tower.resolve_prompt_minutes(out) == 7
+    assert tower.resolve_prompt_minutes(out, 5) == 5
+    r = subprocess.run([sys.executable, str(out / "scripts/process/tower.py"), "--json"], cwd=out,
+                       capture_output=True, text=True, env={**os.environ, "PROCESS_PROMPT_MINUTES": "ten"})
+    assert r.returncode != 0 and "PROCESS_PROMPT_MINUTES" in r.stderr

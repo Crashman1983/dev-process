@@ -25,7 +25,7 @@ conversations.
 | `sessions` | every worker `dispatch.py` started: phase, model, where (tmux window or pid), alive, last printed line and when | the look at the workers; `dispatch.py log <branch>` for more |
 | `questions` | open `DECISION NEEDED` lines in active plans | what only the owner can answer — relayed with options, answered as a `DECISION` line (a question kept in place and marked `(answered …)` before its colon counts as answered too) |
 | `findings` | deterministic, each with a *because* | the list to act on |
-| `--wait`, `--section` (flags) | `--wait [--timeout S] [--states a,b]` blocks on this host's reports file and prints each new matching line as JSON (exit 0; 3 on timeout; 2 outside a clone); with `stale` among the states it also ends on a live session silent too long (below); `--json --section NAME` (repeatable) prints only those keys | the steward's harness-neutral watch (`/steward`); a small read instead of the whole table |
+| `--wait`, `--section` (flags) | `--wait [--timeout S] [--states a,b]` blocks on this host's reports file and prints each new matching line as JSON (exit 0; 3 on timeout; 2 outside a clone); with `stale` among the states it also ends on a live session silent too long, with `prompt` on a tmux session at a permission prompt (below); `--json --section NAME` (repeatable) prints only those keys | the steward's harness-neutral watch (`/steward`); a small read instead of the whole table |
 
 ## Findings (deterministic)
 
@@ -36,6 +36,7 @@ conversations.
 - **plan-without-tier** — an active plan no gate can see
 - **chronic-red** — a gate red for two days or more
 - **stale-worker** — a branch with work (ahead or dirty) but no commit and no report for an hour (`--stale-minutes`, else `PROCESS_STALE_MINUTES`, else the policy's `stale_minutes`); a worker whose latest report is `review-pass`, `done` or `idle` is parked, not stale
+- **permission-prompt** (high) — a live `runner: tmux` worker whose screen shows a permission dialog (its last 15 lines below the input line: `Do you want to …`, `Allow …?`, `(y/n)`, numbered Yes/No — `dispatch.dialog_line`, the recogniser `say` uses) and printed nothing for 10 minutes (`--prompt-minutes`, else `PROCESS_PROMPT_MINUTES`, else the policy's `prompt_minutes`); names the dialog line; approve it in the session or put that one simple command on the allowlist — never a wait loop, a worker runs one simple command per Bash call. No `question-unrouted` for that session: a prompt is no question for the steward. A detached `claude -p` run never shows a prompt (a tool it may not use is refused there), so it never has this finding
 - **remote-unreachable** — `--remote` could not fetch; the table may be stale
 - **remote-residue** — unmerged branches on origin untouched for 14 days, counted not listed
 - **blocked** — a worker that reported `blocked` an hour ago and nothing since
@@ -55,7 +56,11 @@ earliest. `last_output` is its last printed line (`dispatch.py log`).
 Each silence is announced once (`stale-announced.json` beside the reports
 file): a re-armed watch does not wake on it again, and a session that
 commits or reports and then falls silent again is a new episode. The
-steward reads the log, then nudges or stops it (`/steward`).
+steward reads the log, then nudges or stops it (`/steward`). With `prompt`
+among the states the same look ends the wait on a tmux session at a
+permission prompt for `prompt_minutes` (default 10): a synthetic
+`{"state": "prompt", "worker": …, "line": …, "minutes_quiet": …}` record,
+once per prompt (`prompt-announced.json`), the `permission-prompt` rule.
 
 Brainstorm papers (`design-*` plans) and waived stale plans are listed but
 never findings: they are not work in flight. Only date-prefixed files,

@@ -30,11 +30,13 @@ on each monitoring tick. Without a channel, keep the reports-only workflow.
 
 Two wakes, both armed by you. The **watch**: on every wake, first thing,
 run `uv run scripts/process/tower.py --wait --timeout 1800 --states
-planned,pushed,blocked,review-pass,done,stale` as a background command; its
+planned,pushed,blocked,review-pass,done,stale,prompt` as a background command; its
 exit is the wake — a report line the moment it is written (exit 0, the
 record on stdout), a `stale` record for a live session that neither
 reported nor committed for the policy's `stale_minutes` (default 60; once
-per silence), or thirty quiet minutes (exit 3). Re-arm it on every
+per silence), a `prompt` record for a tmux session at a permission prompt
+for `prompt_minutes` (default 10; approve it in the session or allowlist
+that one simple command), or thirty quiet minutes (exit 3). Re-arm it on every
 wake. On `stale`: read the record (last report, last commit, last printed
 line), then `dispatch.py log <branch>` — then nudge it with one line
 (`dispatch.py say <branch> "…"`, or the configured channel) when it is
