@@ -260,6 +260,19 @@ def _plan_records(root: Path, kinds: tuple[str, ...], records: list | None) -> l
     return [(rel, text) for rel, text in records if record_kind(rel) in kinds]
 
 
+def _placed_issues(root: Path, branch: str) -> set[str]:
+    """The issues the branch belongs to by `dispatch.branch_issues` — the train's
+    own rule: a quick run dispatched onto a branch whose name does not lead with
+    its issue attests that issue (v2.87 review). Nothing without dispatch."""
+    if not branch:
+        return set()
+    try:
+        import dispatch as _dispatch  # noqa: PLC0415 — lazily, as the train does
+        return _dispatch.branch_issues(root, branch)
+    except Exception:  # noqa: BLE001 — no dispatch, no records: the name alone decides
+        return set()
+
+
 def work_problems(args, root: Path, records: list | None = None) -> list[str]:
     """A `--work` no plan names clears nothing. A number no plan declares and the
     branch does not lead with is most likely the PR's number (observed: rounds
@@ -273,7 +286,8 @@ def work_problems(args, root: Path, records: list | None = None) -> list[str]:
     if work in known:
         return []
     branch = _git(root, "symbolic-ref", "--short", "HEAD") or ""
-    if work.isascii() and work.isdigit() and branch_issue(branch) != work:
+    if work.isascii() and work.isdigit() and branch_issue(branch) != work \
+            and work not in _placed_issues(root, branch):
         active = sorted({i for rel, text in _plan_records(root, PLAN_KINDS, records)
                          for i in _plan_work_ids(plan_stem(rel), _unfenced(text), include_dedated=True)})
         return [f"work={work} names no plan or issue — it looks like a PR number; the work id "

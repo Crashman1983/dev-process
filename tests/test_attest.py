@@ -1,7 +1,9 @@
 """SP70: evidence is written, never typed — attest.py writes the REVIEW line
 with the reviewed range (base, head); the gate reads what is committed after it."""
 import importlib.util
+import json
 import subprocess
+from pathlib import Path
 
 import pytest
 import sys
@@ -278,6 +280,16 @@ def test_a_number_no_plan_names_is_refused_as_a_likely_pr_number(render, tmp_pat
     # blocks: a planless pass is refused on its evidence (#225); the id rule is verdict-blind
     r = _attest(out, "--base", base, "--head", head, "--work", "gizmo", "--verdict", "block")  # a slug: a note only
     assert r.returncode == 0 and "work=gizmo names no plan" in r.stderr, r.stderr
+    # dispatch placed issue 26 on a branch whose name does not lead with it (a quick
+    # run, a package branch): the train's rule, so the self-check attests (v2.87 review)
+    _git(out, "checkout", "-q", "-b", "package-b")
+    disp = Path(_git(out, "rev-parse", "--absolute-git-dir").stdout.strip()) / "process-dispatch"
+    disp.mkdir(parents=True, exist_ok=True)
+    (disp / "issues.json").write_text(json.dumps({"26": "package-b"}))
+    r = _attest(out, "--base", base, "--head", head, "--work", "26", "--verdict", "block")
+    assert r.returncode == 0, r.stderr
+    import shutil
+    shutil.rmtree(out / ".process-work/journal/package-b")  # the next attestation starts clean
     _git(out, "checkout", "-q", "-b", "26-fix")  # the branch leads with the issue
     r = _attest(out, "--base", base, "--head", head, "--work", "26", "--verdict", "block")
     assert r.returncode == 0, r.stderr
