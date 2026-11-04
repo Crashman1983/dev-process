@@ -411,3 +411,28 @@ def test_areas_parse_and_an_empty_area_is_valid():
     assert tc.parse({"areas": {"ui": ["frontend/**"], "inert": []}})["areas"] == {
         "ui": ["frontend/**"], "inert": []}
     assert tc.parse({})["areas"] == {}
+
+
+# --- #309: a non-finite wait or timeout disables the bound it configures -------------
+
+_BOUNDS = [
+    (lambda v: {"lanes": {"scoped": {"wait": v}}}, r"lanes\.scoped\.wait"),
+    (lambda v: {"stacks": {"backend": {**BACKEND, "timeout": v}}}, r"stacks\.backend\.timeout")]
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")], ids=["inf", "-inf", "nan"])
+@pytest.mark.parametrize("data, says", _BOUNDS, ids=["wait", "timeout"])
+def test_a_non_finite_wait_or_timeout_is_a_broken_configuration(data, says, value):
+    tc = _testing_config()
+    with pytest.raises(tc.ConfigError, match=says):
+        tc.parse(data(value))
+
+
+@pytest.mark.parametrize("literal", ["Infinity", "-Infinity", "NaN"])
+@pytest.mark.parametrize("data, says", _BOUNDS, ids=["wait", "timeout"])
+def test_a_non_finite_json_literal_is_a_broken_configuration(tmp_path, data, says, literal):
+    tc = _testing_config()
+    # json.loads accepts these literals by default: the file is where they arrive
+    _write(tmp_path, tc.CONFIG, json.dumps(data("<v>")).replace('"<v>"', literal))
+    with pytest.raises(tc.ConfigError, match=says):
+        tc.load(tmp_path)
