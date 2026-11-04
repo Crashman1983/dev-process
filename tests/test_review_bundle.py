@@ -2254,3 +2254,22 @@ def test_a_child_or_a_backup_is_never_named_the_parent(render, tmp_path):
     r = _run(out, "--skip-preflight")
     assert r.returncode == 1 and "widget.py" in r.stderr, r.stderr
     assert "parent branch" not in r.stderr and "merge main into the branch" in r.stderr, r.stderr
+
+
+def test_a_parent_that_already_resolved_the_conflict_is_not_told_to_rebase(render, tmp_path):
+    """Refute v2.87 r2: the parent merged main and resolved widget.py — the child
+    is told to rebase onto it, not to have the parent rebased."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _seed_repo(out)  # feat changes widget.py
+    _git(out, "checkout", "-q", "-b", "child")
+    (out / "gadget.py").write_text("g = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "child: gadget")
+    _git(out, "checkout", "-q", "feat")
+    _conflict_on_main(out)  # main changes widget.py too
+    _git(out, "merge", "-q", "-X", "ours", "main", "-m", "feat: merge main")
+    _git(out, "checkout", "-q", "child")
+    r = _run(out, "--skip-preflight", "--base", "feat")
+    assert r.returncode == 1 and "widget.py" in r.stderr, r.stderr
+    assert "feat already resolves them" in r.stderr and "rebase this branch onto feat" in r.stderr, r.stderr
+    assert "rebase feat onto main" not in r.stderr, r.stderr
