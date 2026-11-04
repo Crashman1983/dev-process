@@ -2415,6 +2415,17 @@ def _train_phases(render, tmp_path, rows: list, *args: str) -> str:
     return r.stdout
 
 
+def test_train_phases_takes_the_plan_median_over_rows_that_carry_it(render, tmp_path):
+    """v2.91-Refute: Zeilen von vor v2.91 haben kein `plan`. Sie zählen nicht als 0 s,
+    sonst stünde der Median der Planung nach einem Update lange bei fast null."""
+    rows = [{"suite": 100.0} for _ in range(8)] + [{"plan": 30.0, "suite": 100.0} for _ in range(2)]
+    out = _train_phases(render, tmp_path, rows)
+    plan = next(line for line in out.splitlines() if line.strip().startswith("plan "))
+    assert "median     30 s" in plan and "(in 2/2 runs)" in plan, plan
+    suite = next(line for line in out.splitlines() if line.strip().startswith("suite "))
+    assert "(in 10/10 runs)" in suite, suite
+
+
 def _red(**sources) -> dict:
     """red_tests einer Runde, wie train.py es schreibt: jede genannte Stage ist rot, ihr Wert
     die Quelle (`ids`/`on_base` als Listen, `error`, `too_many`; None: keine Quelle)."""
@@ -4272,15 +4283,15 @@ def test_every_exit_says_who_stays_behind_and_why(render, tmp_path, exit_, args)
         log = next(train_dir.glob("2*.log")).read_text()
         before_build = log[:log.index("merged alpha")]  # build_train's first line
         assert all(line in before_build for line in said), log
-        assert not (train_dir / "last-hold.log").exists()
+        assert not (train_dir / "last-hold.txt").exists()
     else:
-        held = (train_dir / "last-hold.log").read_text()
+        held = (train_dir / "last-hold.txt").read_text()
         assert exit_ in held.splitlines()[0] and re.match(r"\d{4}-\d\d-\d\dT", held), held
         assert all(line in held.splitlines() for line in said), held
 
 
 def test_a_second_holding_run_overwrites_the_hold_log(render, tmp_path):
-    """R1: `last-hold.log` wird überschrieben, nicht angehängt — zwei Läufe hinterlassen den
+    """R1: `last-hold.txt` wird überschrieben, nicht angehängt — zwei Läufe hinterlassen den
     Stand des zweiten."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
@@ -4289,6 +4300,6 @@ def test_a_second_holding_run_overwrites_the_hold_log(render, tmp_path):
     for wanted in ("5", "6"):
         r = _train(out, "run", "--suite", "true", "--min-candidates", wanted)
         assert "holding" in r.stdout, r.stdout + r.stderr
-    held = (out / ".git/process-train/last-hold.log").read_text()
+    held = (out / ".git/process-train/last-hold.txt").read_text()
     assert "waiting for 6" in held and "waiting for 5" not in held, held
     assert held.count("holding") == 1, held

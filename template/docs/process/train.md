@@ -161,7 +161,7 @@ that does not board, its reasons in the words `plan` uses, and one line
 counting the branches with nothing ahead of the base. It does so whether
 the run departs, holds or finds nothing to do. A departing run writes the
 lines into its train log before the first build. A holding run and one
-with nothing to do overwrite `<git-common-dir>/process-train/last-hold.log`
+with nothing to do overwrite `<git-common-dir>/process-train/last-hold.txt`
 with the time, the outcome and the reasons, so a run that is asked often
 leaves one file, not a growing log.
 

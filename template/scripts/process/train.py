@@ -82,7 +82,7 @@ branches that landed, whether the deploy ran green and when the run ended,
 to `<git-common-dir>/process-train/phases.jsonl` (`process_kpis.py
 train-phases`, `flow`). Every run names who stays behind and why, as `plan`
 does (#399); the departing one in its log, a holding one or one with nothing
-to do over `<git-common-dir>/process-train/last-hold.log`.
+to do over `<git-common-dir>/process-train/last-hold.txt`.
 
 Run from the root worktree on the integration branch with a clean tree.
 The train never reviews, never certifies by itself: it merges what the
@@ -433,8 +433,9 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         c: dict = {"branch": b, "sha": tip, "ahead": int(ahead), "behind": int(behind), "eligible": False,
                    "reasons": [], "plans": [], "by": None}
         if int(ahead) == 0:
-            no_lead += 1  # contained after all: an unreadable listing, a branch moved since the snapshot
-            continue
+            if counts:  # git read it: contained after all (an unreadable listing, a branch moved since the snapshot)
+                no_lead += 1
+            continue  # an unreadable count stays unboarded as before, but is no "merged or empty"
         listed = _paths(root, "diff", "--name-only", "-z", f"{base_sha}...{tip}")
         files = set(listed or ())
         c["files"] = len(files)
@@ -1396,7 +1397,7 @@ def _changed_by_run(wt: Path) -> bool:
 
 PHASES = ("plan", "preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
 PHASES_FILE = "phases.jsonl"
-LAST_HOLD_FILE = "last-hold.log"  # the last run that did not depart: when, why, who stayed behind
+LAST_HOLD_FILE = "last-hold.txt"  # the last run that did not depart: when, why, who stayed behind
 
 
 class EnvironmentRed(Exception):
@@ -1839,7 +1840,7 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
 
 def _stay(root: Path, said: str, behind: list[str]) -> None:
     """A run that does not depart (#399): what it says and who stays behind, and why —
-    printed, and written over `last-hold.log`, never appended: a polled `run` floods
+    printed, and written over `last-hold.txt`, never appended: a polled `run` floods
     no log. A lost file costs the record, never the run."""
     print(said)
     for line in behind:
