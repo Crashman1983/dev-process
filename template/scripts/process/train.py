@@ -262,11 +262,29 @@ def _stacked_renames(root: Path, base: str, branches: list[str], new_by: dict[st
         return p
 
     forks = {b: _out(root, "merge-base", base, tip(b, b)) for b in branches if new_by.get(b)}
+    # their commits beyond the base (#398: a `merge-base` per ordered pair was 16 % of a plan);
+    # None where git could not list them — unknown is no "disjoint"
+    beyond = {b: _commits_beyond(root, base, tip(b, b)) for b in forks}
+    shared_forks: dict[tuple[str, str], str] = {}
+
+    def stack_fork(o: str, b: str) -> str:
+        """Their own fork, "" for none. Disjoint commits share no commit beyond the base:
+        no stack, no `merge-base`. Shared ones ask git once per pair, in one order
+        (`merge-base` is not symmetric on criss-cross histories)."""
+        if beyond[o] is None or beyond[b] is None:
+            return _out(root, "merge-base", tip(o, o), tip(b, b))
+        if beyond[o].isdisjoint(beyond[b]):
+            return ""
+        pair = tuple(sorted((tip(o, o), tip(b, b))))
+        if pair not in shared_forks:
+            shared_forks[pair] = _out(root, "merge-base", *pair)
+        return shared_forks[pair]
+
     for o in branches:
         for b in branches:
             if o == b or not new_by.get(o) or not new_by.get(b):
                 continue
-            fork = _out(root, "merge-base", tip(o, o), tip(b, b))
+            fork = stack_fork(o, b)
             if not fork or fork in (forks.get(o), forks.get(b)):
                 continue  # no commit of o's below b (or the other way round): no stack
             pairs = _review.name_status(_git_bytes(root, "diff", "--name-status", "-M", "-z",
@@ -278,6 +296,12 @@ def _stacked_renames(root: Path, base: str, branches: list[str], new_by: dict[st
                 if letter == "R" and source in new_by[o] and rel in new_by[b]:
                     parent[find(source)] = find(rel)
     return {p: find(p) for p in parent}
+
+
+def _commits_beyond(root: Path, base: str, tip: str) -> set[str] | None:
+    """The commits `tip` has beyond `base` (`rev-list base..tip`); None when git failed."""
+    listed = _git_bytes(root, "rev-list", f"{base}..{tip}")
+    return None if listed is None else set(listed.decode().split())
 
 
 def _identity_slugs(paths: set[str], same_plan: dict[str, str]) -> Counter:
