@@ -153,6 +153,16 @@ def test_worktree_placeholder_keeps_its_meaning(render, tmp_path):
     assert d.issue_tokens(out, 7) == (9, 1)
 
 
+def test_policy_comment_and_telemetry_doc_show_the_claude_code_example(render, tmp_path):
+    """AC-4: das Claude-Code-Beispiel steht in beiden Dokumenten, mit `CLAUDE_CONFIG_DIR`."""
+    out = render(tmp_path, {"project_name": "d", "modules": {"telemetry": True}})
+    example = "~/.claude/projects/{worktree_slug}/**/*.jsonl"
+    comment = json.loads((out / "docs/process/model-policy.json").read_text())["_comment"]
+    doc = (out / "docs/process/modules/telemetry.md").read_text()
+    for text in (comment, doc):
+        assert example in text and "CLAUDE_CONFIG_DIR" in text
+
+
 # --- T2: Zeitfenster und Sitzungsherkunft über den Phasenwechsel --------------------------
 
 def _git(root: Path, *args: str):
