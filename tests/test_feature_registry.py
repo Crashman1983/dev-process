@@ -137,3 +137,76 @@ def test_module_doc_states_inventory_split(render, tmp_path):
     assert "GitHub" in doc
     # story_order was retired with the work-log axis
     assert not (out / "scripts/process/story_order.py").exists()
+
+
+# --- v2.92 K0: one owner of configuration and loader (registry_config) ---
+
+LOCAL = "docs/process/feature-registry.local.json"
+
+
+def _local(out, data):
+    (out / LOCAL).write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_registry_config_is_core(render, tmp_path):
+    # Wächter: rendered without the module too — two core gates import it
+    out = render(tmp_path, {"project_name": "d"})
+    assert (out / "scripts/process/registry_config.py").is_file()
+    assert (out / "docs/process/feature-registry.json").is_file()
+    assert not (out / "scripts/process/check_feature_registry.py").exists()
+
+
+def test_local_retired_fields_replace_the_default_list(render, tmp_path):
+    out = _render(render, tmp_path)
+    _local(out, {"retired_fields": ["blocked_by"]})
+    _entry(out, parent="STORY-0001")  # retired by default, not by the project's list
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    _entry(out, blocked_by=["STORY-0001"])
+    r = _gate(out)
+    assert r.returncode == 1 and "retired work-log field(s) ['blocked_by']" in r.stdout, r.stdout
+
+
+def test_unknown_config_key_is_hard(render, tmp_path):
+    # a typo must not drop a rule silently
+    out = _render(render, tmp_path)
+    _entry(out)
+    _local(out, {"node_chek": "hard"})
+    r = _gate(out)
+    assert r.returncode == 1 and "unknown key `node_chek`" in r.stdout, r.stdout
+
+
+def test_unknown_nested_config_key_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out)
+    _local(out, {"issues": {"requird": True}})
+    r = _gate(out)
+    assert r.returncode == 1 and "unknown key `issues.requird`" in r.stdout, r.stdout
+
+
+def test_comment_keys_are_allowed_at_any_level(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out)
+    _local(out, {"_comment": "why we deviate", "issues": {"_comment": "x", "required": False}})
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_invalid_local_config_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out)
+    (out / LOCAL).write_text("{ nope", encoding="utf-8")
+    r = _gate(out)
+    assert r.returncode == 1 and "feature-registry.local.json: invalid JSON" in r.stdout, r.stdout
+
+
+def test_wrongly_shaped_config_value_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out)
+    _local(out, {"layout": "nested"})
+    r = _gate(out)
+    assert r.returncode == 1 and "`layout` must be one of" in r.stdout, r.stdout
+    _local(out, {"issues": None})
+    r = _gate(out)
+    assert r.returncode == 1 and "`issues` must be an object" in r.stdout, r.stdout
+    assert "Traceback" not in r.stderr

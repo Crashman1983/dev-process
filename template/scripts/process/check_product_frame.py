@@ -28,17 +28,17 @@ placeholders. Pure stdlib.
 """
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
 
 FRAME = "PRODUCT.md"
-REGISTRY_DIR = "docs/process/feature-registry"
 
 # the decision-records gate (core, co-rendered) owns ADR file identity; the
-# review gate owns fence stripping — import, don't copy (one owner per behavior)
+# review gate owns fence stripping; registry_config (core) owns where the
+# registry lives — import, don't copy (one owner per behavior)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+import registry_config  # noqa: E402
 from check_decisions import ADR_DIR, adr_exists  # noqa: E402
 from check_review import _unfenced as _strip_fences  # noqa: E402
 
@@ -58,23 +58,11 @@ def _unfenced(text: str) -> str:
     return _strip_fences(HTML_COMMENT.sub("", text))
 
 
-def _story_ids(root: Path) -> set[str]:
+def _story_ids(stories: list[registry_config.Story]) -> set[str]:
     """Registered story ids — resolved by the `id` field like the registry
     gate does, falling back to the filename stem, so a story living in a
     non-canonical filename still resolves."""
-    reg = root / REGISTRY_DIR
-    ids: set[str] = set()
-    for p in reg.glob("*.json"):
-        if p.name.endswith(".example.json"):
-            continue
-        ids.add(p.stem)
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-            continue
-        if isinstance(d, dict) and isinstance(d.get("id"), str):
-            ids.add(d["id"])
-    return ids
+    return registry_config.story_ids(stories) | {s.path.stem for s in stories}
 
 
 def _leftover_placeholders(text: str) -> list[str]:
@@ -130,18 +118,32 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     stories = sorted({s.group(1) for s in STORY_REF.finditer(text)})
     if stories:
-        reg = root / REGISTRY_DIR
-        if not reg.is_dir():
-            soft.append(f"STORY reference(s) in {FRAME} not checkable — "
-                        f"no {REGISTRY_DIR}/ (feature-registry off)")
+        registry, why = _registry(root)
+        if registry is None:
+            soft.append(f"STORY reference(s) in {FRAME} not checkable — {why}")
         else:
-            ids = _story_ids(root)
+            ids = _story_ids(registry.stories)
+            where = registry.path.relative_to(root).as_posix()
             for num in stories:
                 # width-normalized like ADR refs: STORY-7 resolves to STORY-0007
                 if f"STORY-{num.zfill(4)}" not in ids and f"STORY-{num}" not in ids:
                     hard.append(f"{FRAME}: STORY-{num} referenced but no such "
-                                f"story is registered in {REGISTRY_DIR}/")
+                                f"story is registered in {where}/")
     return hard, soft
+
+
+def _registry(root: Path) -> tuple[registry_config.Registry | None, str]:
+    """(the registry, or None and why its references cannot be checked)."""
+    if not registry_config.module_active(root):
+        return None, "no feature registry (feature-registry off)"
+    try:
+        cfg = registry_config.config(root)
+        registry = registry_config.load_registry(root, cfg)
+    except (registry_config.ConfigError, KeyError) as exc:
+        return None, f"the registry configuration is unusable ({exc}; the feature-registry gate says why)"
+    if not registry.present:
+        return None, f"no {cfg['root']}/"
+    return registry, ""
 
 
 def main() -> int:

@@ -1369,3 +1369,10 @@ def test_archiving_a_plan_is_judged_where_it_went_not_as_a_deletion(render, tmp_
     r = _merge_push(out)
     assert "deleted by this push" not in r.stdout, r.stdout
     assert "archive/2026-09-07-widget.md: tier 3 plan has no clearing REVIEW" in r.stdout, r.stdout
+
+
+def test_feature_registry_config_files_are_gate_files():
+    # v2.92 K0: the registry configuration is gate configuration — refute, bundle, quiet
+    cr = _cr()
+    assert cr.is_gate_path("docs/process/feature-registry.json")
+    assert cr.is_gate_path("docs/process/feature-registry.local.json")

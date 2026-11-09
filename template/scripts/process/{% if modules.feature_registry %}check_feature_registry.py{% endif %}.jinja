@@ -16,22 +16,18 @@ test *semantically* proves its criterion is not mechanically decidable and is
 review judgment. Language-agnostic; stdlib only (plus the shared adr glob)."""
 from __future__ import annotations
 
-import json
 import re
 import sys
 from pathlib import Path
 
-REGISTRY_DIR = "docs/process/feature-registry"
-
-# the decision-records gate (core, always rendered) owns ADR file identity —
-# import, don't copy (one owner per behavior)
+# the decision-records gate (core, always rendered) owns ADR file identity, and
+# registry_config (core) owns configuration and loader — import, don't copy (one
+# owner per behavior)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+import registry_config  # noqa: E402
 from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
-ID_RE = re.compile(r"^STORY-\d{4}$")
 
-# work-log fields retired in the lean pass — their truth lives in GitHub
-# Issues/Sub-Issues/Projects now; a leftover field is stale double bookkeeping
-RETIRED_FIELDS = {"status", "blocked_by", "parent"}
+ID_RE = re.compile(r"^STORY-\d{4}$")
 KNOWN_FIELDS = {"id", "title", "story", "acceptance", "tests", "adr", "issue", "links"}
 
 # Advisory only: an entry with many mapped tests but very few acceptance
@@ -40,32 +36,28 @@ UNDER_GRANULAR_MAX_ACC = 2
 UNDER_GRANULAR_MIN_TESTS = 5
 
 
-def _entry_files(root: Path) -> list[Path]:
-    reg = root / REGISTRY_DIR
-    if not reg.is_dir():
-        return []
-    return sorted(p for p in reg.glob("*.json") if not p.name.endswith(".example.json"))
-
-
-def _check_entry(root: Path, path: Path, seen_ids: dict) -> tuple[list[str], list[str], dict]:
+def _check_entry(root: Path, cfg: dict, story: registry_config.Story,
+                 seen_ids: dict) -> tuple[list[str], list[str], dict]:
     hard: list[str] = []
     soft: list[str] = []
     stats = {"n_acc": 0, "n_tests": 0, "sid": None}
-    rel = path.relative_to(root)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        return [f"{rel}: invalid JSON: {exc}"], [], stats
+    rel = story.path.relative_to(root)
+    if story.error:
+        return [f"{rel}: {story.error}"], [], stats
+    data = story.data
     if not isinstance(data, dict):
         return [f"{rel}: entry must be a JSON object, got {type(data).__name__}"], [], stats
 
-    retired = sorted(RETIRED_FIELDS & set(data))
+    # work-log fields retired in the lean pass — their truth lives in GitHub
+    # Issues/Sub-Issues/Projects now; a leftover field is stale double bookkeeping
+    retired_fields = set(cfg["retired_fields"])
+    retired = sorted(retired_fields & set(data))
     if retired:
         hard.append(f"{rel}: retired work-log field(s) {retired} — status, "
                     f"dependencies, and decomposition live in GitHub "
                     f"Issues/Projects now; the inventory carries only "
                     f"capability -> acceptance -> tests")
-    unknown = sorted(set(data) - KNOWN_FIELDS - RETIRED_FIELDS)
+    unknown = sorted(set(data) - KNOWN_FIELDS - retired_fields)
     if unknown:
         soft.append(f"{rel}: unknown field(s) {unknown} — not validated")
 
@@ -133,15 +125,22 @@ def _under_granular_note(stats: list[dict]) -> list[str]:
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
-    files = _entry_files(root)
-    if not files:
+    try:
+        cfg = registry_config.config(root)
+    except registry_config.ConfigError as exc:
+        return [str(exc)], []
+    problems = registry_config.problems(cfg)
+    if problems:
+        return problems, []
+    reg = registry_config.load_registry(root, cfg)
+    if not reg.stories:
         return [], ["no inventory entries yet (feature inventory empty)"]
     hard: list[str] = []
     soft: list[str] = []
     seen_ids: dict = {}
     all_stats: list[dict] = []
-    for path in files:
-        h, s, stats = _check_entry(root, path, seen_ids)
+    for story in reg.stories:
+        h, s, stats = _check_entry(root, cfg, story, seen_ids)
         hard += h
         soft += s
         all_stats.append(stats)
