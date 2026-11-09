@@ -74,6 +74,13 @@ _AXIS = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?[*_]*(?P<axis>[a-z][a-z0-9 _-]*?)[*_
                    re.IGNORECASE)
 _NA = re.compile(r"^n/?a\b[\s—–:-]*(.*)$", re.IGNORECASE)
 _TOKEN = re.compile(r"`([^`]+)`|(\S+)")
+# Every key a design-contract registry entry may carry: the design-contracts gate's own
+# fields, the ones this gate reads (`registries`), its `state_catalogue` and `_comment`.
+# The one list — that gate composes its unknown-key note from it, so a key either gate
+# learns is known to both (this file is core, the module's gate imports it lazily).
+REGISTRY_UI_KEYS = ("defaults", "extra_axes", "rule_sources")
+REGISTRY_KEYS = ("surface", "contract", "status", "pin", "id_prefixes", "adr", "review", "reference",
+                 "paths", "notes", *REGISTRY_UI_KEYS, "state_catalogue", "_comment")
 
 
 # --- what the project declares --------------------------------------------------

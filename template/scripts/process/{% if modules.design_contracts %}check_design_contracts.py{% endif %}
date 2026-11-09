@@ -14,9 +14,12 @@ deliberate re-pin); an ID defined twice in the contract; an `accepted`
 contract without decision record or without an independent review that
 records a GO; a review that names a different seal than the reference
 carries; a reference folder whose seal no longer verifies; an active plan
-citing an ID the contract does not define.
+citing an ID the contract does not define; a malformed `states.json` in the
+reference round, and — for a round the push touches — a missing one, a state
+of the catalogue a view lacks, `stories` the registry setting rules out
+(`touched_rounds`; the same findings are notes for an untouched round).
 
-Best-effort (note, never red): an opaque pin; a draft contract; a legacy
+Best-effort (note, never red): an unknown registry key; an opaque pin; a draft contract; a legacy
 norm (one note: registered so plans can declare it, #257); reference
 boards rendered from an older contract (external drift — re-seal or start a
 new round); a change in flight under the surface's paths while no active
@@ -33,8 +36,11 @@ Python stdlib only."""
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -235,6 +241,14 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
     data, errs = load(root, path)
     if data is None:
         return errs, []
+    # before this function adds its own `_review_hashes`: only what the file carries
+    unknown = sorted(set(data) - set(_known_entry_keys()))
+    if unknown:
+        soft.append(f"{rel}: unknown key(s) {', '.join(repr(k) for k in unknown)} — no gate reads "
+                    "them (a typo of a known field?)")
+    _catalogue, problem = state_catalogue(root, data.get("state_catalogue"), _worktree_text(root))
+    if problem:
+        hard.append(f"{rel}: {problem}")
     surface = data["surface"].strip()
     status = data["status"].strip()
     cpath = _inside(root, data["contract"].strip())
@@ -367,6 +381,494 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                         f"surface (e.g. {touched[0]}) while no active plan cites a "
                         f"{'/'.join(data['id_prefixes'])}* contract ID — DoR R5: name the IDs "
                         "the change implements or amends")
+    return hard, soft
+
+
+def _known_entry_keys() -> tuple[str, ...]:
+    """Every key a registry entry may carry — `check_ui` (core) holds the one list."""
+    from check_ui import REGISTRY_KEYS  # noqa: PLC0415
+    return REGISTRY_KEYS
+
+
+def _worktree_text(root: Path) -> Callable[[str], str | None]:
+    def read(rel: str) -> str | None:
+        p = root / rel
+        return _read(p) if p.is_file() else None
+    return read
+
+
+def state_catalogue(root: Path, value: object, read: Callable[[str], str | None]
+                    ) -> tuple[list[str] | None, str | None]:
+    """(states, problem) of an entry's `state_catalogue`: a list of state IDs, or a
+    repo path to a JSON list — one place for every surface. None, None: not set.
+    `read(rel)` gives a file's text or None; the fork point's reader reads there."""
+    if value is None:
+        return None, None
+    if isinstance(value, str) and value.strip():
+        target = _inside(root, value.strip())
+        if target is None:
+            return None, f"'state_catalogue' path {value.strip()!r} escapes the repo root"
+        text = read(target.relative_to(root.resolve()).as_posix())
+        if text is None:
+            return None, f"'state_catalogue' {value.strip()} does not exist"
+        try:
+            items = json.loads(text)
+        except ValueError as exc:
+            return None, f"'state_catalogue' {value.strip()} is not valid JSON ({exc})"
+        if not isinstance(items, list):
+            return None, f"'state_catalogue' {value.strip()} must hold a JSON list of state IDs"
+    elif isinstance(value, list):
+        items = value
+    else:
+        return None, "'state_catalogue' must be a list of state IDs or a repo path to a JSON list of them"
+    if not all(isinstance(x, str) and x.strip() for x in items):
+        return None, "'state_catalogue' must hold non-empty state IDs (strings)"
+    return [x.strip() for x in items], None
+
+
+# --- the round's state list and element map (#404 B1/B2) ----------------------------
+# `states.json` in the reference round says which views and states the boards show, at
+# which viewports, themes and variants, and which owner each element of a view has. This
+# gate owns loading and checking it. What the file says about itself is checked always —
+# a sealed round cannot change without a push touching it. What depends on the world
+# around it (the state catalogue, the feature registry) is hard only for a round the push
+# touches (`entry_triggers`), a note otherwise: else every clean-up elsewhere would red a
+# sealed round until it is re-sealed and re-reviewed. Never by the fork point's state.
+STATES = "states.json"
+COMMENT = "_comment"  # allowed at every level of states.json
+_STATES_KEYS = frozenset({"schema_version", "surfaces", "stories", "viewports", "themes", "variants",
+                          "elements", "views", COMMENT})
+_VIEWPORT_KEYS = frozenset({"id", "width", "height", COMMENT})
+_ELEMENT_KEYS = frozenset({"id", "owner", "role", COMMENT})
+_VIEW_KEYS = frozenset({"id", "elements", "states", "not_applicable", COMMENT})
+_STATE_KEYS = frozenset({"id", "viewports", "themes", "variants", "boards", COMMENT})
+_UNTOUCHED = " (no push touches the round here: a note)"
+
+
+def _rel(root: Path, p: Path) -> str:
+    return p.resolve().relative_to(root.resolve()).as_posix()
+
+
+def _unknown_keys(obj: dict, known: frozenset[str], where: str) -> list[str]:
+    extra = sorted(k for k in obj if k not in known)
+    if not extra:
+        return []
+    return [f"{where}: unknown key(s) {', '.join(repr(k) for k in extra)} — known: "
+            f"{', '.join(sorted(known - {COMMENT}))} (and `{COMMENT}`)"]
+
+
+def _names(value: object, key: str, where: str, out: list[str]) -> list[str]:
+    """A non-empty list of distinct non-empty strings; problems go to `out`."""
+    if not (isinstance(value, list) and value and all(isinstance(x, str) and x.strip() for x in value)):
+        out.append(f"{where}: '{key}' must be a non-empty list of names")
+        return []
+    names = [x.strip() for x in value]
+    for dup in sorted({n for n in names if names.count(n) > 1}):
+        out.append(f"{where}: '{key}' names {dup!r} twice")
+    return names
+
+
+def _subset(state: dict, key: str, known: list[str], what: str, where: str, out: list[str]) -> None:
+    if key not in state:
+        return
+    for name in _names(state[key], key, where, out):
+        if name not in known:
+            out.append(f"{where}: unknown {what} {name!r} — the round lists {', '.join(known) or 'none'}")
+
+
+def stories_problem(value: object) -> str | None:
+    """Why a round's `stories` is malformed — None when absent, a non-empty list of story
+    IDs, or `n/a: <reason>` (a round that covers no story says so, with the reason)."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        na = _NA.match(value.strip())
+        if na is not None:
+            return None if re.search(r"\w", na.group(1)) else (
+                "'stories': `n/a` without a reason — name why the round covers no story")
+    elif isinstance(value, list) and value and all(isinstance(x, str) and x.strip() for x in value):
+        return None
+    return "'stories' must be a non-empty list of story IDs or `\"n/a: <reason>\"`"
+
+
+def round_stories(states: dict) -> list[str] | None:
+    """The story IDs a valid `states.json` names; None for `n/a: …` or no `stories` key."""
+    value = states.get("stories")
+    return [x.strip() for x in value] if isinstance(value, list) else None
+
+
+def load_states(root: Path, rdir: Path) -> tuple[dict | None, list[str]]:
+    """(data, problems) of the round's `states.json`, checked on its own: shape, the axes
+    of each state within the round's lists, the boards it names, the element map (every
+    element once, with an owner; a view names only elements the map has). data is None
+    when the file cannot be read as a JSON object."""
+    where = f"{_rel(root, rdir)}/{STATES}"
+    try:
+        data = json.loads((rdir / STATES).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return None, [f"{where}: not readable as JSON ({exc})"]
+    if not isinstance(data, dict):
+        return None, [f"{where}: must be a JSON object"]
+    out = _unknown_keys(data, _STATES_KEYS, where)
+    version = data.get("schema_version")
+    if type(version) is not int or version != 1:
+        out.append(f"{where}: 'schema_version' must be 1")
+    if "surfaces" in data and not (isinstance(data["surfaces"], list) and data["surfaces"]):
+        out.append(f"{where}: 'surfaces' must be a non-empty list when given")
+    elif "surfaces" in data:
+        _names(data["surfaces"], "surfaces", where, out)
+    problem = stories_problem(data.get("stories"))
+    if problem:
+        out.append(f"{where}: {problem}")
+    axes: dict[str, list[str]] = {}
+    for key in ("themes", "variants"):
+        axes[key] = _names(data[key], key, where, out) if key in data else []
+    axes["viewports"] = _viewports(data.get("viewports"), where, out)
+    elements = _elements(data.get("elements"), where, out)
+    views = data.get("views")
+    if not (isinstance(views, list) and views):
+        out.append(f"{where}: 'views' must be a non-empty list")
+        return data, out
+    seen: set[str] = set()
+    for i, view in enumerate(views):
+        if not isinstance(view, dict):
+            out.append(f"{where}: views[{i}] must be an object")
+            continue
+        vid = view.get("id")
+        vwhere = f"{where}: view {vid!r}" if isinstance(vid, str) else f"{where}: views[{i}]"
+        out += _unknown_keys(view, _VIEW_KEYS, vwhere)
+        if not (isinstance(vid, str) and vid.strip()):
+            out.append(f"{vwhere}: 'id' must be a non-empty string")
+        elif vid in seen:
+            out.append(f"{where}: view {vid!r} twice")
+        else:
+            seen.add(vid)
+        for eid in _names(view["elements"], "elements", vwhere, out) if "elements" in view else []:
+            if eid not in elements:
+                out.append(f"{vwhere} names element {eid!r}, which `elements` does not define")
+        state_ids = _states_of(root, rdir, view.get("states", []), axes, vwhere, out)
+        na = view.get("not_applicable", {})
+        if not isinstance(na, dict):
+            out.append(f"{vwhere}: 'not_applicable' must be an object (state ID → reason)")
+            continue
+        for sid, reason in na.items():
+            if sid == COMMENT:
+                continue
+            if not (isinstance(reason, str) and re.search(r"\w", reason)):
+                out.append(f"{vwhere}: not_applicable {sid!r} has no reason")
+            if sid in state_ids:
+                out.append(f"{vwhere}: {sid!r} is in `states` and in `not_applicable` — one or the other")
+    return data, out
+
+
+def _viewports(value: object, where: str, out: list[str]) -> list[str]:
+    if value is None:
+        return []
+    if not (isinstance(value, list) and value):
+        out.append(f"{where}: 'viewports' must be a non-empty list when given")
+        return []
+    ids: list[str] = []
+    for i, vp in enumerate(value):
+        if not isinstance(vp, dict):
+            out.append(f"{where}: viewports[{i}] must be an object")
+            continue
+        out += _unknown_keys(vp, _VIEWPORT_KEYS, f"{where}: viewports[{i}]")
+        vid = vp.get("id")
+        if not (isinstance(vid, str) and vid.strip()):
+            out.append(f"{where}: viewports[{i}]: 'id' must be a non-empty string")
+            continue
+        if vid in ids:
+            out.append(f"{where}: viewport {vid!r} twice")
+        ids.append(vid)
+        for dim in ("width", "height"):
+            size = vp.get(dim)
+            if type(size) is not int or size <= 0:
+                out.append(f"{where}: viewport {vid!r}: '{dim}' must be a positive whole number (px)")
+    return ids
+
+
+def _elements(value: object, where: str, out: list[str]) -> set[str]:
+    if value is None:
+        return set()
+    if not isinstance(value, list):
+        out.append(f"{where}: 'elements' must be a list")
+        return set()
+    ids: set[str] = set()
+    for i, el in enumerate(value):
+        if not isinstance(el, dict):
+            out.append(f"{where}: elements[{i}] must be an object")
+            continue
+        eid = el.get("id")
+        ewhere = f"{where}: element {eid!r}" if isinstance(eid, str) else f"{where}: elements[{i}]"
+        out += _unknown_keys(el, _ELEMENT_KEYS, ewhere)
+        if not (isinstance(eid, str) and eid.strip()):
+            out.append(f"{ewhere}: 'id' must be a non-empty string")
+        elif eid in ids:
+            out.append(f"{where}: element {eid!r} twice — one owner per element")
+        else:
+            ids.add(eid)
+        if not (isinstance(el.get("owner"), str) and el["owner"].strip()):
+            out.append(f"{ewhere}: 'owner' must be a non-empty string (the one owner of the element)")
+        if "role" in el and not isinstance(el["role"], str):
+            out.append(f"{ewhere}: 'role' must be a string (e.g. main, secondary)")
+    return ids
+
+
+def _states_of(root: Path, rdir: Path, value: object, axes: dict[str, list[str]], vwhere: str,
+               out: list[str]) -> set[str]:
+    if not isinstance(value, list):
+        out.append(f"{vwhere}: 'states' must be a list")
+        return set()
+    ids: set[str] = set()
+    folder = rdir.resolve()
+    for i, state in enumerate(value):
+        if not isinstance(state, dict):
+            out.append(f"{vwhere}: states[{i}] must be an object")
+            continue
+        sid = state.get("id")
+        swhere = f"{vwhere} state {sid!r}" if isinstance(sid, str) else f"{vwhere} states[{i}]"
+        out += _unknown_keys(state, _STATE_KEYS, swhere)
+        if not (isinstance(sid, str) and sid.strip()):
+            out.append(f"{swhere}: 'id' must be a non-empty string")
+        elif sid in ids:
+            out.append(f"{vwhere}: state {sid!r} twice")
+        else:
+            ids.add(sid)
+        _subset(state, "viewports", axes["viewports"], "viewport", swhere, out)
+        _subset(state, "themes", axes["themes"], "theme", swhere, out)
+        _subset(state, "variants", axes["variants"], "variant", swhere, out)
+        for board in _names(state["boards"], "boards", swhere, out) if "boards" in state else []:
+            target = (rdir / board).resolve()
+            if folder not in target.parents or not target.is_file():
+                out.append(f"{swhere}: board {board!r} does not exist in the round")
+    return ids
+
+
+def catalogue_gaps(states: dict, catalogue: list[str]) -> list[str]:
+    """Each view of a valid `states.json` against the state catalogue: every catalogue
+    state is rendered (`states`) or named in `not_applicable`; others are allowed."""
+    out: list[str] = []
+    for view in states.get("views", []):
+        if not isinstance(view, dict) or not isinstance(view.get("id"), str):
+            continue
+        have = {s.get("id") for s in view.get("states", []) if isinstance(s, dict)}
+        na = view.get("not_applicable", {})
+        have |= set(na) if isinstance(na, dict) else set()
+        for state in catalogue:
+            if state not in have:
+                out.append(f"view {view['id']!r} has no state {state!r} of the state catalogue — "
+                           "render it, or name it in `not_applicable` with a reason")
+    return out
+
+
+# --- when the round is judged hard: the push touches it ------------------------------
+
+def fork_point(root: Path) -> tuple[str | None, str | None]:
+    """(fork point SHA, why there is none). Without one, whether a push touches a round
+    is unknown — the caller notes that, never treats every round as touched nor
+    passes silently (unlike `declaration_rule`, which falls back to the working tree)."""
+    import check_review as _review  # noqa: PLC0415  (the owner of the fork point)
+    try:
+        base = _review.merge_base(root)
+    except _review.GitReadError as exc:
+        return None, f"the fork point is ambiguous ({exc})"
+    if base:
+        return base, None
+    forkless = _review.forkless_refs(root)
+    if forkless:
+        remedy = ("this clone is shallow: `git fetch --unshallow`" if _review.is_shallow(root)
+                  else f"fetch the history of {forkless[0]} the branch forked from")
+        return None, f"no fork point with {', '.join(forkless)} in this history — {remedy}"
+    return None, "no fork point: no push range against an integration ref (on it, or none exists)"
+
+
+def _norm(value: object) -> str:
+    """A repo path as written in an entry, normalized: `x` and `x/` are one folder."""
+    return posixpath.normpath(value.strip()) if isinstance(value, str) and value.strip() else ""
+
+
+def _status(data: dict) -> str:
+    return data["status"].strip() if isinstance(data.get("status"), str) else ""
+
+
+def _blob_changed(root: Path, base: str, rel: str) -> bool:
+    """Whether `rel` in the working tree differs from the fork point's blob: compared by
+    blob ID, not decoded text. Missing or unreadable at the fork point counts as changed."""
+    from check_review import _git_bytes  # noqa: PLC0415
+    old = _git_bytes(root, "rev-parse", "--verify", "-q", f"{base}:{rel}")
+    if old is None:
+        return True
+    if not (root / rel).is_file():
+        return True
+    now = _git_bytes(root, "hash-object", "--", rel)
+    return now is None or now.strip() != old.strip()
+
+
+def _entry_at(root: Path, base: str, rel: str) -> dict | None | bool:
+    """The registry entry at the fork point: a dict, None when the file is new, False
+    when it is there but no JSON object."""
+    import check_review as _review  # noqa: PLC0415
+    text = _review._show(root, base, rel)
+    if text is None:
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False
+    return data if isinstance(data, dict) else False
+
+
+def entry_triggers(root: Path, base: str, rel: str, data: dict) -> list[str]:
+    """Why this push touches the round a registry entry references, against the fork
+    point `base` — [] when it does not. A new entry file is touched (fail-closed)."""
+    old = _entry_at(root, base, rel)
+    if old is None:
+        return ["new registry entry file"]
+    if old is False:
+        return ["registry entry unreadable at the fork point"]
+    out: list[str] = []
+    ref, review = _norm(data.get("reference")), _norm(data.get("review"))
+    if _norm(old.get("reference")) != ref:
+        out.append("reference changed")
+    if _status(data) == "accepted" and _status(old) != "accepted":
+        out.append("status became accepted")
+    if _norm(old.get("review")) != review:
+        out.append("review path changed")
+    if ref and _blob_changed(root, base, f"{ref}/{_seal.SEAL}"):
+        out.append("seal changed")
+    if review and _blob_changed(root, base, review):
+        out.append("review file changed")
+    return out
+
+
+@dataclass
+class Round:
+    """A reference round and the registry entries that reference it."""
+    key: str                      # the round folder, repo-relative and resolved
+    path: Path
+    entries: list[tuple[str, dict]] = field(default_factory=list)   # (registry rel, entry)
+    triggers: dict[str, list[str]] = field(default_factory=dict)    # registry rel → why touched
+    states: dict | None = None    # the parsed states.json, once `round_findings` read it
+
+    @property
+    def touched(self) -> bool:
+        """Does this push touch the round? False also when no fork point tells."""
+        return any(self.triggers.values())
+
+    def why(self) -> str:
+        return "; ".join(f"{Path(rel).name}: {', '.join(t)}" for rel, t in self.triggers.items() if t)
+
+
+def touched_rounds(root: Path, entries: list[tuple[str, dict]], base: str | None) -> list[Round]:
+    """Every round a non-legacy registry entry references, with the triggers by which this
+    push touches it (`entry_triggers`; none without a fork point). Two entries on one
+    folder (`x` and `x/` alike) are one round. The one owner of "hard or note"."""
+    found: dict[str, Round] = {}
+    for rel, data in entries:
+        if _status(data) == "legacy" or not _norm(data.get("reference")):
+            continue
+        rdir = _inside(root, data["reference"].strip())
+        if rdir is None or not rdir.is_dir():
+            continue  # `_check_one` reports it
+        rnd = found.setdefault(_rel(root, rdir), Round(_rel(root, rdir), rdir))
+        rnd.entries.append((rel, data))
+        rnd.triggers[rel] = entry_triggers(root, base, rel, data) if base else []
+    return [found[k] for k in sorted(found)]
+
+
+def _by_touch(rnd: Round, findings: list[str]) -> tuple[list[str], list[str]]:
+    return (findings, []) if rnd.touched else ([], [f + _UNTOUCHED for f in findings])
+
+
+def round_catalogue(root: Path, rnd: Round, base: str | None) -> list[str] | None:
+    """The state catalogue of a round: the union over its entries, each as it stands now
+    and at the fork point — a push cannot drop a state for its own GO. None: none set."""
+    import check_review as _review  # noqa: PLC0415
+    states: list[str] = []
+    found = False
+    for rel, data in rnd.entries:
+        values = [(data.get("state_catalogue"), _worktree_text(root))]
+        old = _entry_at(root, base, rel) if base else None
+        if isinstance(old, dict):
+            values.append((old.get("state_catalogue"),
+                           lambda r, b=base: _review._show(root, b, r)))  # type: ignore[misc]
+        for value, read in values:
+            got, _problem = state_catalogue(root, value, read)
+            if got is not None:
+                found = True
+                states += [s for s in got if s not in states]
+    return states if found else None
+
+
+def story_findings(root: Path, rnd: Round) -> tuple[list[str], list[str]]:
+    """(hard, notes) for the `stories` of a round whose states.json loaded. Without the
+    feature registry a list is a finding (no coverage is judgeable; `n/a: <reason>`
+    says so); with it a touched round names its stories or `n/a: <reason>`.
+
+    The hook for coverage (#404 B4): the registry lookup of the IDs and the duty of at
+    least one visible AC go here, gated by `rnd.touched` like everything else."""
+    import registry_config  # noqa: PLC0415  (core: the registry module's presence)
+    assert rnd.states is not None
+    where = f"{rnd.key}/{STATES}"
+    stories = rnd.states.get("stories")
+    findings: list[str] = []
+    if not registry_config.module_active(root):
+        if isinstance(stories, list):
+            findings.append(f"{where}: 'stories' lists story IDs, but this project has no feature "
+                            "registry, so no coverage can be judged — write `\"stories\": \"n/a: <reason>\"`")
+    elif stories is None:
+        findings.append(f"{where}: 'stories' is required with the feature registry — the story IDs "
+                        "the round covers, or `\"n/a: <reason>\"`")
+    return _by_touch(rnd, findings)
+
+
+def round_findings(root: Path, rnd: Round, base: str | None) -> tuple[list[str], list[str]]:
+    """(hard, notes) of one reference round: its states.json — required where the push
+    touches the round — and what it says against the catalogue and the registry."""
+    if not (rnd.path / STATES).is_file():
+        names = ", ".join(Path(rel).name for rel, _ in rnd.entries)
+        if rnd.touched:
+            return [f"{rnd.key}: the reference round has no {STATES}, required once a push touches "
+                    f"the round ({rnd.why()}) — list its views, states, viewports, themes and "
+                    f"elements ({REGISTRY_DIR}/templates/states.example.json), then re-seal and "
+                    "re-review"], []
+        return [], [f"{rnd.key}: the reference round of {names} has no {STATES} — not touched by "
+                    "this push, so a note; required once a push changes its reference, status, "
+                    "review or seal"]
+    states, hard = load_states(root, rnd.path)
+    soft: list[str] = []
+    if states is None or hard:
+        return hard, soft
+    rnd.states = states
+    catalogue = round_catalogue(root, rnd, base)
+    h, s = _by_touch(rnd, [f"{rnd.key}/{STATES}: {gap}" for gap in catalogue_gaps(states, catalogue or [])])
+    hard += h
+    soft += s
+    h, s = story_findings(root, rnd)
+    return hard + h, soft + s
+
+
+def shared_review_findings(rounds: list[Round]) -> tuple[list[str], list[str]]:
+    """Entries on different rounds that share one review file couple the rounds: a new
+    section for one touches both. Red where the push touches one of them, else a note."""
+    by_review: dict[str, list[tuple[str, Round]]] = {}
+    for rnd in rounds:
+        for rel, data in rnd.entries:
+            if _norm(data.get("review")):
+                by_review.setdefault(_norm(data["review"]), []).append((rel, rnd))
+    hard: list[str] = []
+    soft: list[str] = []
+    for review, users in sorted(by_review.items()):
+        keys = sorted({rnd.key for _rel_, rnd in users})
+        if len(keys) < 2:
+            continue
+        line = (f"{', '.join(sorted(Path(rel).name for rel, _ in users))} share the review {review} "
+                f"but reference different rounds ({', '.join(keys)}) — a section for one touches "
+                "the other; give each round its own review file")
+        if any(rnd.triggers.get(rel) for rel, rnd in users):
+            hard.append(line)
+        else:
+            soft.append(line + _UNTOUCHED)
     return hard, soft
 
 
@@ -538,6 +1040,24 @@ def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
     return hard, soft
 
 
+def _rounds_check(root: Path, entries: list[tuple[str, dict]]) -> tuple[list[str], list[str]]:
+    """The reference rounds of the registry: each round, then the shared review files."""
+    base, problem = fork_point(root)
+    rounds = touched_rounds(root, entries, base)
+    hard: list[str] = []
+    soft: list[str] = []
+    if rounds and base is None:
+        soft.append(f"{problem} — whether this push touches the round(s) "
+                    f"{', '.join(r.key for r in rounds)} is unknown, so their {STATES} duty and "
+                    "touched-round checks are notes here")
+    for rnd in rounds:
+        h, s = round_findings(root, rnd, base)
+        hard += h
+        soft += s
+    h, s = shared_review_findings(rounds)
+    return hard + h, soft + s
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     files = _registry_files(root)
     plans = active_plan_texts(root)
@@ -559,7 +1079,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         soft += s
         data, _errs = load(root, path)
         if data is not None:
-            entries.append(data)
+            entries.append((path.relative_to(root).as_posix(), data))
+    h, s = _rounds_check(root, entries)
+    hard += h
+    soft += s
+    entries = [data for _rel, data in entries]
     # a plan that cites IDs of some family but names no contract at all is
     # judged against nothing — say so once, not once per surface
     for prel, ptext in plans.items():

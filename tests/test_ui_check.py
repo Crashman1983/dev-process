@@ -502,3 +502,18 @@ def test_a_shallow_clone_without_a_fork_point_refuses(project, tmp_path):
     r = subprocess.run([sys.executable, "scripts/process/check_ui.py", "."], cwd=shallow,
                        capture_output=True, text=True, env=_env())
     assert r.returncode == 1 and "git fetch --unshallow" in r.stdout, r.stdout + r.stderr
+
+
+# --- v2.93 B1: one list of the registry entry's keys -----------------------------------
+
+def test_the_registry_key_list_knows_the_seed_and_every_key_this_gate_reads(project):
+    """The design-contracts gate notes unknown entry keys from `check_ui.REGISTRY_KEYS`:
+    a key the seed ships or this gate reads must never read as a typo."""
+    code = ("import sys, json; sys.path.insert(0, 'scripts/process'); import check_ui; "
+            "from pathlib import Path; "
+            "seed = json.load(open('docs/process/design-contracts/surface.example.json')); "
+            "read = {k for r in check_ui.registries(Path('.')) for k in r}; "
+            "known = set(check_ui.REGISTRY_KEYS); "
+            "print(sorted((set(seed) | read | {'state_catalogue', '_comment'}) - known))")
+    r = subprocess.run([sys.executable, "-c", code], cwd=project, capture_output=True, text=True, env=_env())
+    assert r.returncode == 0 and r.stdout.strip() == "[]", r.stdout + r.stderr

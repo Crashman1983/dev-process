@@ -1,0 +1,31 @@
+{
+  "_comment": "Copy into the round folder as states.json before sealing. 'stories' lists the feature-registry stories the round covers; a project without the feature registry, or a round that covers no story, writes \"stories\": \"n/a: <reason>\" instead. Unknown keys are an error at every level; _comment is allowed at every level.",
+  "schema_version": 1,
+  "surfaces": ["web"],
+  "stories": ["DOC-US-001", "DOC-US-004"],
+  "viewports": [
+    {"id": "phone", "width": 402, "height": 874},
+    {"id": "standard", "width": 1280, "height": 800}
+  ],
+  "themes": ["light", "dark"],
+  "variants": ["ax3"],
+  "elements": [
+    {"id": "btn", "owner": "rs/Button", "role": "main"}
+  ],
+  "views": [
+    {
+      "id": "shell-open",
+      "elements": ["btn"],
+      "states": [
+        {
+          "id": "default",
+          "viewports": ["phone", "standard"],
+          "themes": ["light", "dark"],
+          "variants": ["ax3"],
+          "boards": ["boards/shell-open-phone-light.png"]
+        }
+      ],
+      "not_applicable": {"offline": "the shell has no network state of its own"}
+    }
+  ]
+}
