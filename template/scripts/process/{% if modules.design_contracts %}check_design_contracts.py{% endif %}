@@ -15,9 +15,12 @@ contract without decision record or without an independent review that
 records a GO; a review that names a different seal than the reference
 carries; a reference folder whose seal no longer verifies; an active plan
 citing an ID the contract does not define; a malformed `states.json` in the
-reference round, and — for a round the push touches — a missing one, a state
-of the catalogue a view lacks, `stories` the registry setting rules out
-(`touched_rounds`; the same findings are notes for an untouched round).
+reference round, an owner decision ID twice with different text, an item that
+lost its coverage against the fork point, and — for a round the push touches —
+a missing one, a state of the catalogue a view lacks, `stories` the registry
+rules out, a GO with a visible acceptance item uncovered (`touched_rounds`; the
+same findings are notes for an untouched round). The coverage is computed
+(#404 B4, `round_coverage`): `--coverage <surface>` prints its table.
 
 Best-effort (note, never red): an unknown registry key; an opaque pin; a draft contract; a legacy
 norm (one note: registered so plans can declare it, #257); reference
@@ -35,6 +38,8 @@ machine work — that is what the sealed boards and the reviewer are for.
 Python stdlib only."""
 from __future__ import annotations
 
+import argparse
+import functools
 import json
 import posixpath
 import re
@@ -320,13 +325,12 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                 continue
             if key == "review":
                 rtext = _unfenced(_read(p))
-                decisions = list(_GO.finditer(rtext))
-                go = decisions[-1] if decisions else None  # the last decision line stands
-                if go is None:
+                verdict = _verdict(rtext)
+                if verdict is None:
                     hard.append(f"{rel}: review {val} records no decision line (`Decision: GO` / "
                                 "`Decision: NO GO`) — an accepted contract needs a recorded GO")
-                elif go.group(1).upper() != "GO":
-                    hard.append(f"{rel}: review {val} records {go.group(1)!r} — the contract "
+                elif verdict.upper() != "GO":
+                    hard.append(f"{rel}: review {val} records {verdict!r} — the contract "
                                 "cannot be 'accepted' on a review that did not clear it")
                 data["_review_hashes"] = {m.group(1) for m in _SEAL_LINE.finditer(rtext)}
 
@@ -382,6 +386,12 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                         f"{'/'.join(data['id_prefixes'])}* contract ID — DoR R5: name the IDs "
                         "the change implements or amends")
     return hard, soft
+
+
+def _verdict(text: str) -> str | None:
+    """The verdict of a review's unfenced text: its last decision line stands; None: none."""
+    found = list(_GO.finditer(text))
+    return found[-1].group(1) if found else None
 
 
 def _known_entry_keys() -> tuple[str, ...]:
@@ -868,6 +878,11 @@ class Round:
     states: dict | None = None    # the parsed states.json, once `round_findings` read it
 
     @property
+    def name(self) -> str:
+        """The round's folder name: what an anchor and a bound owner decision name."""
+        return Path(self.key).name
+
+    @property
     def touched(self) -> bool:
         """Does this push touch the round? False also when no fork point tells."""
         return any(self.triggers.values())
@@ -917,31 +932,470 @@ def round_catalogue(root: Path, rnd: Round, base: str | None) -> list[str] | Non
     return states if found else None
 
 
-def story_findings(root: Path, rnd: Round) -> tuple[list[str], list[str]]:
+# --- coverage: which visible acceptance items a round covers (#404 B4) -----------------
+# An item of a story the round's `stories` names is visible to the round when it is not
+# owned_by a shared proof layer and its surfaces (`registry_config.item_surfaces`) meet the
+# round's `surfaces` — without them every item counts, the implicit surface always does.
+# It is covered by a `design` anchor into the round or by an owner decision with an ID
+# that changes or drops it. A GO needs every visible item covered: hard for a round the
+# push touches, a note otherwise. Coverage lost against the fork point is a delta rule,
+# hard for an untouched round too — it does not touch the round.
+
+@dataclass
+class Reg:
+    """The feature registry as the coverage reads it: today's configuration (it resolves
+    surfaces for the fork point's stories too) and the stories by id."""
+    cfg: dict
+    stories: dict[str, dict]
+
+
+def _by_id(stories: list) -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for story in stories:
+        if isinstance(story.data, dict) and isinstance(story.data.get("id"), str):
+            out.setdefault(story.data["id"], story.data)
+    return out
+
+
+@dataclass
+class Coverage:
+    """What the coverage reads once per run: the registry today and, on first ask, at the
+    fork point. `module`: the feature-registry module is on; `reg` is None then only with
+    a `problem` (its configuration cannot be used — the registry gate says why)."""
+    root: Path
+    base: str | None
+    module: bool = False
+    reg: Reg | None = None
+    problem: str | None = None
+    _at_base: tuple[dict[str, dict] | None, list[str]] | None = None
+
+    @classmethod
+    def read(cls, root: Path, base: str | None) -> Coverage:
+        import registry_config  # noqa: PLC0415  (core, a leaf)
+        ctx = cls(root, base, registry_config.module_active(root))
+        if not ctx.module:
+            return ctx
+        try:
+            cfg = registry_config.config(root)
+        except registry_config.ConfigError as exc:
+            ctx.problem = f"the feature registry configuration cannot be read ({exc})"
+            return ctx
+        if registry_config.problems(cfg):
+            ctx.problem = "the feature registry configuration is invalid (its gate says why)"
+            return ctx
+        ctx.reg = Reg(cfg, _by_id(registry_config.load_registry(root, cfg).stories))
+        return ctx
+
+    def at_base(self) -> tuple[dict[str, dict] | None, list[str]]:
+        """(the registry's stories at the fork point, or None with the notes why none)."""
+        if self._at_base is None:
+            if self.base is None:
+                self._at_base = (None, [])
+            else:
+                import registry_config  # noqa: PLC0415
+                reg, notes = registry_config.load_registry_at(self.root, self.base)
+                self._at_base = (None if reg is None else _by_id(reg.stories), notes)
+        return self._at_base
+
+
+def _items(data: object) -> list[dict]:
+    """A story's acceptance items that carry a conforming id."""
+    from registry_config import ITEM_ID  # noqa: PLC0415
+    items = data.get("acceptance") if isinstance(data, dict) else None
+    return [it for it in items if isinstance(it, dict) and isinstance(it.get("id"), str)
+            and ITEM_ID.match(it["id"])] if isinstance(items, list) else []
+
+
+def _names_in(value: object) -> list[str]:
+    """The strings of a list, stripped — a lenient read of a fork point's states.json."""
+    return [x.strip() for x in value if isinstance(x, str) and x.strip()] if isinstance(value, list) else []
+
+
+def visible_items(reg: Reg, stories: dict[str, dict], names: list[str], surfaces: list[str] | None
+                  ) -> dict[str, list[str]]:
+    """{story: the ids of its items visible to the round} for each of `names` in `stories`."""
+    import registry_config  # noqa: PLC0415
+    out: dict[str, list[str]] = {}
+    for sid in names:
+        data = stories.get(sid)
+        if data is None:
+            continue
+        own, _problems = registry_config.story_surfaces(reg.cfg, data)
+        seen: list[str] = []
+        for item in _items(data):
+            if "owned_by" in item:
+                continue
+            got, _problems = registry_config.item_surfaces(reg.cfg, item, own)
+            if surfaces is None or not got or set(got) & set(surfaces):
+                seen.append(item["id"])
+        out[sid] = seen
+    return out
+
+
+def anchored(stories: dict[str, dict], name: str, views: dict[str, dict[str, dict]] | None
+             ) -> dict[tuple[str, str], tuple[str, dict]]:
+    """{(story, item): (its anchor, the state it names)} of every item anchored in the round
+    `name`. With `views`, only an anchor to a view and state the round renders counts;
+    without (the fork point's anchors, read leniently) any anchor naming the round."""
+    out: dict[tuple[str, str], tuple[str, dict]] = {}
+    for sid, data in stories.items():
+        for item in _items(data):
+            for text in anchor_texts(item.get("design")) or []:
+                parsed = parse_anchor(text)
+                if parsed is None or parsed[0] != name:
+                    continue
+                state: dict | None = {}
+                if views is not None:
+                    state = views.get(parsed[1], {}).get(parsed[2])
+                    if state is None:
+                        continue
+                out.setdefault((sid, item["id"]), (text, state))
+    return out
+
+
+# an owner decision with an ID: `DECISION <date> owner <ID>: …`, bound to a round as
+# `owner <round>/<ID>: …` (the token split at its last `/`); the coverage form is
+# `change|drop <Story>#AC<n>[, …] — <reason>`
+_DECISION_ID = re.compile(r"[A-Z][A-Z0-9]*-?\d+")
+_ITEM_REF = r"[A-Za-z][\w.-]*#AC[1-9]\d*(?![\w-])"
+_COVERS = re.compile(rf"^(?P<verb>change|drop)[ \t]+(?P<refs>{_ITEM_REF}(?:[ \t]*,[ \t]*{_ITEM_REF})*)"
+                     r"(?P<rest>.*)$")
+_REASON = re.compile(r"^[ \t]*(?:—|–|--?)[ \t]*\S")
+
+
+@functools.cache
+def _owner_line() -> re.Pattern[str]:
+    from check_review import _RECORD_LEAD  # noqa: PLC0415  (the review gate's line grammar)
+    return re.compile(_RECORD_LEAD + r"[*_]*DECISION[*_]*[ \t]+\d{4}-\d{2}-\d{2}[ \t]+owner[ \t]+"
+                      r"[*_]*(?P<token>[^\s:*]+?)[*_]*:(?P<body>.*)$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class Decision:
+    """An owner decision with an ID, as one file states it."""
+    source: str                          # the repo-relative file
+    raw: str                             # the ID as written
+    key: str                             # the ID canonical: D7 = D07, D-7 is another
+    round: str | None                    # the round it is bound to; None: unbound
+    text: str                            # what follows `<ID>:`, for the quote check
+    verb: str | None                     # change|drop: the coverage form
+    refs: tuple[tuple[str, str], ...]    # (story, item) it changes or drops
+    reasoned: bool
+
+
+def decisions_in(text: str, source: str) -> list[Decision]:
+    """The owner decisions with an ID in a file's unfenced text."""
+    out: list[Decision] = []
+    for m in _owner_line().finditer(_unfenced(text)):
+        head, sep, raw = m.group("token").rpartition("/")
+        bound = head.rsplit("/", 1)[-1] if sep else None
+        if not _DECISION_ID.fullmatch(raw) or bound == "":
+            continue
+        plain = m.group("body").strip().strip("*_").strip()
+        cover = _COVERS.match(plain)
+        refs = tuple((ref.split("#")[0], ref.split("#")[1])
+                     for ref in re.findall(_ITEM_REF, cover.group("refs"))) if cover else ()
+        out.append(Decision(source, raw, canonical(raw, _DECISION_ID), bound,
+                            " ".join(re.sub(r"[*_]+", "", plain).split()),
+                            cover.group("verb") if cover else None, refs,
+                            bool(cover and _REASON.match(cover.group("rest")))))
+    return out
+
+
+Sources = list[tuple[str, str, "str | None"]]   # (round|review|contract, repo rel, text or None)
+
+
+def _round_sources(root: Path, rnd: Round) -> Sources:
+    """Where the round's owner decisions stand today: the round folder's `*.md`, then the
+    review and the contract of every entry on the round."""
+    out: Sources = [("round", _rel(root, p), _read(p)) for p in sorted(rnd.path.glob("*.md")) if p.is_file()]
+    seen: set[tuple[str, str]] = set()
+    for kind in ("review", "contract"):
+        for _entry_rel, data in rnd.entries:
+            val = _norm(data.get(kind))
+            if val and (kind, val) not in seen:
+                seen.add((kind, val))
+                path = _inside(root, val)
+                out.append((kind, val, _read(path) if path is not None and path.is_file() else None))
+    return out
+
+
+def _entries_at(root: Path, base: str) -> list[tuple[str, dict]]:
+    """The registry entries at the fork point that are JSON objects."""
+    from check_review import _git_bytes  # noqa: PLC0415
+    names = _git_bytes(root, "ls-tree", "-z", "--name-only", base, "--", f"{REGISTRY_DIR}/")
+    out = []
+    for rel in sorted((names or b"").decode("utf-8", "replace").split("\0")):
+        if rel.endswith(".json") and not rel.endswith(".example.json") \
+                and posixpath.dirname(rel) == REGISTRY_DIR:
+            data = _entry_at(root, base, rel)
+            if isinstance(data, dict):
+                out.append((rel, data))
+    return out
+
+
+def _base_sources(root: Path, base: str, rnd: Round) -> Sources:
+    """Where the round's owner decisions stood at the fork point: the round folder's `*.md`
+    there, and the review and contract of every entry that referenced the round there —
+    so a changed `contract` path or a `reference` moved away shows. A file there that
+    cannot be read is None."""
+    from check_review import _git_bytes, _show  # noqa: PLC0415
+    names = _git_bytes(root, "ls-tree", "-z", "--name-only", base, "--", f"{rnd.key}/")
+    out: Sources = [("round", rel, _show(root, base, rel))
+                    for rel in sorted((names or b"").decode("utf-8", "replace").split("\0"))
+                    if rel.endswith(".md") and posixpath.dirname(rel) == rnd.key]
+    seen: set[tuple[str, str]] = set()
+    for _entry_rel, data in _entries_at(root, base):
+        if _status(data) == "legacy" or _norm(data.get("reference")) != rnd.key:
+            continue
+        for kind in ("review", "contract"):
+            val = _norm(data.get(kind))
+            if val and (kind, val) not in seen:
+                seen.add((kind, val))
+                out.append((kind, val, _show(root, base, val)))
+    return out
+
+
+def round_decisions(sources: Sources, name: str) -> tuple[list[Decision], list[str]]:
+    """(the decisions that count for the round `name`, notes). In the round folder and the
+    review an unbound decision counts for the round; a bound one counts only for the round
+    it names, anywhere. In a contract only the bound form counts — an unbound one in the
+    coverage form gets a note to bind it; other owner questions there are left alone."""
+    out: list[Decision] = []
+    notes: list[str] = []
+    for kind, rel, text in sources:
+        for d in decisions_in(text or "", rel):
+            if d.round == name or (d.round is None and kind != "contract"):
+                out.append(d)
+            elif d.round is None and d.verb:
+                notes.append(f"{rel}: owner decision {d.raw} changes acceptance items but names no "
+                             f"round — in a contract it counts only bound, `owner {name}/{d.raw}` "
+                             "(the round it was taken for)")
+    return out, notes
+
+
+@dataclass
+class RoundCoverage:
+    """Which items a round covers: the visible ones per story, how each covered one is."""
+    visible: dict[str, list[str]]
+    covered: dict[tuple[str, str], str] = field(default_factory=dict)   # → anchor or decision
+    axes: dict[tuple[str, str], dict] = field(default_factory=dict)     # → the anchored state
+    hard: list[str] = field(default_factory=list)       # hard however the round stands
+    by_touch: list[str] = field(default_factory=list)   # hard where the push touches it
+    notes: list[str] = field(default_factory=list)
+
+    def keys(self) -> list[tuple[str, str]]:
+        return [(sid, iid) for sid, items in self.visible.items() for iid in items]
+
+    def uncovered(self) -> list[str]:
+        return [f"{sid}#{iid}" for sid, iid in self.keys() if (sid, iid) not in self.covered]
+
+
+def _round_surfaces(states: dict) -> list[str] | None:
+    value = states.get("surfaces")
+    return _names_in(value) if isinstance(value, list) else None
+
+
+def round_coverage(root: Path, rnd: Round, ctx: Coverage) -> RoundCoverage | None:
+    """The coverage of a round whose states.json loaded — None where none is judged: no
+    usable registry, or `stories` is no list (`n/a: <reason>`, or missing)."""
+    names = round_stories(rnd.states) if rnd.states is not None else None
+    if ctx.reg is None or names is None or rnd.states is None:
+        return None
+    cov = RoundCoverage(visible_items(ctx.reg, ctx.reg.stories, names, _round_surfaces(rnd.states)))
+    for key, (text, state) in anchored(ctx.reg.stories, rnd.name, round_views(rnd.states)).items():
+        cov.covered[key] = text
+        cov.axes[key] = state
+    decisions, cov.notes = round_decisions(_round_sources(root, rnd), rnd.name)
+    _judge_decisions(rnd, ctx, decisions, cov)
+    return cov
+
+
+def _judge_decisions(rnd: Round, ctx: Coverage, decisions: list[Decision], cov: RoundCoverage) -> None:
+    """What the decisions cover, and what is wrong with them: an ID twice with different
+    text (a quote repeats it word for word); an item that never was one — hard where the
+    push touches the round; a retired id, a deleted story, an item gone without `retired`:
+    notes, so a sealed round stays green after "drop, then retire"."""
+    import registry_config  # noqa: PLC0415
+    assert ctx.reg is not None
+    texts: dict[str, dict[str, list[str]]] = {}
+    for d in decisions:
+        texts.setdefault(d.key, {}).setdefault(d.text, []).append(d.source)
+    for key, variants in texts.items():
+        if len(variants) > 1:
+            raw = next(d.raw for d in decisions if d.key == key)
+            sources = sorted({s for found in variants.values() for s in found})
+            cov.hard.append(f"{rnd.key}: owner decision {raw} stands "
+                            f"{sum(map(len, variants.values()))} times with different text "
+                            f"({', '.join(sources)}) — one ID, one decision; a quote repeats it "
+                            "word for word")
+    seen: set[tuple[str, str, str]] = set()
+    for d in decisions:
+        if d.verb is None:
+            continue
+        if not d.reasoned:
+            cov.notes.append(f"{d.source}: owner decision {d.raw} names no reason (` — <reason>`), "
+                             "so it covers nothing")
+            continue
+        for sid, iid in d.refs:
+            if (d.key, sid, iid) in seen:
+                continue
+            seen.add((d.key, sid, iid))
+            ref = f"{sid}#{iid}"
+            data = ctx.reg.stories.get(sid)
+            if data is None:
+                cov.notes.append(f"{d.source}: owner decision {d.raw} names {ref}, a story the registry "
+                                 "does not hold (deleted?) — it covers nothing")
+                continue
+            ids, retired = registry_config.item_ids(data)
+            if iid in ids:
+                cov.covered.setdefault((sid, iid), f"decision {d.raw} ({d.verb})")
+            elif iid in retired:
+                cov.notes.append(f"{d.source}: owner decision {d.raw} names {ref}, a retired id — it "
+                                 "covers nothing and stands as history")
+            elif iid in registry_config.item_ids((ctx.at_base()[0] or {}).get(sid))[0]:
+                cov.notes.append(f"{d.source}: owner decision {d.raw} names {ref}, which the fork point "
+                                 f"holds but this tree does not — removed without 'retired'? List "
+                                 f"{iid} in {sid}'s 'retired'")
+            else:
+                cov.by_touch.append(f"{d.source}: owner decision {d.raw} names {ref}, never an item of "
+                                    f"{sid} (neither in 'acceptance' nor in 'retired') — name an item; "
+                                    f"if it was removed, list it in 'retired'")
+
+
+def _says_go(root: Path, data: dict) -> bool:
+    """An `accepted` entry whose review's last decision line is GO."""
+    review = _norm(data.get("review"))
+    path = _inside(root, review) if review else None
+    if _status(data) != "accepted" or path is None or not path.is_file():
+        return False
+    verdict = _verdict(_unfenced(_read(path)))
+    return verdict is not None and verdict.upper() == "GO"
+
+
+def lost_coverage(root: Path, rnd: Round, ctx: Coverage, cov: RoundCoverage) -> tuple[list[str], list[str]]:
+    """(hard, notes): an item that stands and is visible to the round at the fork point and
+    now, was covered for the round there and is not now (a delta rule, hard whether or not
+    the push touches the round). The fork point's coverage: its anchors (from its registry,
+    read leniently) and the decisions of the entries that referenced the round there. A
+    contract there that cannot be read counts as changed: what it may have covered is lost
+    (fail-closed). Without a registry at the fork point the anchors are not compared — the
+    decisions are, against the items as they stand now."""
+    from check_review import _show  # noqa: PLC0415
+    if ctx.reg is None or ctx.base is None:
+        return [], []
+    text = _show(root, ctx.base, f"{rnd.key}/{STATES}")
+    try:
+        old = json.loads(text) if text is not None else None
+    except ValueError:
+        old = None
+    names = _names_in(old.get("stories")) if isinstance(old, dict) else []
+    if not names or not isinstance(old, dict):
+        return [], []
+    stories, why = ctx.at_base()
+    notes = [f"{rnd.key}: {n} — lost design anchors are not compared" for n in why]
+    before = visible_items(ctx.reg, stories if stories is not None else ctx.reg.stories, names,
+                           _round_surfaces(old))
+    sources = _base_sources(root, ctx.base, rnd)
+    unreadable = [rel for kind, rel, body in sources if kind == "contract" and body is None]
+    decisions, _notes = round_decisions(sources, rnd.name)
+    was = {ref: f"decision {d.raw}" for d in decisions if d.verb and d.reasoned for ref in d.refs}
+    for key, (anchor, _state) in anchored(stories or {}, rnd.name, None).items():
+        was.setdefault(key, f"anchor {anchor}")
+    now = set(cov.keys())
+    hard = []
+    for sid, items in before.items():
+        for iid in items:
+            key = (sid, iid)
+            if key not in now or key in cov.covered:
+                continue
+            if key in was:
+                hard.append(f"{rnd.key}: {sid}#{iid} lost its coverage — covered for the round at the "
+                            f"fork point ({was[key]}), not now: anchor it in the round again or record "
+                            "an owner decision with an ID")
+            elif unreadable:
+                hard.append(f"{rnd.key}: {sid}#{iid} may have lost its coverage — the contract "
+                            f"{', '.join(unreadable)} cannot be read at the fork point, so it counts as "
+                            "changed: anchor the item in the round or record an owner decision with an ID")
+    return hard, notes
+
+
+def coverage_findings(root: Path, rnd: Round, ctx: Coverage) -> tuple[list[str], list[str]]:
+    """(hard, notes) of a round's coverage: the decisions; a GO with a visible item
+    uncovered — every such item named, hard where the push touches the round; lost coverage."""
+    cov = round_coverage(root, rnd, ctx)
+    if cov is None:
+        return [], []
+    gate = list(cov.by_touch)
+    missing = cov.uncovered()
+    go = [Path(rel).name for rel, data in rnd.entries if _says_go(root, data)]
+    if go and missing:
+        gate.append(f"{rnd.key}: {', '.join(go)} record(s) GO, but the round leaves visible acceptance "
+                    f"items uncovered: {', '.join(missing)} — anchor each (`design`: "
+                    f"`{rnd.name}/<view>#<state>`) or record an owner decision with an ID "
+                    "(`check_design_contracts.py --coverage <surface>` prints the table)")
+    hard, soft = _by_touch(rnd, gate)
+    lost, notes = lost_coverage(root, rnd, ctx, cov)
+    return cov.hard + hard + lost, cov.notes + soft + notes
+
+
+def coverage_table(cov: RoundCoverage) -> list[str]:
+    """The computed coverage as a table: each visible item, how it is covered (the anchor,
+    or the decision), and the viewports, themes and variants of the state it is anchored in."""
+    rows = ["| AC | covered by | viewports | themes | variants |", "| --- | --- | --- | --- | --- |"]
+    for key in cov.keys():
+        state = cov.axes.get(key, {})
+        cells = [", ".join(_names_in(state.get(axis))) or "—" for axis in ("viewports", "themes", "variants")]
+        rows.append(f"| {key[0]}#{key[1]} | {cov.covered.get(key, '**uncovered**')} | {' | '.join(cells)} |")
+    return rows
+
+
+def story_findings(root: Path, rnd: Round, ctx: Coverage) -> tuple[list[str], list[str]]:
     """(hard, notes) for the `stories` of a round whose states.json loaded. Without the
     feature registry a list is a finding (no coverage is judgeable; `n/a: <reason>`
-    says so); with it a touched round names its stories or `n/a: <reason>`.
-
-    The hook for coverage (#404 B4): the registry lookup of the IDs and the duty of at
-    least one visible AC go here, gated by `rnd.touched` like everything else."""
-    import registry_config  # noqa: PLC0415  (core: the registry module's presence)
+    says so); with it a touched round names its stories or `n/a: <reason>`, each a story
+    of the registry, at least one item visible to the round among them, its `surfaces`
+    within the registry's. A story with no visible item is a note."""
     assert rnd.states is not None
     where = f"{rnd.key}/{STATES}"
     stories = rnd.states.get("stories")
     findings: list[str] = []
-    if not registry_config.module_active(root):
+    notes: list[str] = []
+    if not ctx.module:
         if isinstance(stories, list):
             findings.append(f"{where}: 'stories' lists story IDs, but this project has no feature "
                             "registry, so no coverage can be judged — write `\"stories\": \"n/a: <reason>\"`")
     elif stories is None:
         findings.append(f"{where}: 'stories' is required with the feature registry — the story IDs "
                         "the round covers, or `\"n/a: <reason>\"`")
-    return _by_touch(rnd, findings)
+    elif ctx.reg is None:
+        notes.append(f"{where}: {ctx.problem} — the round's coverage is not judged")
+    elif isinstance(stories, list):
+        names = round_stories(rnd.states) or []
+        findings += [f"{where}: 'stories' names {sid}, which the feature registry does not hold"
+                     for sid in names if sid not in ctx.reg.stories]
+        surfaces = _round_surfaces(rnd.states)
+        declared = ctx.reg.cfg["surfaces"]
+        if surfaces is not None and declared:
+            findings += [f"{where}: 'surfaces' names {s!r}, which the feature registry does not declare "
+                         f"({', '.join(declared)})" for s in surfaces if s not in declared]
+        visible = visible_items(ctx.reg, ctx.reg.stories, names, surfaces)
+        notes += [f"{where}: story {sid} has no acceptance item visible to the round (owned_by a "
+                  "shared layer, or on other surfaces)" for sid, items in visible.items() if not items]
+        if not any(visible.values()):
+            findings.append(f"{where}: no story in 'stories' has an acceptance item visible to the "
+                            "round — a round under the duty covers at least one, or says "
+                            "`\"stories\": \"n/a: <reason>\"`")
+    hard, soft = _by_touch(rnd, findings)
+    return hard, soft + notes
 
 
-def round_findings(root: Path, rnd: Round, base: str | None) -> tuple[list[str], list[str]]:
+def round_findings(root: Path, rnd: Round, base: str | None, ctx: Coverage | None = None
+                   ) -> tuple[list[str], list[str]]:
     """(hard, notes) of one reference round: its states.json — required where the push
-    touches the round — and what it says against the catalogue and the registry."""
+    touches the round — and what it says against the catalogue and the registry, then
+    its coverage. `ctx` is read here when the caller has none."""
+    ctx = ctx if ctx is not None else Coverage.read(root, base)
     if not (rnd.path / STATES).is_file():
         names = ", ".join(Path(rel).name for rel, _ in rnd.entries)
         if rnd.touched:
@@ -961,8 +1415,10 @@ def round_findings(root: Path, rnd: Round, base: str | None) -> tuple[list[str],
     h, s = _by_touch(rnd, [f"{rnd.key}/{STATES}: {gap}" for gap in catalogue_gaps(states, catalogue or [])])
     hard += h
     soft += s
-    h, s = story_findings(root, rnd)
-    return hard + h, soft + s
+    for h, s in (story_findings(root, rnd, ctx), coverage_findings(root, rnd, ctx)):
+        hard += h
+        soft += s
+    return hard, soft
 
 
 def shared_review_findings(rounds: list[Round]) -> tuple[list[str], list[str]]:
@@ -1167,8 +1623,9 @@ def _rounds_check(root: Path, entries: list[tuple[str, dict]]) -> tuple[list[str
         soft.append(f"{problem} — whether this push touches the round(s) "
                     f"{', '.join(r.key for r in rounds)} is unknown, so their {STATES} duty and "
                     "touched-round checks are notes here")
+    ctx = Coverage.read(root, base) if rounds else None
     for rnd in rounds:
-        h, s = round_findings(root, rnd, base)
+        h, s = round_findings(root, rnd, base, ctx)
         hard += h
         soft += s
     h, s = shared_review_findings(rounds)
@@ -1215,12 +1672,62 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     return hard, soft
 
 
+def _entry_rounds(root: Path) -> tuple[dict[str, Round], Coverage]:
+    """{registry rel: the round its entry references, its states.json read where it reads
+    clean} and the registry as the coverage reads it — for the table, no fork point."""
+    entries = []
+    for path in _registry_files(root):
+        data, _errs = load(root, path)
+        if data is not None:
+            entries.append((path.relative_to(root).as_posix(), data))
+    by_entry: dict[str, Round] = {}
+    for rnd in touched_rounds(root, entries, None):
+        if (rnd.path / STATES).is_file():
+            states, problems = load_states(root, rnd.path)
+            rnd.states = states if not problems else None
+        by_entry.update({rel: rnd for rel, _data in rnd.entries})
+    return by_entry, Coverage.read(root, None)
+
+
+def _covered_count(cov: RoundCoverage) -> str:
+    return f"{len(cov.keys()) - len(cov.uncovered())} of {len(cov.keys())} visible acceptance items covered"
+
+
+def coverage_report(root: Path, surface: str) -> tuple[list[str], int]:
+    """(lines, exit code) of `--coverage <surface>`: the computed coverage table of the
+    round the surface's entry references; 1 when there is none to compute."""
+    rel = f"{REGISTRY_DIR}/{surface}.json"
+    if not (root / rel).is_file():
+        return [f"design-contracts: no design-contract entry for surface {surface!r} ({rel})"], 1
+    by_entry, ctx = _entry_rounds(root)
+    rnd = by_entry.get(rel)
+    why = None
+    if rnd is None:
+        why = f"{rel} names no reference round (or is legacy or unreadable)"
+    elif rnd.states is None:
+        why = f"{rnd.key} has no {STATES} that reads clean — the gate says why"
+    elif not ctx.module:
+        why = "this project has no feature registry, so no coverage is computed"
+    elif ctx.reg is None:
+        why = f"{ctx.problem}"
+    if why or rnd is None:
+        return [f"design-contracts: {why}"], 1
+    cov = round_coverage(root, rnd, ctx)
+    if cov is None:
+        return [f"design-contracts: {rnd.key}: 'stories' is no list of story IDs — the round covers "
+                "no story"], 0
+    return [f"coverage of {rnd.key} ({surface}): {_covered_count(cov)}", "", *coverage_table(cov)], 0
+
+
 def bundle_lines(root: Path, plans: dict[str, str] | None = None) -> list[str]:
     """For the review bundle: which surface contracts govern this change and
     which IDs the plans cite — so the reviewer opens the right norm and the
-    right boards instead of judging from taste."""
+    right boards instead of judging from taste — and each reference round's
+    computed coverage table."""
     out: list[str] = []
     plans = active_plan_texts(root) if plans is None else plans
+    by_entry, ctx = _entry_rounds(root)
+    shown: set[str] = set()
     for path in _registry_files(root):
         data, _errs = load(root, path)
         if data is None:
@@ -1236,11 +1743,27 @@ def bundle_lines(root: Path, plans: dict[str, str] | None = None) -> list[str]:
                 + (f", reference `{ref}`" if ref else ", no sealed reference") + ")")
         line += f" — plan cites {', '.join(cited)}" if cited else " — no ID cited by an active plan"
         out.append(line)
+        rnd = by_entry.get(path.relative_to(root).as_posix())
+        cov = round_coverage(root, rnd, ctx) if rnd is not None and rnd.key not in shown else None
+        if rnd is not None and cov is not None:
+            shown.add(rnd.key)
+            out += ["", f"  Coverage of `{rnd.key}`, computed — the gate judges a GO by it "
+                        f"({_covered_count(cov)}):", "", *(f"  {row}" for row in coverage_table(cov)), ""]
     return out
 
 
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    ap = argparse.ArgumentParser(description="The design-contracts gate, or (--coverage) the "
+                                             "computed coverage table of a surface's round.")
+    ap.add_argument("root", nargs="?", default=".")
+    ap.add_argument("--coverage", metavar="SURFACE",
+                    help="print which visible acceptance items the surface's reference round covers")
+    args = ap.parse_args()
+    root = Path(args.root).resolve()
+    if args.coverage is not None:
+        lines, code = coverage_report(root, args.coverage)
+        print("\n".join(lines))
+        return code
     hard, soft = check(root)
     for note in soft:
         print(f"design-contracts: note: {note}")
