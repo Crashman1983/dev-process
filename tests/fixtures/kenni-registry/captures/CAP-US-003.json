@@ -1,0 +1,52 @@
+{
+  "id": "CAP-US-003",
+  "title": "Fehlklassifizierte Triage wird per Korrektur-Endpoint umgeroutet",
+  "as_a": "Seb",
+  "i_want": "eine falsch klassifizierte Quick-Capture-Triage korrigieren",
+  "so_that": "der falsche Sink entfernt wird und der richtige Reminder oder nur die Notiz uebrig bleibt",
+  "surfaces": [
+    "web",
+    "ios"
+  ],
+  "acceptance": [
+    "POST /captures/{id}/triage/correct {target} loescht den bestehenden Sink (Reminder via ReminderService.delete; ein memory-Ref wird by design nicht zurueckgerollt) und legt den Ziel-Sink an. Seit #518 ist auch target=termin ein Reminder-Sink.",
+    "target=notiz entfernt den Sink ersatzlos: Row status=note, category=notiz, triage_ref_* geleert, Frontmatter triage=note.",
+    "target=termin ohne start_datetime liefert HTTP 422 und fuehrt keinen Sink-Wechsel aus.",
+    "Unbekannte oder fremde capture_id liefert HTTP 404 (user-scoped).",
+    "Die capture_triage-Row ist autoritativ und traegt nach Korrektur den neuen status/category/triage_ref; die Notiz-Frontmatter wird best-effort nachgezogen.",
+    "Re-Dispatch-Fehler laesst alten Sink und Row unangetastet; Undo laeuft erst nach dem autoritativen Row-Commit.",
+    "target=termin mit tz-aware start_datetime erreicht den Service als ISO-String; tz-naive Datetimes liefern 422.",
+    "listing (#319): GET /captures?limit=… listet user-scoped die juengsten Captures (created_at DESC, limit default 20 cap 50) mit {capture_id, text, status, category, triage_ref, note_path, created_at}; triage_ref ist \"{kind}:{id}\" bei Sink-Ref, sonst null.",
+    "web (#319): die 'Letzte Captures'-Liste im Ueberblick (OvRecentCaptures) zeigt je Capture ein Triage-Badge (Kategorie) und bietet eine Ziel-Korrektur (Notiz/Aufgabe sofort; Termin verlangt ein Datum) ueber POST /captures/{id}/triage/correct; nach Erfolg invalidiert sie Captures-Liste, Reminders und Ueberblick-Widgets. Leere Liste zeigt seit #374 einen Leerzustand-Hinweis (siehe CAP-US-004).",
+    "web-react #417: Auf Phone-Viewports besitzen Aendern, die drei Korrekturziele, Datumseingabe und Anlegen-Button jeweils eine tatsaechliche Touchbox von mindestens 44 x 44 CSS-Pixeln, ohne horizontales Overflow.",
+    "web #1084: eine Capture, deren Triage erst nach dem Laden der Liste fertig wird, loest sich in der 'Letzte Captures'-Liste ohne Zutun des Benutzers auf — die Zeile verlaesst 'wird sortiert …' und traegt das Ergebnis-Badge, ohne Reload und ohne Web-Push. Nachgefasst wird nur, solange mindestens eine Capture status=pending traegt; danach ruht der Takt.",
+    "web (#1487): die Korrektur-Oberflaeche lebt im Shell-Baum am Ende des Erinnerungen-Screens (CaptureTriage, Abschnitt 'Zuletzt erfasst') statt im Ueberblick; Owner unveraendert (useCapturesList(5), useCorrectCapture). Zielsatz bleibt der des Contracts - notiz/aufgabe sofort, termin erst mit Datum (start_datetime, sonst 422); 'Memory' ist kein Korrekturziel. Der Abschnitt fehlt ganz, wenn nichts erfasst wurde, und steht auch bei leerem Erinnerungs-Bestand. Bewiesen bei 393 und 1440px.",
+    "ios (#1095): die Liste 'Letzte Captures' leitet den Badge-Text aus category ab (Notiz/Aufgabe/Termin/Merk-Fakt), zeigt status nur fuer pending ('Laeuft…') und failed ('Fehler') und nie roh; der Korrektur-Knopf ist deaktiviert, wenn category dem Ziel entspricht; solange eine Capture pending ist, fasst die Liste alle 1,5 s nach und ruht danach (Parallele zu web #1084)."
+  ],
+  "test_mapping": {
+    "backend": [
+      "backend/tests/services/capture/test_capture_correction_service.py",
+      "backend/tests/api/test_captures_endpoint.py",
+      "backend/tests/repositories/test_capture_triage_repo.py"
+    ],
+    "web": [
+      "frontend-react/src/api/captures.test.ts",
+      "frontend-react/src/queries/useCaptures.test.tsx",
+      "frontend-react/src/app/shell/reminders/CaptureTriage.test.tsx",
+      "frontend-react/src/app/shell/screens/RemindersScreen.triage.test.tsx",
+      "frontend-react/e2e/reminders.spec.ts"
+    ],
+    "ios": [
+      "ios/Projects/KenniCore/Tests/PureTests/CaptureTriagePresentationTests.swift"
+    ]
+  },
+  "status": "partial",
+  "notes": "GET /captures-Listing (#319) geschlossen → Web-Korrektur ist NICHT mehr backend-blockiert. Web nutzt die listenbasierte Korrektur (OvRecentCaptures im Ueberblick). Apple bleibt vorerst push-only (CAP-US-003-UI dort offen) und wuerde GET /captures fuer eine eigene Korrektur-UI spaeter adoptieren. At-moment-Korrektur direkt aus dem Web-Push (capture_id ist im Payload) ist eine notierte Folge-Option.",
+  "issues": [
+    "#131",
+    "#319",
+    "#417",
+    "#1487",
+    "#1095"
+  ]
+}

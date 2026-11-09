@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "capability": "clients",
+  "prefix": "CLI",
+  "inventory_sections": [
+    "Suche / Switcher"
+  ]
+}

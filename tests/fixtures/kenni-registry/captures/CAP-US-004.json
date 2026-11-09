@@ -1,0 +1,32 @@
+{
+  "id": "CAP-US-004",
+  "title": "Erfassen + Letzte Captures sind anordenbare Dashboard-Widgets",
+  "as_a": "Seb",
+  "i_want": "die Karten 'Erfassen' und 'Letzte Captures' im Ueberblick verschieben, in der Breite umschalten und aus-/einblenden wie jedes andere Widget",
+  "so_that": "ich mein Ueberblick-Dashboard frei anordnen kann, ohne dass diese zwei Karten fix oben festhaengen",
+  "surfaces": [
+    "web"
+  ],
+  "acceptance": [
+    "While der Anordnen-Modus aktiv ist, the system shall die Karten 'Erfassen' und 'Letzte Captures' mit denselben Widget-Controls (Ziehen, Breite umschalten, Entfernen) wie die uebrigen Widgets darstellen (ov-widget-capture / ov-widget-recentCaptures in der OvCard-Huelle).",
+    "When ein Widget vor 'Erfassen' oder 'Letzte Captures' gezogen wird, the system shall die neue Reihenfolge uebernehmen und versioniert ({v:2,layout}) in localStorage (kenni_overview_layout) persistieren; sie bleibt nach Reload erhalten.",
+    "When 'Erfassen' oder 'Letzte Captures' ueber die Galerie entfernt und wieder hinzugefuegt wird, the system shall die Karte aus-/einblenden wie jedes andere Widget; das Entfernen bleibt ueber Reloads sticky (kein Wieder-Voranstellen).",
+    "The system shall die Scope-Zeile (Alle Projekte/Projektkontexte) fix am obersten Platz unter dem Titel halten (nicht Teil des anordenbaren Bereichs, auch bei loading/error sichtbar).",
+    "If ein bestehendes localStorage-Layout die neuen Widget-IDs noch nicht kennt (v1-bare-Array), then the system shall 'Erfassen' + 'Letzte Captures' einmalig vorne ergaenzen (volle Bahn) und als v2 zurueckschreiben, ohne die vorhandene Reihenfolge der uebrigen Widgets zu verwerfen.",
+    "While keine Captures vorliegen, the system shall das 'Letzte Captures'-Widget mit einem Leerzustand-Hinweis ('Noch nichts erfasst.') statt einer leeren Karte oder eines Layout-Sprungs darstellen.",
+    "While die Primaerquelle (Inbox/Overview) laedt oder fehlschlaegt, the system shall 'Erfassen' erreichbar halten (eigene Query, nicht hinter dem loading/error-Gate); Datenfehler zeigen ein nicht-blockierendes Banner mit Retry, das Grid bleibt gerendert.",
+    "The system shall das Capture-/Triage-Verhalten (CAP-US-001/002/003) unveraendert lassen — nur Position/Anordenbarkeit und der Leerzustand aendern sich."
+  ],
+  "test_mapping": {
+    "web": [
+      "planned:#1467:kein Beleg mehr moeglich — das anordenbare Widget-Raster der alten Uebersicht ist mit dem alten Baum gefallen (#681 strich es ersatzlos, #1467 loeschte den Screen)"
+    ]
+  },
+  "status": "deferred",
+  "issues": [
+    "#374",
+    "#1465",
+    "#1487"
+  ],
+  "notes": "STILLGELEGT mit #1487 (Entscheidung #1465, 2026-09-04): Galerie/Anordnen und die Overview-Scope-Chips werden NICHT in den Shell-Baum uebernommen. Die Story beschreibt eine Faehigkeit des alten Ueberblicks; sie bleibt als Historie stehen und gilt bis zum Teardown (#1458, Slice 9) fuer die alte Route weiter, danach hat sie keine Flaeche mehr. Capture und Triage selbst leben weiter - auf der Startseite bzw. im Erinnerungen-Screen (CAP-US-001/CAP-US-003, jeweils AK 'web (#1487)')."
+}

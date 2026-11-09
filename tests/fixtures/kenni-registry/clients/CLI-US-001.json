@@ -1,0 +1,59 @@
+{
+  "id": "CLI-US-001",
+  "title": "Klienten und Engagements anlegen",
+  "as_a": "Seb",
+  "i_want": "Klienten und Engagements per Sheet erstellen",
+  "so_that": "ich neue Projekte ohne Backend-CLI anlegen kann",
+  "surfaces": [
+    "web",
+    "ios",
+    "macos"
+  ],
+  "acceptance": [
+    "POST /clients legt einen Klienten mit canonical_name an.",
+    "POST /clients/{slug}/engagements legt ein Engagement mit name + disciplines an.",
+    "Backend active_context erlaubt Client-Scope ohne kuenstliches Engagement; klientenuebergreifende Informationen koennen direkt dem Client zugeordnet werden.",
+    "iOS/macOS: Ein Klient kann direkt als Arbeitskontext gewaehlt und pending bis zur naechsten Session persistiert werden.",
+    "Nach erfolgreichem Anlegen wird die Liste neu geladen.",
+    "macOS: Klienten/Engagements anlegen über „Verwalten\"→ClientsEngagementsView (Sidebar-Scope-Liste, D2).",
+    "Engagement anlegen (#874): das Sheet erhebt mindestens eine Fachrichtung (Chips, Eingabe per Enter/Komma, Vorschlaege aus den Fachrichtungen bestehender Engagements), sperrt 'Anlegen' ohne Fachrichtung und nennt den Grund, und sendet eine nichtleere, normalisierte disciplines-Liste (Contract minItems: 1); bei Fehler bleiben Name und Fachrichtungen erhalten.",
+    "Kunde anlegen im Web (#689, #1949): die gemeinsame Bibliothek bietet den Einstieg im Projekte-Abschnitt neben „Neues Projekt\"; ohne Kunden traegt der Leerzustand ihn statt des Projekt-Einstiegs. Das Formular erhebt den kanonischen Namen, sendet `POST /api/v1/clients`, und der neue Kunde ist ohne Reload im Scope-Katalog und im Klienten-Select des Projekt-Dialogs waehlbar. 409 `client_create_conflict`, 422 `invalid_canonical_name` und (am Projekt-Pfad) 409 `client_archived` erscheinen als deutscher Satz, die Eingabe bleibt erhalten. Mobile (<640px) traegt denselben Weg als Sheet."
+  ],
+  "test_mapping": {
+    "backend": [
+      "backend/tests/api/v1/test_clients.py",
+      "backend/tests/services/session/test_session_service_active_context.py::test_set_active_context_client_clears_engagement",
+      "backend/tests/api/v1/test_sessions_active_context.py::test_post_active_context_client_returns_active_context"
+    ],
+    "ios": [
+      "ios/Projects/KenniCore/Tests/PureTests/AccessoryEngagementLogicTests.swift::testOptimistic_withClientOnly_buildsClientContext",
+      "ios/Projects/KenniCore/Tests/PureTests/KenniAPITests.swift::testSetActiveContextPostsNullableBodyAndDecodesDetail",
+      "ios/Projects/KenniApp/Tests/IntegrationTests/EngagementStateActiveContextTests.swift::testGescheitertesSpeichernFaelltAufDenLetztenStandZurueck",
+      "ios/Projects/KenniCore/Tests/PureTests/EngagementDisciplinesDraftTests.swift",
+      "ios/Projects/KenniCore/Tests/PureTests/KenniAPITests.swift::testCreateEngagementSendsDisciplines"
+    ],
+    "macos": [
+      "ios/Projects/KenniMacUITests/Sources/KenniMacScopeListTests.swift::test_manageOpensClientsEngagements",
+      "ios/Projects/KenniMacUITests/Sources/KenniMacScopeListTests.swift::test_scopeRowsRenderAndSwitch",
+      "ios/Projects/KenniCore/Tests/PureTests/EngagementDisciplinesDraftTests.swift",
+      "ios/Projects/KenniCore/Tests/PureTests/KenniAPITests.swift::testCreateEngagementSendsDisciplines",
+      "ios/Projects/KenniMacUITests/Sources/KenniMacEngagementTests.swift::test_ENG_createAndEditEngagementRoundtrip"
+    ],
+    "web": [
+      "frontend-react/src/api/engagements.test.ts",
+      "frontend-react/src/domain/engagements.test.ts",
+      "frontend-react/src/queries/useEngagementCatalog.test.tsx",
+      "frontend-react/src/app/shell/library/ClientCreateDialog.test.tsx",
+      "frontend-react/src/app/shell/screens/LibraryScreen.test.tsx",
+      "frontend-react/e2e/library-create.spec.ts",
+      "frontend-react/e2e/a11y.spec.ts"
+    ]
+  },
+  "status": "covered",
+  "issues": [
+    "#334",
+    "#336",
+    "#874",
+    "#689"
+  ]
+}
