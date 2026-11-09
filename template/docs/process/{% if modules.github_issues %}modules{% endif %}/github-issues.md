@@ -1,14 +1,15 @@
 # Module: github-issues
 
 Opt-in. Runs the backlog on GitHub Issues: EARS-framed templates, a seed
-helper, a documented claim workflow, and a gate over the `issue` link on
+helper, a documented claim workflow, and a gate over the issue links on
 feature-registry stories.
 
 ## When required
 
-Enable when GitHub Issues is the operative backlog. Tracked work (a story at
-status `in-progress` or `done`) should carry an `issue` link; the gate emits a
-note when it does not.
+Enable when GitHub Issues is the operative backlog. Which stories must carry an
+issue link is the feature registry's rule (`issues.required` and
+`issues.required_for` in its configuration — see the feature-registry module doc);
+this gate checks the links that are there.
 
 The gate has two independent parts. The **story** part operates on
 feature-registry story files: without the `feature-registry` module (or before
@@ -23,30 +24,35 @@ the feature registry (see below).
 - The `gh` CLI, authenticated (`gh auth login`). Absent → existence checks are
   skipped with a note; format is still enforced.
 
-## The `issue` field
+## The issue field
 
-A story's `issue` field (illustrative story path
-`docs/process/feature-registry/STORY-NNNN.json`) accepts three forms:
+A story's issue field — `issue` in the template (illustrative story path
+`docs/process/feature-registry/STORY-NNNN.json`), or the field the registry
+configuration names (`issues.field`, e.g. a list `"issues": ["#412", "#413"]`)
+— holds one ref or a list of refs. Each accepts three forms:
 
 - bare `#412` — resolves against the configured `github_repo`
 - cross-repo `owner/repo#412`
 - URL `https://github.com/owner/repo/issues/412`
 
-**Hard (CI fails):** a malformed ref; **a `done` story with no `issue` link at
-all** — a finished story must trace to an issue (this applies to *every* done
-story, epic or leaf: an epic's children can cover its tests, but the epic's own
-tracking issue is its own). **Tracker-less escape:** a done story may instead
-carry an `issue_waived: <reason>` string field (soft note, not hard) — for a
-project running this module without a reachable issue tracker, so `done` is not
-permanently unreachable. **Soft (advisory note):** an `in-progress` story
-without an issue — still active, the issue may be forthcoming (issue-before-code
-is enforced on the *plan*, below); and whether the issue exists — a 404 stays a
-note, because the gate cannot tell a deleted issue from one the token cannot see.
+**Hard (CI fails):** a malformed ref, or a field that is neither a ref nor a
+list of refs. **Soft (advisory note):** whether the issue exists — a 404 stays a
+note, because the gate cannot tell a deleted issue from one the token cannot
+see. The stories come from the feature registry's own loader
+(`scripts/process/registry_config.py`), in whatever layout the project chose.
 
-> **Migration:** enabling this module (or upgrading to it) makes done-without-
-> issue hard. An existing registry with legacy `done` stories that lack `issue`
-> links will fail on the first run — add the links, or move those stories off
-> `done`, before turning the gate on in CI.
+**Existence, batched:** the gate asks GitHub once per repository and up to 100
+refs, a GraphQL query with one alias per number (`gh api graphql`, issues only,
+as `gh issue view` took them) — not a call per ref, and not `gh issue list`,
+which returns 30 issues by default. A missing issue is a `null` alias: "could
+not confirm #N" for exactly that ref, even though `gh` then exits 1. A transport
+or parse error, or a repository GitHub does not show, leaves that batch "not
+checked" — a note, like every existence finding.
+
+The rule "a `done` story needs an issue" is gone (v2.92): the template retired
+`status`, so it fired in no configuration. A project that keeps a story status
+says which status needs a ref in the registry configuration
+(`issues.required_for`), and the registry gate enforces it.
 
 ## Issue before code
 

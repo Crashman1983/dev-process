@@ -135,8 +135,16 @@ def test_invalid_json_is_hard(render, tmp_path):
 def test_module_doc_states_inventory_split(render, tmp_path):
     out = _render(render, tmp_path)
     doc = (out / "docs/process/modules/feature-registry.md").read_text()
-    assert "Inventory, not work log" in doc
-    assert "GitHub" in doc
+    # v2.92 D1: the registry holds proven behaviour and addressable targets; the
+    # work log stays in GitHub
+    assert "Proven behaviour and addressable targets — not a work log" in doc
+    assert "GitHub" in doc and '"state": "target"' in doc
+    # #404 AC-10: the writing rule and the split rule
+    assert "## Writing rule and split rule" in doc
+    assert "One behaviour per item, in the present tense" in doc and "Split rule" in doc
+    for section in ("## Configuration", "## Overlay: the project's choices", "## Migration"):
+        assert section in doc, section
+    assert "docs/process/feature-registry.local.json" in doc and "--assign-ids --write" in doc
     # story_order was retired with the work-log axis
     assert not (out / "scripts/process/story_order.py").exists()
 
