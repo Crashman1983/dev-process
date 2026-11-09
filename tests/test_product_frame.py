@@ -271,3 +271,14 @@ def test_bulleted_status_line_is_read(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout
     assert "no 'status:' line" not in r.stdout
+
+
+def test_module_off_reads_no_registry_through_the_core_loader(render, tmp_path):
+    # Wächter (v2.92 K0): with the module off the frame imports registry_config and
+    # behaves as without a registry — no import error, an honest note
+    out = render(tmp_path, {"project_name": "demo"})
+    assert (out / "scripts/process/registry_config.py").is_file()
+    _onboarded(out, "\nScope now includes STORY-0007.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "not checkable" in r.stdout and "Traceback" not in r.stderr

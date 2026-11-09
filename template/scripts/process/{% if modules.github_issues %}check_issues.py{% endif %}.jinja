@@ -16,7 +16,6 @@ integration ref at all, or HEAD on one, is a note. Stdlib + PyYAML (a gate
 dep, used to read the copier answers)."""
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import subprocess
@@ -25,7 +24,6 @@ from pathlib import Path
 
 import yaml
 
-REGISTRY_DIR = "docs/process/feature-registry"
 ANSWERS_FILE = ".copier-answers.yml"
 GH_TIMEOUT_S = 10  # cap a hung `gh` so it cannot wedge CI
 TRACKED = ("in-progress", "done")  # statuses that ought to carry an issue link
@@ -42,16 +40,11 @@ from check_review import ISSUE_DECL as _PLAN_ISSUE  # noqa: E402
 from check_review import plan_tier as _plan_tier  # noqa: E402
 # how a file is read at a ref, missing told from unreadable — one owner (plan-structure)
 from check_plan_structure import _Unreadable, _at_ref  # noqa: E402
+import registry_config  # noqa: E402  (one owner of where the registry lives and how it loads)
 from check_plan_structure import _git as _git_read  # noqa: E402
 
 _PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 
-
-def _story_files(root: Path) -> list[Path]:
-    reg = root / REGISTRY_DIR
-    if not reg.is_dir():
-        return []
-    return sorted(p for p in reg.glob("*.json") if not p.name.endswith(".example.json"))
 
 
 def _default_repo(root: Path) -> str | None:
@@ -593,20 +586,20 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     rh, rs = _check_reports(root, default_repo)
     hard += rh
     soft += rs
-    stories = _story_files(root)
+    try:
+        stories = registry_config.load_stories(root)
+    except registry_config.ConfigError:
+        stories = None  # the feature-registry gate reports an unusable configuration
     if not stories:
         soft.append("no stories to check (feature-registry empty or absent)")
         return hard, soft
     gh = shutil.which("gh")
     gh_absent_noted = False
-    for path in stories:
-        rel = path.relative_to(root)
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-            continue  # the feature-registry gate owns JSON validity
+    for story in stories:
+        rel = story.path.relative_to(root)
+        data = story.data
         if not isinstance(data, dict):
-            continue
+            continue  # the feature-registry gate owns JSON validity
         issue = data.get("issue")
         status = data.get("status")
         if not issue:

@@ -1439,3 +1439,13 @@ def test_the_codex_place_is_the_gates_grammar(render, tmp_path):
         _report(out, "2026-10-21-7-codex-review.md", text)
         r = _run(out)
         assert r.returncode == 0 and NO_AT not in r.stdout, r.stdout
+
+
+def test_registry_module_off_imports_cleanly(render, tmp_path):
+    # Wächter (v2.92 K0): check_issues reads the registry through registry_config;
+    # with the feature-registry module off it runs and notes no stories
+    out = _render(render, tmp_path, feature_registry=False)
+    _story(out, issue="#1")  # a stray file in the default root: no module, no registry
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no stories" in r.stdout and "Traceback" not in r.stderr
