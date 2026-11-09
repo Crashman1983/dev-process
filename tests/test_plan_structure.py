@@ -265,6 +265,17 @@ def test_a_branch_loosening_the_registry_pattern_still_meets_mains(render, tmp_p
     assert r.returncode == 1 and "story DOC-US-12 does not match the registry's id pattern" in r.stdout, r.stdout
 
 
+def test_a_half_set_own_key_keeps_the_projects_rule(render, tmp_path):
+    # v2.92 code review: `story_id` set without `registry` was no story check before, and the
+    # registry fallback must not take over — the project's own keys win, even half set
+    out = _project_registry(_with_registry_module(render, tmp_path))
+    (out / "docs/process/plan-structure.local.json").write_text(json.dumps({"story_id": "[A-Z]+-US-\\d+"}))
+    out = _repo(out)
+    _plan(out, GOOD + "\nStories: DOC-US-002\n")
+    r = _run(out)
+    assert r.returncode == 0 and "DOC-US-002" not in r.stdout, r.stdout
+
+
 def test_a_registry_config_git_cannot_read_is_a_note(render, tmp_path):
     out = _repo(_project_registry(_with_registry_module(render, tmp_path)))
     blob = subprocess.run(["git", "-C", str(out), "rev-parse", f"main:{REGISTRY_LOCAL}"],
