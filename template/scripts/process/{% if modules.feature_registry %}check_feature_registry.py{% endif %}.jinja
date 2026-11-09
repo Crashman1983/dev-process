@@ -17,6 +17,12 @@ through `registry_config` — the template's defaults are a flat folder of
 id pattern, surfaces, a story status and a test mapping instead
 (`docs/process/modules/feature-registry.md`, Configuration).
 
+Item ids are stable (v2.93, #404 I4): with `stable_ids` on, each story is compared
+with itself at the branch's fork point (`registry_config.load_registry_at`) — a
+removed id stands in `retired`, a new id is higher than the base's, a renumbering is
+refused — and every `<story id>#AC<n>` ref inside the registry must name an item.
+Without a readable base the comparison is a note, never an error or a silent pass.
+
 Structure and reference existence are hard-guaranteed (CI exit 1). Whether a
 test *semantically* proves its criterion is not mechanically decidable and is
 review judgment. Language-agnostic; stdlib only (plus the shared adr glob)."""
@@ -36,12 +42,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 import registry_config  # noqa: E402
 from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
-from check_review import parse_issue_ref  # noqa: E402
+from check_review import GitReadError, forkless_refs, is_shallow, merge_base, parse_issue_ref  # noqa: E402
 
 PREFIX = re.compile(r"^[A-Z]+$")
 PLANNED_REF = re.compile(r"^planned:#\d+:\S.*$")
 # an acceptance item (#404): addressable as `<story id>#<item id>`, proven or a target
-ITEM_ID = re.compile(r"^AC[1-9]\d*$")
+ITEM_ID = registry_config.ITEM_ID
+RETIRED_ENTRY_FIELDS = {"id", "split_into"}  # an entry of a story's `retired` list (v2.93 I4.1)
 ITEM_FIELDS = {"id", "text", "surfaces", "state", "tests", "owned_by", "design", "issue"}
 STATES = ("proven", "target")
 
@@ -174,21 +181,10 @@ def _check_id(run: Run, story: registry_config.Story, data: dict, rel: str, stat
         run.hard.append(f"{rel}: filename must match story id {sid!r}")
 
 
-def _check_surfaces(run: Run, data: dict, rel: str) -> None:
-    mode = run.cfg["story_surfaces"]
-    if mode == "none":
-        return
-    if "surfaces" not in data:
-        if mode == "required":
-            run.hard.append(f"{rel}: missing 'surfaces'")
-        return
-    surfaces = data["surfaces"]
-    if not (isinstance(surfaces, list) and surfaces and all(isinstance(s, str) and s for s in surfaces)):
-        run.hard.append(f"{rel}: 'surfaces' must be a non-empty list of strings")
-        return
-    unknown = sorted(set(surfaces) - set(run.cfg["surfaces"]))
-    if unknown:
-        run.hard.append(f"{rel}: unknown surface(s) {unknown} — declared: {run.cfg['surfaces']}")
+def _report(run: Run, label: str, found: list[registry_config.Problem]) -> None:
+    """The surface resolution's findings (`registry_config`, which reports none itself)."""
+    for problem in found:
+        (run.hard if problem.hard else run.soft).append(f"{label}: {problem.text}")
 
 
 def _check_status(run: Run, data: dict, rel: str) -> None:
@@ -264,33 +260,6 @@ def _check_story_tests(run: Run, data: dict, rel: str, stats: dict) -> None:
         stats["n_tests"] += sum(_test_ref(run, rel, f"test_mapping.{key}", t) for t in refs)
 
 
-def _story_surfaces(run: Run, data: dict) -> list[str]:
-    """The story's surfaces: its own, or — when it has none — the project's."""
-    own = data.get("surfaces") if run.cfg["story_surfaces"] != "none" else None
-    if isinstance(own, list) and own and all(isinstance(s, str) for s in own):
-        return own
-    return list(run.cfg["surfaces"])
-
-
-def _item_surfaces(run: Run, item: dict, label: str, story_surfaces: list[str]) -> list[str]:
-    """The item's surfaces, in the rule order of #404 AC-3/AC-3a; [] is the one implicit
-    surface (none on the item, the story or in the configuration)."""
-    if "surfaces" not in item:
-        return story_surfaces
-    if not run.cfg["surfaces"]:
-        run.soft.append(f"{label}: item 'surfaces' without project surfaces — declare `surfaces` "
-                        f"in {registry_config.LOCAL}; not checked")
-        return []
-    surfaces = item["surfaces"]
-    if not (isinstance(surfaces, list) and surfaces and all(isinstance(s, str) and s for s in surfaces)):
-        run.hard.append(f"{label}: 'surfaces' must be a non-empty list of strings")
-        return story_surfaces
-    outside = sorted(set(surfaces) - set(story_surfaces))
-    if outside:
-        run.hard.append(f"{label}: surfaces {outside} outside the story's surfaces {story_surfaces}")
-    return list(dict.fromkeys(surfaces))
-
-
 def _check_state(run: Run, item: dict, label: str, surfaces: list[str]) -> None:
     """`state`: proven/target, or a map over the item's surfaces; a target needs an issue."""
     state = item.get("state", "proven")
@@ -346,7 +315,8 @@ def _check_item(run: Run, item: dict, label: str, story_surfaces: list[str], gro
     unknown = sorted(set(item) - ITEM_FIELDS)
     if unknown:
         run.soft.append(f"{label}: unknown item field(s) {unknown} — not validated")
-    surfaces = _item_surfaces(run, item, label, story_surfaces)
+    surfaces, found = registry_config.item_surfaces(run.cfg, item, story_surfaces)
+    _report(run, label, found)
     owned_by = item.get("owned_by")
     if "owned_by" in item and owned_by not in run.cfg["shared_proof_layers"]:
         run.hard.append(f"{label}: owned_by {owned_by!r} is not one of shared_proof_layers "
@@ -364,14 +334,14 @@ def _check_item(run: Run, item: dict, label: str, story_surfaces: list[str], gro
         run.untested[group] = run.untested.get(group, 0) + 1
 
 
-def _check_acceptance(run: Run, data: dict, rel: str, stats: dict, group: str) -> None:
+def _check_acceptance(run: Run, data: dict, rel: str, stats: dict, group: str,
+                      story_surfaces: list[str]) -> None:
     acceptance = data.get("acceptance")
     if not isinstance(acceptance, list) or not acceptance:
         run.hard.append(f"{rel}: 'acceptance' must be a non-empty list")
         return
     stats["n_acc"] = len(acceptance)
     sid = data.get("id") if isinstance(data.get("id"), str) else "?"
-    story_surfaces = _story_surfaces(run, data)
     seen: set[str] = set()
     for i, ac in enumerate(acceptance):
         where = f"{rel}: acceptance[{i}]"
@@ -393,6 +363,56 @@ def _check_acceptance(run: Run, data: dict, rel: str, stats: dict, group: str) -
         if not isinstance(text, str) or not text.strip():
             run.hard.append(f"{where} 'text' must be a non-empty string")
         _check_item(run, ac, label, story_surfaces, group)
+
+
+def _check_retired(run: Run, data: dict, rel: str) -> None:
+    """A story's `retired` list (v2.93 I4.1): `[{"id": "AC9"}, {"id": "AC12", "split_into":
+    ["AC31", "AC32"]}]` — each id an item id, once, and no longer an acceptance item;
+    `split_into` names items that stand in this story, none of them retired."""
+    if "retired" not in data:
+        return
+    retired = data["retired"]
+    sid = data.get("id") if isinstance(data.get("id"), str) else "?"
+    if not isinstance(retired, list):
+        run.hard.append(f"{rel}: 'retired' must be a list of objects with an 'id' (and maybe "
+                        f"'split_into')")
+        return
+    current, _ = registry_config.item_ids(data)
+    ids: set[str] = set()
+    splits: list[tuple[str, object]] = []
+    for i, entry in enumerate(retired):
+        where = f"{rel}: retired[{i}]"
+        if not isinstance(entry, dict) or "id" not in entry:
+            run.hard.append(f"{where} must be an object with an 'id'")
+            continue
+        unknown = sorted(set(entry) - RETIRED_ENTRY_FIELDS)
+        if unknown:
+            run.soft.append(f"{where}: unknown field(s) {unknown} — not validated")
+        iid = entry["id"]
+        if not isinstance(iid, str) or not ITEM_ID.match(iid):
+            run.hard.append(f"{where} 'id' must match {ITEM_ID.pattern}, got {iid!r}")
+            continue
+        if iid in ids:
+            run.hard.append(f"{rel}: {sid}#{iid} is retired twice — a retired id stands once")
+            continue
+        ids.add(iid)
+        if iid in current:
+            run.hard.append(f"{rel}: {sid}#{iid} is retired and still an acceptance item — "
+                            f"a retired id names no item")
+        if "split_into" in entry:
+            splits.append((iid, entry["split_into"]))
+    for iid, targets in splits:
+        if not (isinstance(targets, list) and targets and all(isinstance(t, str) for t in targets)):
+            run.hard.append(f"{rel}: {sid}#{iid}: 'split_into' must be a non-empty list of item ids "
+                            f"of this story")
+            continue
+        for target in targets:
+            if target in ids:
+                run.hard.append(f"{rel}: {sid}#{iid}: split_into names {target!r}, itself retired — "
+                                f"a split names the items that stand")
+            elif target not in current:
+                run.hard.append(f"{rel}: {sid}#{iid}: split_into names {target!r}, no item of "
+                                f"this story")
 
 
 def _check_entry(run: Run, story: registry_config.Story, group: str) -> None:
@@ -428,9 +448,11 @@ def _check_entry(run: Run, story: registry_config.Story, group: str) -> None:
             run.hard.append(f"{rel}: missing '{name}'")
         elif not isinstance(value, str) or not value.strip():
             run.hard.append(f"{rel}: '{name}' must be a non-empty string")
-    _check_surfaces(run, data, rel)
+    surfaces, found = registry_config.story_surfaces(cfg, data)
+    _report(run, rel, found)
     _check_status(run, data, rel)
-    _check_acceptance(run, data, rel, stats, group)
+    _check_acceptance(run, data, rel, stats, group, surfaces)
+    _check_retired(run, data, rel)
     _check_story_tests(run, data, rel, stats)
     _check_issues(run, data, rel)
 
@@ -486,6 +508,162 @@ def _under_granular_note(stats: list[dict]) -> list[str]:
             f"{shown}{more}"]
 
 
+# --- stable item ids: the branch against its fork point (v2.93 I4.2–I4.4, I4.6) ----
+
+NOT_COMPARED = "item ids are not compared with a base"
+
+
+def _base(root: Path) -> tuple[registry_config.Registry | None, list[str]]:
+    """The registry at the branch's fork point (`check_review.merge_base`), or None with a
+    note saying why there is none — never an error, never a silent pass. The pre-push, the
+    train and `finish` fork from the tip of the integration branch; PR CI forks through
+    its merge commit; on the integration branch itself there is no fork point."""
+    try:
+        fork = merge_base(root)
+    except GitReadError as exc:
+        return None, [f"no fork point to compare with: it is ambiguous ({exc}) — {NOT_COMPARED}"]
+    if fork is not None:
+        return registry_config.load_registry_at(root, fork)
+    forkless = forkless_refs(root)
+    if not forkless:
+        return None, [f"no fork point to compare with (on the integration branch, or no "
+                      f"integration ref) — {NOT_COMPARED}"]
+    remedy = ("this clone is shallow: `git fetch --unshallow`" if is_shallow(root)
+              else f"fetch the history of {forkless[0]} the branch forked from")
+    return None, [f"no fork point with {', '.join(forkless)} in this history — {NOT_COMPARED}; "
+                  f"{remedy}"]
+
+
+def _stable_ids(run: Run, base: registry_config.Registry | None) -> bool:
+    """`stable_ids` (I4.6): off only where the base AND the branch say false — a branch
+    cannot lift the duty for itself. No base value counts as true; one that is no boolean
+    counts as true too, with a note."""
+    value = base.cfg.get("stable_ids", True) if base is not None else True
+    if not isinstance(value, bool):
+        run.soft.append(f"`stable_ids` at the base is {value!r}, no boolean — it counts as true")
+        value = True
+    return value or run.cfg["stable_ids"]
+
+
+def _num(iid: str) -> int:
+    return int(iid[2:])
+
+
+def _texts(data: dict) -> dict[str, str]:
+    """{item id: its text, whitespace normalised} of a story's acceptance items with an id."""
+    items = data.get("acceptance") if isinstance(data.get("acceptance"), list) else []
+    return {it["id"]: " ".join(it["text"].split()) for it in items
+            if isinstance(it, dict) and isinstance(it.get("id"), str) and ITEM_ID.match(it["id"])
+            and isinstance(it.get("text"), str)}
+
+
+def _splits(data: dict) -> dict[str, list[str]]:
+    """{retired id: the ids its `split_into` names} of a story — well-formed entries only."""
+    retired = data.get("retired") if isinstance(data.get("retired"), list) else []
+    return {e["id"]: [t for t in e.get("split_into") or [] if isinstance(t, str)]
+            for e in retired if isinstance(e, dict) and isinstance(e.get("id"), str)
+            and isinstance(e.get("split_into", []), list)}
+
+
+def _compare_story(run: Run, story: registry_config.Story, old: registry_config.Story) -> None:
+    """I4.3: one story at the base and today. Ids compare by number (AC10 > AC9)."""
+    data, before = story.data, old.data
+    if not isinstance(data.get("acceptance"), list):
+        return  # the acceptance check says why
+    rel, sid = run.rel(story.path), data["id"]
+    ids, retired = registry_config.item_ids(data)
+    old_ids, old_retired = registry_config.item_ids(before)
+    for iid in sorted(old_ids - ids - retired, key=_num):
+        run.hard.append(f"{rel}: {sid}#{iid} is gone without an entry in 'retired' — item ids "
+                        f"are stable: list a removed id there, so it is never given again")
+    for iid in sorted(old_retired - retired, key=_num):
+        run.hard.append(f"{rel}: {sid}#{iid} is retired at the base, its 'retired' entry is gone — "
+                        f"a retired entry stays")
+    top = max(map(_num, old_ids | old_retired), default=0)
+    for iid in sorted((ids | retired) - old_ids - old_retired, key=_num):
+        if _num(iid) <= top:
+            run.hard.append(f"{rel}: {sid}#{iid} is new but not higher than AC{top}, the highest id "
+                            f"{sid} held at the base — a new item gets AC{top + 1} or higher "
+                            f"(`--assign-ids` gives it)")
+    # renumbered: an item's text now under another id that did not carry it at the base
+    old_text, text, splits = _texts(before), _texts(data), _splits(data)
+    holders: dict[str, list[str]] = {}
+    for iid, t in text.items():
+        holders.setdefault(t, []).append(iid)
+    for iid, t in sorted(old_text.items(), key=lambda kv: _num(kv[0])):
+        if text.get(iid) == t:
+            continue
+        moved = [other for other in holders.get(t, []) if other != iid
+                 and old_text.get(other) != t and other not in splits.get(iid, [])]
+        if moved:
+            run.hard.append(f"{rel}: {sid}#{iid}'s text now stands under {sid}#{moved[0]} — "
+                            f"renumbered? An item keeps its id; if the wording went to another "
+                            f"item on purpose, retire {iid} with `split_into` naming {moved[0]}")
+
+
+def _ref_pattern(cfg: dict) -> re.Pattern:
+    """A registry ref `<story id>#AC<n>` (I4.4): the loose story id, then the item id; a
+    URL anchor `#AC4` without a story id in front matches nothing."""
+    return re.compile("(?P<story>" + registry_config.story_ref_pattern(cfg).pattern
+                      + r")#(?P<item>AC[1-9]\d*)(?![\w-])")
+
+
+def _strings(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for v in value.values() for s in _strings(v)]
+    if isinstance(value, list):
+        return [s for v in value for s in _strings(v)]
+    return []
+
+
+def _check_refs(run: Run, reg: registry_config.Registry) -> None:
+    """I4.4: every `<story id>#AC<n>` in a text value of a story or head file — test refs
+    included — names an item of today's registry. A retired id with `split_into` is a
+    note naming its successors; without one, an unknown story or an unknown id fails. For
+    a deleted story this is the one guard."""
+    stories: dict[str, tuple[set[str], set[str], dict[str, list[str]]]] = {}
+    for story in reg.stories:
+        if isinstance(story.data, dict) and isinstance(story.data.get("id"), str):
+            ids, retired = registry_config.item_ids(story.data)
+            stories.setdefault(story.data["id"], (ids, retired, _splits(story.data)))
+    pattern = _ref_pattern(run.cfg)
+    files = [(story.path, story.data) for story in reg.stories]
+    files += [(cap.path / registry_config.HEAD, cap.head) for cap in reg.capabilities]
+    for path, data in files:
+        rel = run.rel(path)
+        refs = sorted({(m.group("story"), m.group("item")) for text in _strings(data)
+                       for m in pattern.finditer(text)})
+        for sid, iid in refs:
+            ref = f"{sid}#{iid}"
+            if sid not in stories:
+                run.hard.append(f"{rel}: {ref} names no story of the registry")
+                continue
+            ids, retired, splits = stories[sid]
+            if iid in ids:
+                continue
+            if iid in retired and splits.get(iid):
+                run.soft.append(f"{rel}: {ref} is retired, split into {', '.join(splits[iid])} — "
+                                f"point the ref at the item it means")
+            elif iid in retired:
+                run.hard.append(f"{rel}: {ref} is retired — point the ref at the item that holds "
+                                f"the behaviour now, or drop it")
+            else:
+                run.hard.append(f"{rel}: {ref} names no item of {sid}")
+
+
+def _stable(run: Run, reg: registry_config.Registry) -> None:
+    base, notes = _base(run.root)
+    run.soft += notes
+    if not _stable_ids(run, base):
+        return
+    if base is not None:
+        for story, old in registry_config.paired_stories(reg, base):
+            _compare_story(run, story, old)
+    _check_refs(run, reg)
+
+
 def check(root: Path) -> tuple[list[str], list[str]]:
     try:
         cfg = registry_config.config(root)
@@ -508,6 +686,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         return [], ["no inventory entries yet (feature inventory empty)"]
     for story in reg.stories:
         _check_entry(run, story, run.rel(story.capability.path if story.capability else reg.path))
+    _stable(run, reg)
     run.soft += [f"{group}: {n} acceptance item(s) without an existing test — "
                  f"`strict_item_tests` would fail them" for group, n in sorted(run.untested.items())]
     if cfg["shared_proof_layers"] and run.owned:
@@ -522,27 +701,52 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
 # --- migration: --assign-ids [--write] ------------------------------------------
 
-def _numbered(items: list) -> tuple[list, int, list[str]]:
+def _numbered(items: list, reserved: set[str] | frozenset[str] = frozenset()) -> tuple[list, int, list[str]]:
     """(the items with an id each, how many were assigned, non-conforming ids kept).
-    A string or an object without `id` gets `AC<position>`; a position whose id the
-    story already holds — from before or from this run — gets the maximum plus one."""
+    `reserved` are the ids the story holds besides its items: today's `retired` and, where
+    a base registry was read, the base's items and retired ids (v2.93 I4.5). A story with
+    an item id or a reserved id gives each new item the maximum plus one, so a just
+    removed id is never given again; only a story with neither numbers by position
+    (`AC<position>`), the first migration."""
     taken = {it["id"] for it in items
              if isinstance(it, dict) and isinstance(it.get("id"), str) and ITEM_ID.match(it["id"])}
     odd = [repr(it["id"]) for it in items
            if isinstance(it, dict) and "id" in it and not (isinstance(it["id"], str) and ITEM_ID.match(it["id"]))]
+    held = taken | set(reserved)
+    top = max(map(_num, held), default=0)
     out: list = []
     assigned = 0
     for position, item in enumerate(items, 1):
         if (isinstance(item, dict) and "id" in item) or not isinstance(item, (str, dict)):
             out.append(item)
             continue
-        iid = f"AC{position}"
-        if iid in taken:
-            iid = f"AC{max(int(t[2:]) for t in taken) + 1}"
-        taken.add(iid)
+        if held:
+            top += 1
+            iid = f"AC{top}"
+        else:
+            iid = f"AC{position}"
         assigned += 1
         out.append({"id": iid, "text": item} if isinstance(item, str) else {"id": iid, **item})
     return out, assigned, odd
+
+
+def _assign_base(root: Path, reg: registry_config.Registry) -> dict[int, registry_config.Story]:
+    """{id(story): the story at the base} for `--assign-ids` — matched as the gate matches
+    (I4.2); empty without a base registry, with a note when git cannot tell the base."""
+    try:
+        fork = merge_base(root)
+    except GitReadError as exc:
+        print(f"assign-ids: note: the fork point cannot be told ({exc}) — the base is not read; "
+              f"ids follow this tree only")
+        return {}
+    if fork is None:
+        return {}
+    base, notes = registry_config.load_registry_at(root, fork)
+    for note in notes:
+        print(f"assign-ids: note: {note}")
+    if base is None:
+        return {}
+    return {id(story): old for story, old in registry_config.paired_stories(reg, base)}
 
 
 def _indent(text: str) -> int | str | None:
@@ -567,13 +771,19 @@ def assign_ids(root: Path, write: bool) -> int:
         return 1
     changed = 0
     odd_found = False
-    for story in registry_config.load_registry(root, cfg).stories:
+    reg = registry_config.load_registry(root, cfg)
+    at_base = _assign_base(root, reg)
+    for story in reg.stories:
         rel = story.path.relative_to(root).as_posix()
         data = story.data
         if story.error or not isinstance(data, dict) or not isinstance(data.get("acceptance"), list):
             print(f"assign-ids: {rel}: skipped — no readable acceptance list (the gate says why)")
             continue
-        items, assigned, odd = _numbered(data["acceptance"])
+        _ids, reserved = registry_config.item_ids(data)
+        if id(story) in at_base:
+            old_ids, old_retired = registry_config.item_ids(at_base[id(story)].data)
+            reserved |= old_ids | old_retired
+        items, assigned, odd = _numbered(data["acceptance"], reserved)
         sid = data.get("id", rel)
         for iid in odd:
             odd_found = True
