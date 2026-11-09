@@ -1629,7 +1629,32 @@ def _rounds_check(root: Path, entries: list[tuple[str, dict]]) -> tuple[list[str
         hard += h
         soft += s
     h, s = shared_review_findings(rounds)
+    hard += h
+    soft += s
+    h, s = round_name_findings(rounds)
     return hard + h, soft + s
+
+
+def round_name_findings(rounds: list[Round]) -> tuple[list[str], list[str]]:
+    """Anchors (`<round>/<view>#<state>`) and bound decisions (`owner <round>/<ID>`) name a
+    round by its folder name, so two different reference folders with one name are
+    ambiguous. Red where the push touches one of them, else a note."""
+    by_name: dict[str, list[Round]] = {}
+    for rnd in rounds:
+        by_name.setdefault(rnd.name, []).append(rnd)
+    hard: list[str] = []
+    soft: list[str] = []
+    for name, same in sorted(by_name.items()):
+        if len(same) < 2:
+            continue
+        line = (f"the reference rounds {', '.join(sorted(r.key for r in same))} share the folder "
+                f"name {name!r} — anchors and bound owner decisions name a round by it; "
+                "rename one folder")
+        if any(r.touched for r in same):
+            hard.append(line)
+        else:
+            soft.append(line + _UNTOUCHED)
+    return hard, soft
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
