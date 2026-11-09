@@ -66,6 +66,12 @@ def _unfenced(text: str) -> str:
     return owner(text)
 
 
+def _without_decisions(text: str) -> str:
+    """The text without its dated `DECISION` lines — the review gate's grammar, one owner."""
+    from check_review import DECISION_LINE  # noqa: PLC0415
+    return "\n".join(line for line in text.splitlines() if not DECISION_LINE.match(line))
+
+
 def _registry_files(root: Path) -> list[Path]:
     d = root / REGISTRY_DIR
     if not d.is_dir():
@@ -252,7 +258,8 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
 
     # --- IDs: defined once, cited from something real ------------------------
     ids = id_pattern(data["id_prefixes"])
-    defined = {canonical(i, ids) for i in ids.findall(text)}
+    # a `DECISION` line quotes IDs, it defines none (the pin above still covers it)
+    defined = {canonical(i, ids) for i in ids.findall(_without_decisions(text))}
     if not defined:
         if status != "legacy":
             soft.append(f"{rel}: contract defines no ID of the families {data['id_prefixes']} yet")
