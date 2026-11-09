@@ -1506,3 +1506,16 @@ def test_registry_module_off_imports_cleanly(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "no stories" in r.stdout and "Traceback" not in r.stderr
+
+
+def test_github_repo_without_slash_is_a_note_not_a_crash(render, tmp_path):
+    # v2.92 refute: copier does not validate `github_repo`; before the batched query it went
+    # to `gh issue view --repo` and came back as an advisory note — it must not crash now
+    out = _render(render, tmp_path, repo="noslash")
+    _story(out, issue="#412")
+    bindir = tmp_path / "bin"
+    _fake_gh(bindir)
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+    assert "not OWNER/REPO" in r.stdout, r.stdout

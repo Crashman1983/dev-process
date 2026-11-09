@@ -251,6 +251,20 @@ def test_a_registry_config_only_on_the_branch_binds_nothing(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
+def test_a_branch_loosening_the_registry_pattern_still_meets_mains(render, tmp_path):
+    # v2.92 refute (MINOR-6): the config content is read at the integration ref too — a
+    # branch that loosens `id_pattern` in the local file is judged by main's pattern
+    out = _repo(_project_registry(_with_registry_module(render, tmp_path)))
+    (out / REGISTRY_LOCAL).write_text(json.dumps(
+        {"layout": "capabilities", "root": "docs/feature-registry",
+         "id_pattern": "^{prefix}-US-\\d+$"}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "loosen the pattern on the branch")
+    _plan(out, GOOD + "\nStories: DOC-US-12\n")
+    r = _run(out)
+    assert r.returncode == 1 and "story DOC-US-12 does not match the registry's id pattern" in r.stdout, r.stdout
+
+
 def test_a_registry_config_git_cannot_read_is_a_note(render, tmp_path):
     out = _repo(_project_registry(_with_registry_module(render, tmp_path)))
     blob = subprocess.run(["git", "-C", str(out), "rev-parse", f"main:{REGISTRY_LOCAL}"],

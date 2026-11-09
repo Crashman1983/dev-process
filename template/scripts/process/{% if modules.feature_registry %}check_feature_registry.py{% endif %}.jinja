@@ -205,14 +205,14 @@ def _check_issues(run: Run, data: dict, rel: str) -> None:
     issues_cfg = run.cfg["issues"]
     name = issues_cfg["field"]
     refs: list = []
-    if name not in data:
+    if data.get(name) is None:  # absent or null: no ref (the template's `issue` is optional)
         if issues_cfg["required"]:
             run.hard.append(f"{rel}: missing '{name}'")
     elif name == "issue":
         if isinstance(data[name], str):
             refs = [data[name]]
-        else:
-            run.hard.append(f"{rel}: 'issue' must be a string, got {type(data[name]).__name__}")
+        else:  # a provenance pointer for humans: a wrong type is a note, as before v2.92 nothing
+            run.soft.append(f"{rel}: 'issue' should be a string, got {type(data[name]).__name__}")
     elif isinstance(data[name], list):
         refs = data[name]
     else:

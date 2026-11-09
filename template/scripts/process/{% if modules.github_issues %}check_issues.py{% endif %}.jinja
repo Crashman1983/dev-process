@@ -75,7 +75,9 @@ def _existing(gh: str, repo: str, numbers: list[int]) -> tuple[set[int], str]:
     `errors`, and `gh` then exits 1 — so the body is read whatever the exit code.
     Only a transport or parse error, or no repository, leaves the whole batch
     unchecked. Best-effort: the caller turns everything into advisory notes."""
-    owner, name = repo.split("/", 1)
+    owner, sep, name = repo.partition("/")
+    if not (sep and owner and name):  # copier does not validate the answer (v2.92 refute)
+        return set(), f"github_repo {repo!r} is not OWNER/REPO"
     aliases = " ".join("i%d: issue(number: %d) { number }" % (k, n) for k, n in enumerate(numbers))
     query = ("query($owner: String!, $name: String!) "
              "{ repository(owner: $owner, name: $name) { " + aliases + " } }")
