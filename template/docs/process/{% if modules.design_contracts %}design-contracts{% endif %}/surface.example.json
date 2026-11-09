@@ -11,5 +11,6 @@
   "defaults": {"viewports": "320, 768, 1440", "themes": "light, dark"},
   "extra_axes": [],
   "rule_sources": ["docs/design/<surface>-ui-rules.md"],
-  "notes": "Inert seed: the gate skips *.example.json. Copy, drop `.example`, rename the stem to the surface (web, ios, cli, ...). `status` becomes `accepted` only with a decision record and an independent review that records `Decision: GO`; `reference` is a folder sealed with scripts/process/seal.py; `paths` are the code roots whose changes must cite a contract ID in the plan, and they count as UI for the ui-check gate; `defaults` are the axis answers a plan may give as `inherited`, `extra_axes` the project's own ui-check axes, `rule_sources` the UI rule files `rules:` must cite."
+  "state_catalogue": ["default", "loading", "empty", "error"],
+  "notes": "Inert seed: the gate skips *.example.json. Copy, drop `.example`, rename the stem to the surface (web, ios, cli, ...). `status` becomes `accepted` only with a decision record and an independent review that records `Decision: GO`; `reference` is a folder sealed with scripts/process/seal.py, holding its states.json; `paths` are the code roots whose changes must cite a contract ID in the plan, and they count as UI for the ui-check gate; `defaults` are the axis answers a plan may give as `inherited`, `extra_axes` the project's own ui-check axes, `rule_sources` the UI rule files `rules:` must cite; `state_catalogue` the states every view of the round renders or names as not applicable, a list or a repo path to a JSON list shared by all surfaces."
 }

@@ -117,6 +117,18 @@ planned, never passed.
 Open questions for the owner, numbered D1…, each with the options, the
 recommendation, and — once taken — the decision, date and consequence.
 
+An owner decision that changes or drops acceptance items of a story (the
+coverage form) carries an ID and names the round it was taken for, so it
+counts for that round only and never collides with a later round's IDs:
+
+```
+DECISION <date> owner <round>/<ID>: change|drop <Story>#AC<n>[, …] — <reason>
+```
+
+`<round>` is the round's folder name (`web-round-2`), `<ID>` like `D7` or
+`F1`. Other owner questions stay as they are. A decision written here
+changes the contract: re-pin it in the registry.
+
 ## 10. Amendments
 
 Append-only. An amendment is written **before** the code that relies on it:

@@ -50,22 +50,84 @@ On by default in the standard set; inert until the first registry entry exists.
 | `reference` | no | the sealed round folder the reviewer judges AFTER pictures against |
 | `paths` | no | globs of the surface's code; a change there must cite an ID in its plan |
 | `notes` | no | prose; amendments go into `<surface>.notes.md` next to the entry, whole lines appended (`merge=union`), read with `notes` — a note citing an older seal must say it is historical |
+| `state_catalogue` | no | the states every view of the round renders or names as not applicable: a list, or a repo path to a JSON list — one place for every surface |
+| `defaults`, `extra_axes`, `rule_sources` | no | read by the ui-check gate (below) |
+| `_comment` | no | prose; any other key is a note (a typo of a known field?) |
 
 ## Hard vs. best-effort (no false-green)
 
 **Hard (CI fails):** invalid registry; a contract that is not a committed
 file; a hash pin that no longer matches (the contract moved without a
 re-pin); an ID defined by two headings; `accepted` without decision record,
-without review, or with a review whose decision is not GO; a review naming a
+without review, or with a review whose decision is not GO (the template's
+unfilled `GO | GO with conditions | NO GO` is no decision); a review naming a
 different seal than the reference carries; a reference whose seal no longer
 verifies (a board edited or added after the GO); an **active plan citing an
 ID the contract does not define** — plausible-looking IDs are the failure
-this module exists for.
+this module exists for (an ID that only a `DECISION` line quotes is not
+defined); a malformed `state_catalogue` or `states.json`; and, for a round
+the push touches, a missing `states.json` and the checks against the world
+around the round (below).
 
 **Best-effort (note, never fails CI):** an opaque pin; a `draft` contract; a `legacy` norm (one note);
 reference boards rendered from an older contract (external drift: re-seal or
 start a new round); a push touching the surface's `paths` while no active
-plan cites an ID (DoR R5); an accepted contract without a sealed reference.
+plan cites an ID (DoR R5); an accepted contract without a sealed reference;
+an unknown key in a registry entry; the same round checks for a round no
+push touches; no fork point to tell whether a push touches a round.
+
+## The round's state list and element map
+
+A round says in `states.json` what its boards cover: views × states ×
+viewports × themes, plus `variants` (AX3, text size) and the `surfaces` it
+draws, and which owner each element of a view has. The format, with an
+example, is in `docs/process/design-contracts/templates/round-README.md` and
+`docs/process/design-contracts/templates/states.example.json`; this gate is the
+one owner of reading it. What the file says about itself — its keys at every
+level, each state's axes within the round's lists, the
+boards it names, every element once with an owner, `stories` as a non-empty
+list or `n/a: <reason>` — is checked always.
+
+**A round is judged hard where a push touches it.** Against the fork point
+(`check_review.merge_base`), an entry's round is touched when the push sets
+or changes its `reference`, makes it `accepted`, changes its `review` path,
+changes the seal (`manifest.sha256`, compared by blob ID; missing at the fork
+point counts as changed — a sub-revision N.1 touches the round), changes the
+review file (a new GO section), or adds the entry file (a `legacy` entry's
+round is not judged). For a touched round:
+
+- `states.json` is required;
+- every state of the catalogue — the union of every entry on the round, as
+  it stands now and at the fork point, so a push cannot drop a state for its
+  own GO — is in each view's `states` or `not_applicable`;
+- with the feature registry, `stories` is required; without it a list is
+  red (no coverage could be judged) and `n/a: <reason>` is the form.
+
+A round no push touches gets the same findings as notes: a story deleted, a
+state added to the catalogue elsewhere must not red every push until the
+round is re-sealed and re-reviewed. The rule hangs on the touch only, never
+on what the fork point holds. Without a fork point (main CI, a shallow clone,
+a criss-cross) one note names the reason — never everything touched, never
+a silent pass. Rounds accepted before this rule stay a note until a push
+touches them.
+
+**One review file per round.** A changed review file touches every round
+whose entry names it, so a new section for one surface makes the shared
+round's `states.json` due. Entries on *different* rounds that share a review
+file couple those rounds: red when the push touches one of them, a note
+otherwise.
+
+**The seal.** It covers every file of the folder: a `states.json` or a
+decision file added to a sealed round breaks it (`added after sealing`) —
+re-seal, and the round is reviewed again under the new hash. A decision
+written into the contract changes the contract: it needs a new pin, and
+since the contract is a `--dep` of the seal, the reference notes drift too.
+
+**Owner decisions with an ID.** An owner decision that changes or drops
+acceptance items carries an ID: `DECISION <date> owner <ID>: change|drop
+<Story>#AC<n> — <reason>` in the round folder or the review; in the
+contract (§9) it names its round, `owner <round>/<ID>`, and counts for that
+round only.
 
 ## Binding a plan to its contract
 
@@ -196,4 +258,5 @@ the review: that is what a GO applies to.
 ## Seed
 
 An inert `surface.example.json` ships next to the templates; the gate skips
-`*.example.json`. The gate is `scripts/process/check_design_contracts.py`.
+`*.example.json`. `docs/process/design-contracts/templates/states.example.json`
+is the seed of a round's `states.json`. The gate is `scripts/process/check_design_contracts.py`.
