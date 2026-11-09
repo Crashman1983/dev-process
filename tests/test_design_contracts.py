@@ -794,3 +794,19 @@ def test_a_legacy_norm_still_checks_the_ids_plans_cite(render, tmp_path):
            f"# Plan\n\ntier: 2\n\nFollows {CONTRACT}: S99 header.\n")
     r = _gate(out)
     assert r.returncode == 1 and "S99" in r.stdout, r.stdout
+
+
+# --- v2.93 B5: the unfilled template line is no decision -----------------------------
+
+def test_the_unfilled_template_decision_line_is_no_decision(render, tmp_path):
+    out = _render(render, tmp_path)
+    _accepted(out, decision="GO | GO with conditions | NO GO")
+    r = _gate(out)
+    assert r.returncode == 1 and "records no decision line" in r.stdout, r.stdout
+    _write(out, REVIEW, "# R\n\n**Decision:** GO with conditions\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout  # guard: with conditions is still a GO
+    _write(out, REVIEW, "# R\n\nDecision: GO\n\nDecision: NO GO\n\nDecision: GO\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout  # guard: the last decision stands
+
