@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "capability": "captures",
+  "prefix": "CAP",
+  "inventory_sections": [
+    "Produktivität (Reminders / Mail)"
+  ]
+}

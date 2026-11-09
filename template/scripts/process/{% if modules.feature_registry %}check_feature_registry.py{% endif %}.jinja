@@ -1,15 +1,21 @@
 #!/usr/bin/env python3
-"""feature-inventory gate: validate the capability entries under
-docs/process/feature-registry/ — the "what can the product do today, and
-where is that proven?" SSOT.
+"""feature-inventory gate: validate the feature registry — the "what can the
+product do, and where is that proven?" SSOT.
 
 Lean pass: the registry's work-log axis (status, blocked_by, parent, ready
 ordering) moved to GitHub Issues/Projects — issues own "what is in flight".
-This inventory owns the other question: each entry names a shipped
-capability, its acceptance criteria, and the tests that prove them. An entry
-without a resolvable test is a claim, not an inventory item — hard failure.
-Fed at merge: the feature's spec user stories are promoted here with their
-test references (the durable yield of the pruned spec artifacts).
+This inventory owns the other question: each entry names a capability, its
+acceptance criteria, and the tests that prove them. An entry without a
+resolvable test is a claim, not an inventory item — hard failure. Fed at
+merge: the feature's spec user stories are promoted here with their test
+references (the durable yield of the pruned spec artifacts).
+
+How the registry is laid out and which rules bind is configuration
+(`docs/process/feature-registry.json`, a project's `.local.json` over it), read
+through `registry_config` — the template's defaults are a flat folder of
+`STORY-NNNN.json` entries; a project may choose capability directories, its own
+id pattern, surfaces, a story status and a test mapping instead
+(`docs/process/modules/feature-registry.md`, Configuration).
 
 Structure and reference existence are hard-guaranteed (CI exit 1). Whether a
 test *semantically* proves its criterion is not mechanically decidable and is
@@ -18,17 +24,18 @@ from __future__ import annotations
 
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
-# the decision-records gate (core, always rendered) owns ADR file identity, and
-# registry_config (core) owns configuration and loader — import, don't copy (one
-# owner per behavior)
+# the decision-records gate owns ADR file identity, the review gate the issue-ref
+# grammar, and registry_config configuration and loader (all core, always
+# rendered) — import, don't copy (one owner per behavior)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 import registry_config  # noqa: E402
 from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
+from check_review import parse_issue_ref  # noqa: E402
 
-ID_RE = re.compile(r"^STORY-\d{4}$")
-KNOWN_FIELDS = {"id", "title", "story", "acceptance", "tests", "adr", "issue", "links"}
+PREFIX = re.compile(r"^[A-Z]+$")
 
 # Advisory only: an entry with many mapped tests but very few acceptance
 # criteria likely under-describes its tested behaviour. Warns, never blocks.
@@ -36,76 +43,236 @@ UNDER_GRANULAR_MAX_ACC = 2
 UNDER_GRANULAR_MIN_TESTS = 5
 
 
-def _check_entry(root: Path, cfg: dict, story: registry_config.Story,
-                 seen_ids: dict) -> tuple[list[str], list[str], dict]:
-    hard: list[str] = []
-    soft: list[str] = []
+@dataclass
+class Run:
+    """One gate run: the configuration, what it found, and what spans entries."""
+    root: Path
+    cfg: dict
+    hard: list[str] = field(default_factory=list)
+    soft: list[str] = field(default_factory=list)
+    seen_ids: dict = field(default_factory=dict)
+    stats: list[dict] = field(default_factory=list)
+
+    def rel(self, path: Path) -> str:
+        return path.relative_to(self.root).as_posix()
+
+
+def _known_fields(cfg: dict) -> set[str]:
+    known = {"id", "acceptance", "adr", "links", "retired", cfg["issues"]["field"], cfg["story_tests"],
+             *cfg["story_text_fields"], *cfg["extra_fields"]}
+    if cfg["story_surfaces"] != "none":
+        known.add("surfaces")
+    if cfg["story_status"]:
+        known.add("status")
+    return known
+
+
+def _retired_fields(cfg: dict) -> set[str]:
+    # with a project story status, `status` is the project's field, not a leftover
+    return set(cfg["retired_fields"]) - ({"status"} if cfg["story_status"] else set())
+
+
+def _test_ref(run: Run, rel: str, where: str, ref: object) -> bool:
+    """One test ref; True when it names an existing test (proof)."""
+    if not isinstance(ref, str) or not ref.strip():
+        run.hard.append(f"{rel}: {where}: a test ref must be a non-empty string, got {ref!r}")
+        return False
+    file_part = ref.split("::", 1)[0]  # strip a ::node selector
+    if not (run.root / file_part).is_file():
+        run.hard.append(f"{rel}: {where}: test path does not exist: {ref}")
+        return False
+    return True
+
+
+def _check_id(run: Run, story: registry_config.Story, data: dict, rel: str, stats: dict) -> None:
+    cfg = run.cfg
+    sid = data.get("id")
+    prefix = None
+    if story.capability and story.capability.head:
+        prefix = story.capability.head.get("prefix")
+        prefix = prefix if isinstance(prefix, str) and PREFIX.match(prefix) else None
+    pattern = registry_config.strict_id_pattern(cfg, prefix)
+    if not isinstance(sid, str) or not sid:
+        run.hard.append(f"{rel}: missing or non-string 'id'")
+    elif not pattern.match(sid):
+        run.hard.append(f"{rel}: 'id' must match {pattern.pattern}, got {sid!r}")
+    elif sid in run.seen_ids:
+        run.hard.append(f"{rel}: duplicate id {sid!r} (also in {run.seen_ids[sid]})")
+    else:
+        run.seen_ids[sid] = rel
+        stats["sid"] = sid
+    if story.capability and isinstance(sid, str) and story.path.stem != sid:
+        run.hard.append(f"{rel}: filename must match story id {sid!r}")
+
+
+def _check_surfaces(run: Run, data: dict, rel: str) -> None:
+    mode = run.cfg["story_surfaces"]
+    if mode == "none":
+        return
+    if "surfaces" not in data:
+        if mode == "required":
+            run.hard.append(f"{rel}: missing 'surfaces'")
+        return
+    surfaces = data["surfaces"]
+    if not (isinstance(surfaces, list) and surfaces and all(isinstance(s, str) and s for s in surfaces)):
+        run.hard.append(f"{rel}: 'surfaces' must be a non-empty list of strings")
+        return
+    unknown = sorted(set(surfaces) - set(run.cfg["surfaces"]))
+    if unknown:
+        run.hard.append(f"{rel}: unknown surface(s) {unknown} — declared: {run.cfg['surfaces']}")
+
+
+def _check_status(run: Run, data: dict, rel: str) -> None:
+    status_cfg = run.cfg["story_status"]
+    if not status_cfg:
+        return
+    if "status" not in data:
+        run.hard.append(f"{rel}: missing 'status'")
+    elif data["status"] not in status_cfg["values"]:
+        run.hard.append(f"{rel}: invalid status {data['status']!r} (want one of {status_cfg['values']})")
+
+
+def _check_issues(run: Run, data: dict, rel: str) -> None:
+    issues_cfg = run.cfg["issues"]
+    name = issues_cfg["field"]
+    refs: list = []
+    if name not in data:
+        if issues_cfg["required"]:
+            run.hard.append(f"{rel}: missing '{name}'")
+    elif name == "issue":
+        if isinstance(data[name], str):
+            refs = [data[name]]
+        else:
+            run.hard.append(f"{rel}: 'issue' must be a string, got {type(data[name]).__name__}")
+    elif isinstance(data[name], list):
+        refs = data[name]
+    else:
+        run.hard.append(f"{rel}: 'issues' must be a list (it may be empty)")
+    for ref in refs:
+        if not isinstance(ref, str) or parse_issue_ref(ref.strip()) is None:
+            run.hard.append(f"{rel}: malformed issue ref {ref!r} in '{name}' "
+                            f"(want '#N', 'owner/repo#N', or a github issue URL)")
+    required_for = issues_cfg["required_for"]
+    if required_for is not None and data.get("status") == required_for and not refs:
+        run.hard.append(f"{rel}: status {required_for!r} needs at least one ref in '{name}'")
+
+
+def _check_story_tests(run: Run, data: dict, rel: str, stats: dict) -> None:
+    if run.cfg["story_tests"] == "tests":
+        # an inventory entry asserts a proven capability — it requires at least
+        # one existing test; a dead test path is a false claim of proof
+        tests = data.get("tests")
+        if not isinstance(tests, list) or not tests:
+            run.hard.append(f"{rel}: 'tests' must be a non-empty list — an inventory "
+                            f"entry without a proving test is a claim, not an inventory")
+            return
+        stats["n_tests"] += sum(_test_ref(run, rel, "tests", t) for t in tests)
+        return
+    mapping = data.get("test_mapping")
+    if not isinstance(mapping, dict) or not mapping:
+        run.hard.append(f"{rel}: 'test_mapping' must be a non-empty object")
+        return
+    allowed = set(run.cfg["surfaces"]) | set(run.cfg["shared_proof_layers"])
+    unknown = sorted(set(mapping) - allowed)
+    if unknown:
+        run.hard.append(f"{rel}: unknown test_mapping key(s) {unknown} — allowed: {sorted(allowed)}")
+    status_cfg = run.cfg["story_status"] or {}
+    empty_ok = bool(status_cfg.get("deferred_allows_empty_tests")) \
+        and status_cfg.get("deferred") is not None and data.get("status") == status_cfg.get("deferred")
+    for key, refs in mapping.items():
+        if empty_ok and refs == []:
+            continue
+        if not isinstance(refs, list) or not refs:
+            run.hard.append(f"{rel}: 'test_mapping.{key}' must be a non-empty list")
+            continue
+        stats["n_tests"] += sum(_test_ref(run, rel, f"test_mapping.{key}", t) for t in refs)
+
+
+def _check_acceptance(run: Run, data: dict, rel: str, stats: dict) -> None:
+    acceptance = data.get("acceptance")
+    if not isinstance(acceptance, list) or not acceptance:
+        run.hard.append(f"{rel}: 'acceptance' must be a non-empty list")
+        return
+    stats["n_acc"] = len(acceptance)
+    for i, ac in enumerate(acceptance):
+        text = ac.get("text") if isinstance(ac, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            run.hard.append(f"{rel}: acceptance[{i}] 'text' must be a non-empty string")
+
+
+def _check_entry(run: Run, story: registry_config.Story) -> None:
     stats = {"n_acc": 0, "n_tests": 0, "sid": None}
-    rel = story.path.relative_to(root)
+    run.stats.append(stats)
+    rel = run.rel(story.path)
     if story.error:
-        return [f"{rel}: {story.error}"], [], stats
+        run.hard.append(f"{rel}: {story.error}")
+        return
     data = story.data
     if not isinstance(data, dict):
-        return [f"{rel}: entry must be a JSON object, got {type(data).__name__}"], [], stats
+        run.hard.append(f"{rel}: entry must be a JSON object, got {type(data).__name__}")
+        return
+    cfg = run.cfg
 
     # work-log fields retired in the lean pass — their truth lives in GitHub
     # Issues/Sub-Issues/Projects now; a leftover field is stale double bookkeeping
-    retired_fields = set(cfg["retired_fields"])
+    retired_fields = _retired_fields(cfg)
     retired = sorted(retired_fields & set(data))
     if retired:
-        hard.append(f"{rel}: retired work-log field(s) {retired} — status, "
-                    f"dependencies, and decomposition live in GitHub "
-                    f"Issues/Projects now; the inventory carries only "
-                    f"capability -> acceptance -> tests")
-    unknown = sorted(set(data) - KNOWN_FIELDS - retired_fields)
+        run.hard.append(f"{rel}: retired work-log field(s) {retired} — status, "
+                        f"dependencies, and decomposition live in GitHub "
+                        f"Issues/Projects now; the inventory carries only "
+                        f"capability -> acceptance -> tests")
+    unknown = sorted(set(data) - _known_fields(cfg) - retired_fields)
     if unknown:
-        soft.append(f"{rel}: unknown field(s) {unknown} — not validated")
+        run.soft.append(f"{rel}: unknown field(s) {unknown} — not validated")
 
-    sid = data.get("id")
-    if not isinstance(sid, str) or not sid:
-        hard.append(f"{rel}: missing or non-string 'id'")
-    elif not ID_RE.match(sid):
-        hard.append(f"{rel}: 'id' must match STORY-NNNN, got {sid!r}")
-    elif sid in seen_ids:
-        hard.append(f"{rel}: duplicate id {sid!r} (also in {seen_ids[sid]})")
-    else:
-        seen_ids[sid] = str(rel)
-        stats["sid"] = sid
-
-    if not data.get("title"):
-        hard.append(f"{rel}: missing 'title'")
-    if not data.get("story"):
-        hard.append(f"{rel}: missing 'story'")
-
-    acceptance = data.get("acceptance")
-    if not isinstance(acceptance, list) or not acceptance:
-        hard.append(f"{rel}: 'acceptance' must be a non-empty list")
-    else:
-        stats["n_acc"] = len(acceptance)
-        for i, ac in enumerate(acceptance):
-            text = ac.get("text") if isinstance(ac, dict) else None
-            if not isinstance(text, str) or not text.strip():
-                hard.append(f"{rel}: acceptance[{i}] 'text' must be a non-empty string")
-
-    # an inventory entry asserts a shipped, proven capability — it requires at
-    # least one existing test; a dead test path is a false claim of proof
-    tests = data.get("tests")
-    if not isinstance(tests, list) or not tests:
-        hard.append(f"{rel}: 'tests' must be a non-empty list — an inventory "
-                    f"entry without a proving test is a claim, not an inventory")
-    else:
-        for t in tests:
-            file_part = str(t).split("::", 1)[0]  # strip a pytest ::node selector
-            if not (root / file_part).is_file():
-                hard.append(f"{rel}: test path does not exist: {t}")
-            else:
-                stats["n_tests"] += 1
+    _check_id(run, story, data, rel, stats)
+    for name in cfg["story_text_fields"]:
+        value = data.get(name)
+        if not value:
+            run.hard.append(f"{rel}: missing '{name}'")
+        elif not isinstance(value, str) or not value.strip():
+            run.hard.append(f"{rel}: '{name}' must be a non-empty string")
+    _check_surfaces(run, data, rel)
+    _check_status(run, data, rel)
+    _check_acceptance(run, data, rel, stats)
+    _check_story_tests(run, data, rel, stats)
+    _check_issues(run, data, rel)
 
     adr = data.get("adr")
-    if adr and not _adr_exists(root, adr):
-        hard.append(f"{rel}: adr link {adr!r} has no file under {ADR_DIR}/")
+    if adr and not _adr_exists(run.root, adr):
+        run.hard.append(f"{rel}: adr link {adr!r} has no file under {ADR_DIR}/")
 
-    return hard, soft, stats
+
+def _check_capabilities(run: Run, reg: registry_config.Registry) -> None:
+    """The capabilities layout: heads, directory names, nothing loose in the root."""
+    cfg = run.cfg
+    root_rel = run.rel(reg.path)
+    for path in reg.stray:
+        run.hard.append(f"{run.rel(path)}: JSON directly in {root_rel} — a capability is a "
+                        f"directory <capability>/{registry_config.HEAD} plus one <id>.json per story")
+    needs_prefix = "{prefix}" in cfg["id_pattern"]
+    for cap in reg.capabilities:
+        crel = run.rel(cap.path)
+        head_rel = f"{crel}/{registry_config.HEAD}"
+        if cap.error:
+            run.hard.append(f"{crel}: {cap.error}")
+        else:
+            head = cap.head
+            if head.get("schema_version") != 1:
+                run.hard.append(f"{head_rel}: schema_version must be 1, got {head.get('schema_version')!r}")
+            if head.get("capability") != cap.path.name:
+                run.hard.append(f"{crel}: directory name must match capability {head.get('capability')!r}")
+            prefix = head.get("prefix")
+            if needs_prefix and not (isinstance(prefix, str) and PREFIX.match(prefix)):
+                run.hard.append(f"{head_rel}: 'prefix' must be upper-case letters A-Z, got {prefix!r} "
+                                "— id_pattern uses {prefix}")  # no f-string: the file is Jinja
+        if not cap.stories:
+            (run.hard if cfg["require_registry"] else run.soft).append(
+                f"{crel}: a capability without stories")
+    if not reg.capabilities:
+        (run.hard if cfg["require_registry"] else run.soft).append(
+            f"{root_rel} holds no capability directory")
 
 
 def _under_granular_note(stats: list[dict]) -> list[str]:
@@ -133,19 +300,21 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if problems:
         return problems, []
     reg = registry_config.load_registry(root, cfg)
-    if not reg.stories:
+    run = Run(root, cfg)
+    if not reg.present:
+        if cfg["require_registry"]:
+            return [f"{cfg['root']} does not exist"], []
         return [], ["no inventory entries yet (feature inventory empty)"]
-    hard: list[str] = []
-    soft: list[str] = []
-    seen_ids: dict = {}
-    all_stats: list[dict] = []
+    if cfg["layout"] == "capabilities":
+        _check_capabilities(run, reg)
+    elif not reg.stories:
+        if cfg["require_registry"]:
+            return [f"{cfg['root']} holds no story"], []
+        return [], ["no inventory entries yet (feature inventory empty)"]
     for story in reg.stories:
-        h, s, stats = _check_entry(root, cfg, story, seen_ids)
-        hard += h
-        soft += s
-        all_stats.append(stats)
-    soft += _under_granular_note(all_stats)
-    return hard, soft
+        _check_entry(run, story)
+    run.soft += _under_granular_note(run.stats)
+    return run.hard, run.soft
 
 
 def main() -> int:

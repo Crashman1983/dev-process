@@ -1,0 +1,46 @@
+{
+  "id": "CLI-US-002",
+  "title": "Klienten und Engagements bearbeiten und archivieren",
+  "as_a": "Seb",
+  "i_want": "bestehende Klienten und Engagements umbenennen und archivieren",
+  "so_that": "ich veraltete oder falsch benannte Eintraege korrigieren kann",
+  "surfaces": [
+    "ios",
+    "macos"
+  ],
+  "acceptance": [
+    "PATCH /clients/{slug} aktualisiert canonical_name, aliases, keywords.",
+    "DELETE /clients/{slug} setzt status=archived (soft delete, 204).",
+    "PATCH /clients/{slug}/engagements/{id} aktualisiert name, disciplines, keywords.",
+    "DELETE /clients/{slug}/engagements/{id} setzt status=archived, closed_at gesetzt (204).",
+    "iOS: Swipe-to-Delete öffnet Bestätigung vor dem Archivieren.",
+    "iOS: Klient-Kontextmenü (Long-Press auf Section-Header) bietet Bearbeiten + Archivieren.",
+    "Ownership-Prüfung: falscher Client-Slug liefert 404.",
+    "Archivierte Engagements verschwinden aus der Liste (GET-Filter status=active).",
+    "Opt-in: GET /clients?include_archived=true und GET /clients/{slug}/engagements?include_archived=true liefern auch archivierte Einträge (Default unverändert).",
+    "iOS (#1919, C13): Die destruktive Bestätigung ist ein Alert über den Kit-Owner `kenniDestructiveConfirmation` mit sichtbarem „Abbrechen“ und der destruktiven Aktion; der frühere confirmationDialog erschien auf dem iPhone (iOS 26) als Popover ohne Abbrechen. Abbrechen lässt das Objekt unverändert stehen.",
+    "Backend (#2338): Ein archiviertes Engagement oder ein nicht aktiver Klient bleibt im Dokumentbaum sichtbar, taucht aber in Suche, Kontext-Vorabsuche, Agent-Suchwerkzeugen und Agent-Mount nicht mehr auf; die Dateien bleiben im Git.",
+    "Ein geöffnetes Dokument eines archivierten Mandats kommt nicht in den Kontext (#2582).",
+    "[#2338 phase e] AC-3/AC-8: Client and engagement PATCH/DELETE archive routes invoke stop and scoped recovery only after successful commit. Repeated archive retries cleanup; reactivation never resumes old turns."
+  ],
+  "test_mapping": {
+    "backend": [
+      "backend/tests/api/v1/test_clients.py",
+      "backend/tests/services/clients/test_service_reads.py",
+      "backend/tests/services/documents/test_scope_lifecycle.py",
+      "backend/tests/api/v1/documents/test_search_excludes_archived.py",
+      "backend/tests/services/context/test_active_document_locked.py::test_archived_active_document_not_loaded",
+      "backend/tests/api/v1/test_archive_turn_stop.py"
+    ],
+    "ios": [
+      "ios/Projects/KenniAppUITests/Sources/KenniAppClientEngagementTests.swift",
+      "ios/Projects/KenniAppUITests/Sources/KenniAppClientEngagementTests.swift::test_CE03b_archivierenAbbrechenLaesstEngagementStehen"
+    ]
+  },
+  "status": "partial",
+  "issues": [
+    "#116",
+    "#1919",
+    "#2338"
+  ]
+}

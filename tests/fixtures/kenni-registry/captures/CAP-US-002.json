@@ -1,0 +1,35 @@
+{
+  "id": "CAP-US-002",
+  "title": "Triage-Ergebnis wird per aktionierbarer Push zurueckgemeldet",
+  "as_a": "Seb",
+  "i_want": "nach einem Quick-Capture eine Push-Notification mit dem Ergebnis",
+  "so_that": "ich sofort sehe, dass Kenni eine Erinnerung oder einen Termin angelegt hat (statt stummer Notiz)",
+  "surfaces": [
+    "macos",
+    "web"
+  ],
+  "acceptance": [
+    "Nach erfolgreicher Triage mit angelegtem Sink (reminder_created; der Status event_created ist mit #518 / Migration 0049 entfallen) sendet der Orchestrator einen Web Push an die aktiven Subscriptions des Users.",
+    "Die Push traegt category=CAPTURE_TRIAGE und custom-data {capture_id, status, triage_ref}, damit ein spaeterer Korrektur-Client den Bezug kennt.",
+    "Die Alert-Zeile nennt die Massnahme und den Titel (z. B. 'Erinnerung angelegt: DATEV').",
+    "Fuer Kategorie notiz (kein Sink) wird KEINE Push gesendet (kein Rauschen).",
+    "Ein Push-Fehler ist fail-open: der Reminder/Event und die capture_triage-Row bleiben unveraendert, kein 500, der BackgroundTask endet sauber.",
+    "Ohne aktive Subscription ist der Push-Pfad ein sauberer No-op.",
+    "web (#131): notify_capture_triage sendet das Ergebnis als Web Push an die Browser-Subscriptions (type=capture_triage, body=Massnahmen-Text aus _capture_alert, custom-data {capture_id,status,category,triage_ref}); der frueher parallele APNs-Pfad ist mit #562 entfallen (ADR-0057). Der Service Worker zeigt im Hintergrund eine OS-Notification, im Vordergrund einen Inline-Toast per postMessage (useCaptureResultToast) und invalidiert die Queries; fuer notiz (kein Sink) kein Push; fail-open pro Subscription.",
+    "web (#1487): der neue Shell-Baum montiert denselben Ergebnis-Owner wie der alte (Shell.tsx ruft useCaptureResultToast und rendert den ToastHost) - der Triage-Push erscheint im Shell-Baum unveraendert, ohne zweiten Handler und ohne zweite Meldung."
+  ],
+  "test_mapping": {
+    "backend": [
+      "backend/tests/services/push/test_push_actionable.py",
+      "backend/tests/services/capture/test_capture_triage_service.py"
+    ],
+    "web": [
+      "frontend-react/src/app/useCaptureResultToast.test.ts",
+      "frontend-react/src/app/sw.test.ts"
+    ]
+  },
+  "status": "partial",
+  "issues": [
+    "#131"
+  ]
+}

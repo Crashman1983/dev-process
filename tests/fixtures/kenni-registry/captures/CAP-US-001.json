@@ -1,0 +1,48 @@
+{
+  "id": "CAP-US-001",
+  "title": "Quick-Capture wird klassifiziert und automatisch geroutet",
+  "as_a": "Seb",
+  "i_want": "einen kurzen Capture-Text an Kenni schicken",
+  "so_that": "Termine und Aufgaben automatisch angelegt werden und sonst eine durable Notiz bleibt",
+  "surfaces": [
+    "macos",
+    "ios",
+    "web"
+  ],
+  "acceptance": [
+    "Web (#1706 motion): Capture confirmation has reserved space and fades through the shared motion owner without shifting the field at 320/375px. Reduced motion disables the fade; live announcement, draft retention on error/dismissal and success clearing remain unchanged.",
+    "POST /captures {text} schreibt eine durable Notiz und gibt sofort 201 {capture_id, note_path} zurueck.",
+    "Nach der Triage existiert eine capture_triage-Zeile mit category, status und ggf. triage_ref_*.",
+    "Kategorie aufgabe erzeugt einen Reminder; termin erzeugt seit #518 (Kalender-Rueckbau) ebenfalls einen Reminder (start_datetime wird die Faelligkeit, end_datetime entfaellt); merk_fakt schreibt einen session-tier Memory-Claim (source=session, triage_ref=memory:<path>); notiz bleibt Sink-no-op.",
+    "termin ohne start_datetime ergibt bewusst einen Reminder OHNE Faelligkeit (fail-open, ADR-0038 erlaubt due_at=NULL) statt eines Fehlers: der Text bleibt erhalten, das Datum traegt Seb nach. Der Korrektur-Endpoint bleibt strenger und verlangt bei termin weiterhin ein start_datetime (422).",
+    "Klassifikator-Fehler, fehlender API-Key, Extraktions- oder Memory-Write-Fehler sind fail-open: bei nicht-extrahierbarem Fakt oder graceful Write-Reject bleibt die Notiz durable (status=note); ein transienter Repo-Fehler ergibt status=failed, nie ein 500 im Capture-Request.",
+    "Trust-Grenze (by design): ein session-tier (rank-1) Capture aendert ein gepinntes profile/feedback-File nicht. Trifft merk_fakt ein gepinntes Profil, blockt der pinned_guard den Merge (pinned_merge_blocked) -> die Notiz bleibt durable (status=note, kein Push), das kuratierte File bleibt unveraendert; manuelle Pflege laeuft ueber /merke.",
+    "Die Notiz-Frontmatter traegt nach Triage triage, triage_ref und capture_id.",
+    "web (#131): die Smart-Capture-Leiste im Ueberblick (OvCapture) sendet POST /captures und zeigt optimistisch 'Notiz gespeichert - Kenni analysiert ...'; der Triage-Sink erscheint in der jeweiligen Web-Zielansicht (Reminder in /reminders - seit #518 auch fuer die Kategorie termin, Notiz/Dokument in /documents, Fakt in /memory). Getrennt vom To-do-Capture in OvTodos (einfacher Reminder im Scope).",
+    "ios: Smart-Capture laeuft ueber UniversalSwitcherView und das Home-Screen-Widget (KenniCapture). Das Notiz-Widget im Ueberblick-Tab (OverviewNoteWidget) ist seit #509 KEINE Capture-Flaeche mehr, sondern ein lokaler, scope-gebundener Notizzettel wie OvNote (web) und OvDashNote (macOS) — es sendet kein POST /captures. Revidiert die chore/design-sync-13-Entscheidung auf Sebs Wunsch nach einheitlichem Verhalten zwischen iOS und macOS (2026-07-28).",
+    "web (#1487): die Startseite traegt die Erfassungszeile (CaptureBar) und schickt ueber DENSELBEN Owner (useCreateCapture) POST /captures {text, kind=quick}; der Text wird getrimmt, ein leerer Wurf erreicht den Endpunkt nie. Nach Erfolg ist das Feld leer und die Zeile bestaetigt INLINE ('Gespeichert - Kenni sortiert ein.'); die Bestaetigung verschwindet beim naechsten Zeichen, ohne Timer. Ein Fehlschlag laesst den Text im Feld. Bewiesen bei 393 und 1440px."
+  ],
+  "test_mapping": {
+    "backend": [
+      "backend/tests/services/capture/test_capture_triage_service.py",
+      "backend/tests/api/test_captures_endpoint.py",
+      "backend/tests/api/test_captures_e2e.py"
+    ],
+    "ios": [
+      "ios/Projects/KenniApp/Tests/IntegrationTests/SmartCaptureSurfaceTests.swift",
+      "ios/Projects/KenniAppUITests/Sources/RecentCapturesStatusMessageTests.swift::RecentCapturesStatusMessageTests"
+    ],
+    "web": [
+      "frontend-react/src/api/captures.test.ts",
+      "frontend-react/src/queries/useCaptures.test.tsx",
+      "frontend-react/src/app/shell/home/CaptureBar.test.tsx",
+      "frontend-react/e2e/storybook/mobile-motion.spec.ts",
+      "frontend-react/src/app/shell/screens/HomeScreen.widgets.test.tsx",
+      "frontend-react/e2e/home.spec.ts"
+    ]
+  },
+  "status": "partial",
+  "issues": [
+    "#131"
+  ]
+}
