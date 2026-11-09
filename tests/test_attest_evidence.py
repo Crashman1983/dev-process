@@ -2842,3 +2842,22 @@ def test_a_playwright_skipped_suite_is_skipped(ev_mod):
     for form in (text, text.replace(".skip(", ".fixme(")):
         got = mod._other_status(form, "e2e/a.spec.ts", "works", mod.DEFAULTS)
         assert got and "skip" in got, (form, got)
+
+
+# --- v2.93 I4.7: a registry ref `<Story-ID>#AC<n>` is no criterion of the work ---
+
+def test_a_registry_item_ref_is_no_criterion_of_the_plan(ev_mod):
+    """Kenni #2922 AC-5: `NAV-US-003#AC19` matched `AC_ID` behind its `#` and became a
+    criterion of the work; `ac_key` made it collide with an own `AC-19` as well."""
+    mod, _out = ev_mod
+    req, foreign = mod.required_criteria, mod.foreign_criteria
+    plan = "issue: #7\n\nSiehe NAV-US-003#AC19.\n\n- AC-1: When x, y shall z.\n- AC-2: When a, b shall c.\n"
+    assert req(plan, "") == {"1", "2"} and foreign(plan, "") == set()
+    # the spec's ref is no criterion either
+    assert req(plan, "# Spec\nAus NAV-US-003#AC19 und CLI-US-12#AC3.\n") == {"1", "2"}
+    # Wächter: an own AC-19 beside the ref stays required, so does a bare AC19
+    assert req(plan + "- AC-19: When p, q shall r.\n", "") == {"1", "2", "19"}
+    assert req(plan + "AC19 matters here.\n", "") == {"1", "2", "19"}
+    assert req("issue: #7\n", "- AC19: When x, y shall z.\nSee NAV-US-003#AC19.\n") == {"19"}
+    # Wächter: a URL anchor without a story id in front is no registry ref
+    assert req("issue: #7\nSee https://example.com/spec#AC4.\n", "") == {"4"}
