@@ -38,6 +38,10 @@ from check_review import parse_issue_ref  # noqa: E402
 
 PREFIX = re.compile(r"^[A-Z]+$")
 PLANNED_REF = re.compile(r"^planned:#\d+:\S.*$")
+# an acceptance item (#404): addressable as `<story id>#<item id>`, proven or a target
+ITEM_ID = re.compile(r"^AC[1-9]\d*$")
+ITEM_FIELDS = {"id", "text", "surfaces", "state", "tests", "owned_by", "design", "issue"}
+STATES = ("proven", "target")
 
 # Advisory only: an entry with many mapped tests but very few acceptance
 # criteria likely under-describes its tested behaviour. Warns, never blocks.
@@ -56,6 +60,8 @@ class Run:
     stats: list[dict] = field(default_factory=list)
     names: dict = field(default_factory=dict)   # .py file -> its def/class names (None: unparsable)
     texts: dict = field(default_factory=dict)   # other file -> its text (None: unreadable)
+    untested: dict = field(default_factory=dict)  # capability or inventory -> items without a test
+    owned: dict = field(default_factory=dict)  # capability or inventory -> [items, items owned_by]
 
     def rel(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()
@@ -252,19 +258,138 @@ def _check_story_tests(run: Run, data: dict, rel: str, stats: dict) -> None:
         stats["n_tests"] += sum(_test_ref(run, rel, f"test_mapping.{key}", t) for t in refs)
 
 
-def _check_acceptance(run: Run, data: dict, rel: str, stats: dict) -> None:
+def _story_surfaces(run: Run, data: dict) -> list[str]:
+    """The story's surfaces: its own, or — when it has none — the project's."""
+    own = data.get("surfaces") if run.cfg["story_surfaces"] != "none" else None
+    if isinstance(own, list) and own and all(isinstance(s, str) for s in own):
+        return own
+    return list(run.cfg["surfaces"])
+
+
+def _item_surfaces(run: Run, item: dict, label: str, story_surfaces: list[str]) -> list[str]:
+    """The item's surfaces, in the rule order of #404 AC-3/AC-3a; [] is the one implicit
+    surface (none on the item, the story or in the configuration)."""
+    if "surfaces" not in item:
+        return story_surfaces
+    if not run.cfg["surfaces"]:
+        run.soft.append(f"{label}: item 'surfaces' without project surfaces — declare `surfaces` "
+                        f"in {registry_config.LOCAL}; not checked")
+        return []
+    surfaces = item["surfaces"]
+    if not (isinstance(surfaces, list) and surfaces and all(isinstance(s, str) and s for s in surfaces)):
+        run.hard.append(f"{label}: 'surfaces' must be a non-empty list of strings")
+        return story_surfaces
+    outside = sorted(set(surfaces) - set(story_surfaces))
+    if outside:
+        run.hard.append(f"{label}: surfaces {outside} outside the story's surfaces {story_surfaces}")
+    return list(dict.fromkeys(surfaces))
+
+
+def _check_state(run: Run, item: dict, label: str, surfaces: list[str]) -> None:
+    """`state`: proven/target, or a map over the item's surfaces; a target needs an issue."""
+    state = item.get("state", "proven")
+    if isinstance(state, dict):
+        outside = sorted(set(state) - set(surfaces))
+        if outside:
+            hint = " (one implicit surface takes a single state value)" if not surfaces else ""
+            run.hard.append(f"{label}: state key(s) {outside} outside the item's surfaces {surfaces}{hint}")
+        values = list(state.values())
+    else:
+        values = [state]
+    if any(v not in STATES for v in values):
+        run.hard.append(f"{label}: state must be 'proven' or 'target', or a map from surface to one "
+                        f"of them, got {state!r}")
+    issue = item.get("issue")
+    valid_issue = isinstance(issue, str) and parse_issue_ref(issue.strip()) is not None
+    if "issue" in item and not valid_issue:
+        run.hard.append(f"{label}: malformed issue ref {issue!r} "
+                        f"(want '#N', 'owner/repo#N', or a github issue URL)")
+    elif "target" in values and not valid_issue:
+        run.hard.append(f"{label}: state 'target' needs an 'issue' — the issue that makes it proven")
+
+
+def _check_item_tests(run: Run, item: dict, label: str, surfaces: list[str], owned_by: object) -> bool:
+    """`tests`: a map over the item's surfaces and its owned_by layer, or a plain list for
+    an item with exactly one (maybe implicit) surface. True when one names an existing test."""
+    tests = item["tests"]
+    if isinstance(tests, list):
+        if len(surfaces) > 1:
+            run.hard.append(f"{label}: a plain 'tests' list fits an item with exactly one surface; "
+                            f"this one has {surfaces} — use a map per surface")
+        return any([_test_ref(run, label, "tests", ref) for ref in tests])
+    if not isinstance(tests, dict):
+        run.hard.append(f"{label}: 'tests' must be a list or a map from surface to a list of test refs")
+        return False
+    layers = run.cfg["shared_proof_layers"]
+    proof = False
+    for key, refs in tests.items():
+        if key in layers and key != owned_by:
+            run.hard.append(f"{label}: tests key {key!r} is a shared proof layer — only an item with "
+                            f"owned_by {key!r} may use it")
+        elif key not in surfaces and key != owned_by:
+            run.hard.append(f"{label}: tests key {key!r} is neither one of the item's surfaces "
+                            f"{surfaces} nor its owned_by layer")
+        if not isinstance(refs, list) or not refs:
+            run.hard.append(f"{label}: tests.{key} must be a non-empty list")
+            continue
+        proof = any([_test_ref(run, label, f"tests.{key}", ref) for ref in refs]) or proof
+    return proof
+
+
+def _check_item(run: Run, item: dict, label: str, story_surfaces: list[str], group: str) -> None:
+    unknown = sorted(set(item) - ITEM_FIELDS)
+    if unknown:
+        run.soft.append(f"{label}: unknown item field(s) {unknown} — not validated")
+    surfaces = _item_surfaces(run, item, label, story_surfaces)
+    owned_by = item.get("owned_by")
+    if "owned_by" in item and owned_by not in run.cfg["shared_proof_layers"]:
+        run.hard.append(f"{label}: owned_by {owned_by!r} is not one of shared_proof_layers "
+                        f"{run.cfg['shared_proof_layers']}")
+    counts = run.owned.setdefault(group, [0, 0])
+    counts[0] += 1
+    counts[1] += "owned_by" in item
+    _check_state(run, item, label, surfaces)
+    # `design` is accepted unvalidated until #404 B fixes the anchor format
+    if "tests" in item and _check_item_tests(run, item, label, surfaces, owned_by):
+        return
+    if run.cfg["strict_item_tests"]:
+        run.hard.append(f"{label}: no existing test (strict_item_tests)")
+    else:
+        run.untested[group] = run.untested.get(group, 0) + 1
+
+
+def _check_acceptance(run: Run, data: dict, rel: str, stats: dict, group: str) -> None:
     acceptance = data.get("acceptance")
     if not isinstance(acceptance, list) or not acceptance:
         run.hard.append(f"{rel}: 'acceptance' must be a non-empty list")
         return
     stats["n_acc"] = len(acceptance)
+    sid = data.get("id") if isinstance(data.get("id"), str) else "?"
+    story_surfaces = _story_surfaces(run, data)
+    seen: set[str] = set()
     for i, ac in enumerate(acceptance):
-        text = ac.get("text") if isinstance(ac, dict) else None
+        where = f"{rel}: acceptance[{i}]"
+        if not isinstance(ac, dict) or "id" not in ac:
+            run.hard.append(f"{where} has no 'id' — an item is an object with 'id' and 'text'; "
+                            f"`python scripts/process/check_feature_registry.py --assign-ids --write` "
+                            f"numbers them by position")
+            continue
+        iid = ac["id"]
+        label = where
+        if not isinstance(iid, str) or not ITEM_ID.match(iid):
+            run.hard.append(f"{where} 'id' must match {ITEM_ID.pattern}, got {iid!r}")
+        elif iid in seen:
+            run.hard.append(f"{rel}: {sid}#{iid} is used twice — an item id is unique within its story")
+        else:
+            seen.add(iid)
+            label = f"{rel}: {sid}#{iid}"
+        text = ac.get("text")
         if not isinstance(text, str) or not text.strip():
-            run.hard.append(f"{rel}: acceptance[{i}] 'text' must be a non-empty string")
+            run.hard.append(f"{where} 'text' must be a non-empty string")
+        _check_item(run, ac, label, story_surfaces, group)
 
 
-def _check_entry(run: Run, story: registry_config.Story) -> None:
+def _check_entry(run: Run, story: registry_config.Story, group: str) -> None:
     stats = {"n_acc": 0, "n_tests": 0, "sid": None}
     run.stats.append(stats)
     rel = run.rel(story.path)
@@ -299,7 +424,7 @@ def _check_entry(run: Run, story: registry_config.Story) -> None:
             run.hard.append(f"{rel}: '{name}' must be a non-empty string")
     _check_surfaces(run, data, rel)
     _check_status(run, data, rel)
-    _check_acceptance(run, data, rel, stats)
+    _check_acceptance(run, data, rel, stats, group)
     _check_story_tests(run, data, rel, stats)
     _check_issues(run, data, rel)
 
@@ -376,7 +501,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             return [f"{cfg['root']} holds no story"], []
         return [], ["no inventory entries yet (feature inventory empty)"]
     for story in reg.stories:
-        _check_entry(run, story)
+        _check_entry(run, story, run.rel(story.capability.path if story.capability else reg.path))
+    run.soft += [f"{group}: {n} acceptance item(s) without an existing test — "
+                 f"`strict_item_tests` would fail them" for group, n in sorted(run.untested.items())]
+    if cfg["shared_proof_layers"] and run.owned:
+        # whether a behaviour really is the shared layer's stays review judgment; the
+        # share makes a drift of client items into "owned_by" visible (#404 AC-22)
+        shares = ", ".join(f"{group.rsplit('/', 1)[-1]} {owned}/{n}"
+                           for group, (n, owned) in sorted(run.owned.items()))
+        run.soft.append(f"items owned_by a shared proof layer, per capability: {shares}")
     run.soft += _under_granular_note(run.stats)
     return run.hard, run.soft
 
