@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.92.0 — Ein Registry-Checker für Template und Projekt; Tokens aus Claude-Code-Transkripten
+
+Die Liste dessen, was das Produkt kann (die Feature-Registry), darf jetzt die Form eines Projekts annehmen: ein Ordner je Fähigkeit, Tests je Plattform, ein Story-Status. Das Template prüft sie, ein Projekt braucht keinen eigenen Checker mehr. Jedes Akzeptanzkriterium bekommt eine feste Kennung und kann sagen, ob es schon funktioniert oder noch ein Ziel ist, und auf welcher Plattform. Ein Befehl vergibt die Kennungen für eine bestehende Registry. Außerdem kann der Prozess jetzt zählen, wie viele Tokens die Claude-Code-Sitzungen eines Issues verbraucht haben, über alle seine Phasen.
+
 ## v2.91.0 — Der Zug plant schneller und sagt, wer warum zurückbleibt
 
 Bevor der Merge-Zug losfährt, ermittelt er, welche Branches einsteigen dürfen. In einem großen Repo mit Hunderten alter Branches dauerte das über eine Viertelstunde. Jetzt liest er nur, was er braucht, und fragt git viel seltener: Auf einem Test-Repo mit 600 Branches sinkt die Planung von 44 auf 9 Sekunden, mit demselben Ergebnis. Außerdem sagt jeder Zuglauf für jeden Branch, der zurückbleibt, warum. Bisher tat das nur die getrennte Planungsansicht.

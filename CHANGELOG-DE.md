@@ -9,6 +9,70 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.92.0 — Ein Registry-Checker für Template und Projekt; Tokens aus Claude-Code-Transkripten · 2026-11-09
+
+**Warum.**
+- Downstream lief neben dem Checker des Templates ein eigener Feature-Registry-Checker des Projekts. Er hatte ein anderes Layout, eine andere Story-Form mit Status und Tests je Plattform. Die 1714 Akzeptanzkriterien waren bloße Strings, und verwiesen wurde auf sie über ihre Position (#404).
+- Token-Kosten wurden nie gemessen. Der Glob `transcripts` konnte Claude Codes Projektverzeichnis nicht adressieren, also sagten `cost --issue`, `models` und `finish` „not measured“ (#403).
+
+**Was sich ändert.**
+- **Konfigurierbarer Registry-Checker** (#404 Teil A, Owner-Entscheidung).
+  - `docs/process/feature-registry.json` trägt die Template-Vorgaben, die Wahl des Projekts steht in `docs/process/feature-registry.local.json`. Ohne lokale Datei verhält sich der Checker wie bisher, bis auf die Item-IDs unten.
+  - Das Layout `capabilities` sieht ein Verzeichnis je Fähigkeit vor, mit Kopfdatei `_capability.json`, die das ID-`prefix` trägt, und einer Datei je Story.
+  - Konfigurierbar sind:
+    - ID-Muster;
+    - Pflichtfelder der Story;
+    - Plattformen (`surfaces`) und gemeinsame Beleg-Schichten;
+    - `tests` oder `test_mapping` je Plattform;
+    - eine Issue-Liste;
+    - ein optionaler Story-Status;
+    - Wurzeln für Test-Verweise;
+    - `planned:`-Platzhalter;
+    - abgeschaffte Felder.
+  - Unbekannte Konfigurationsschlüssel sind ein Fehler.
+  - Beide Konfigurationsdateien gelten als Gate-Code.
+- **Akzeptanzkriterien tragen eine `id`** (`AC<n>`, eindeutig je Story; Verweise lauten `<Story>#AC<n>`). Optionale Item-Felder werden geprüft, wo sie stehen:
+  - `surfaces`;
+  - `state` (`proven`/`target`, auch je Plattform; ein Ziel braucht ein `issue`);
+  - `tests` je Plattform;
+  - `owned_by` für Verhalten, das eine gemeinsame Schicht wie das Backend für alle Plattformen belegt.
+
+  Ein Item ohne jede Plattform hat eine implizite.
+- **Test-Verweise:** Die Datei muss existieren. Ein `::node` wird je Segment geprüft (AST bei Python, sonst als Teilstring), standardmäßig als Hinweis, mit `node_check: hard` als Fehler. Ein `planned:`-Platzhalter ist nie ein Beleg.
+- **Ein Lader für alle Leser.** Die Gates Product-Frame, Issues und Plan-Structure lesen die Registry über das neue Kernmodul `registry_config.py`.
+  - Der Issues-Gate prüft die Existenz mit gebündelten GraphQL-Anfragen statt einem `gh`-Aufruf je Verweis.
+  - Seine Regel „done braucht ein Issue“, die keine Konfiguration mehr erreichte, entfällt.
+  - Der Plan-Structure-Gate nimmt das Story-Muster nur dann aus der Registry, wenn die lokale Registry-Datei an der Integrationsbasis existiert.
+- **Migration:** `check_feature_registry.py --assign-ids [--write]` nummeriert Items nach ihrer Position, nimmt bei einer Kollision die nächste freie Nummer, meldet nicht konforme IDs und erhält die Formatierung der Dateien.
+- **Tokens aus Claude Code** (#403).
+  - Der Platzhalter `{worktree_slug}` folgt der Regel, nach der Claude Code sein Projektverzeichnis benennt; empfohlen ist `~/.claude/projects/{worktree_slug}/**/*.jsonl`.
+  - Eine Sitzungsdatei zählt nur, wenn ihr `cwd` der Worktree ist, und ihre Subagent-Dateien zählen mit ihr.
+  - Die Phasen-Historie hält Zeitfenster je Issue und Branch, damit alle Phasen eines Issues zählen, auch nachdem die Kette die Sitzung gestoppt hat. Ein wiederverwendeter Branch-Name, ein wiedereröffnetes Issue und zwei Issues im Wechsel auf einem Branch werden richtig zugeordnet.
+  - Ein Besitzer, `dispatch.token_reason`, nennt den Grund für fehlende Tokens: `not-configured`, `no-record`, `no-files`, `remote` oder `partial`.
+- **Testhinweise:** Ein Fake liefert das echte Wire-Format seines Produzenten, samt Zeitzone; zeitabhängige Suiten laufen nicht in UTC; Fehlerpfade werden auch aus späteren Zuständen getestet.
+- **Probe-Build:** Ein billiger Bau aus dem Design-Paket allein, vor dem Einfrieren, findet die Stellen, an denen ein Implementierer improvisieren müsste.
+
+**Wirkung.**
+- Das Projekt kann seinen eigenen Checker ablösen und behält nur seine Projektregeln. Auf der echten Registry des Projekts findet der Checker genau die 1714 Items ohne ID, und `--assign-ids --write` migriert sie.
+- Token-Kosten je Issue werden für Claude-Code-Sitzungen messbar.
+
+**Geänderte Abschnitte.**
+- `feature-registry.md` (neu geschrieben: Proven behaviour and addressable targets — not a work log; Acceptance items; Writing rule and split rule; Test refs; Configuration; Overlay: the project's choices; Migration)
+- `github-issues.md` (Prerequisites (optional); The issue field)
+- `telemetry.md` (The KPI cockpit)
+- `testing.md` (What earns a test beyond the happy path)
+- `design-contracts.md` (Probe build — a completeness check before the freeze)
+- `workflow.md` (Spike)
+- `journal-state-plans.md` (Plans)
+- `overlays.md` (Where an overlay lives)
+
+**Update.**
+- Projekte mit Akzeptanzkriterien ohne `id` führen einmal `python scripts/process/check_feature_registry.py --assign-ids --write` aus.
+- Items, die schon `surfaces` oder `tests` tragen, brauchen die `surfaces` des Projekts in `feature-registry.local.json`.
+- Für die Token-Messung `"transcripts": "~/.claude/projects/{worktree_slug}/**/*.jsonl"` in `model-policy.local.json` setzen; mit `CLAUDE_CONFIG_DIR` den dortigen Pfad.
+
+Details: [Plan](docs/analysis/2026-11-09-v2.92.md) #404 #403
+
 ## v2.91.0 — Der Zug plant schneller und sagt, wer warum zurückbleibt · 2026-11-04
 
 **Warum.** Downstream, bei 603 Branches und 247 Journal-Shards:
