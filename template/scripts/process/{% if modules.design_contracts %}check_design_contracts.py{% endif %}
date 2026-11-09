@@ -63,9 +63,12 @@ _HASH_PIN = re.compile(r"^sha256:([0-9a-f]{64})$")
 # review-artifact digest (64 hex) — grabbing any hex read that as "a different seal"
 _SEAL_LINE = re.compile(r"(?:manifest\.sha256|seal(?:\s+reviewed)?)\s*[:=]\s*`?([0-9a-f]{64})`?", re.IGNORECASE)
 # the verdict is the whole token: "Decision: GO/NO-GO meeting" is no decision, and
-# neither is the template's unfilled choice "GO | GO with conditions | NO GO"
+# neither is an unfilled choice ("GO | GO with conditions | NO GO", "GO / NO GO",
+# "GO or NO GO"). Only the same line is read: a table after the line is no choice,
+# and "NO GO | blockers F1" stays NO GO
 _GO = re.compile(r"^\s*[*_#\s]*(?:decision|entscheidung)[*_]*\s*:\s*[*_]*\s*(GO|NO[- ]GO|KEIN GO)\b(?![-/])"
-                 r"(?!\s*\|)", re.IGNORECASE | re.MULTILINE)
+                 r"(?![ \t]*(?:\||/|,|\bor\b|\boder\b)[ \t]*[*_]*(?:GO|NO[- ]GO|KEIN GO)\b)",
+                 re.IGNORECASE | re.MULTILINE)
 _HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.MULTILINE)
 _FENCE = re.compile(r"^(`{3,}|~{3,}).*?^\1[ \t]*$", re.MULTILINE | re.DOTALL)
 
@@ -75,6 +78,13 @@ def _unfenced(text: str) -> str:
     reads them (indented and list-item fences, a longer closing fence): one owner."""
     from check_review import _unfenced as owner  # noqa: PLC0415
     return owner(text)
+
+
+def _readable(text: str) -> str:
+    """What a reader of the rendered Markdown sees: no fenced blocks, no HTML comments —
+    a commented-out draft decides nothing. The review gate's reading, one owner."""
+    from check_review import readable  # noqa: PLC0415
+    return readable(text)
 
 
 def _without_decisions(text: str) -> str:
@@ -91,7 +101,10 @@ def _registry_files(root: Path) -> list[Path]:
 
 
 def _inside(root: Path, rel: str) -> Path | None:
-    resolved = (root / rel).resolve()
+    try:
+        resolved = (root / rel).resolve()
+    except (OSError, ValueError):  # an embedded NUL is no path
+        return None
     if root.resolve() not in resolved.parents:
         return None
     return resolved
@@ -324,7 +337,7 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                 hard.append(f"{rel}: {key} {val!r} is not a committed file")
                 continue
             if key == "review":
-                rtext = _unfenced(_read(p))
+                rtext = _readable(_read(p))
                 verdict = _verdict(rtext)
                 if verdict is None:
                     hard.append(f"{rel}: review {val} records no decision line (`Decision: GO` / "
@@ -648,8 +661,11 @@ def _states_of(root: Path, rdir: Path, value: object, axes: dict[str, list[str]]
         _subset(state, "themes", axes["themes"], "theme", swhere, out)
         _subset(state, "variants", axes["variants"], "variant", swhere, out)
         for board in _names(state["boards"], "boards", swhere, out) if "boards" in state else []:
-            target = (rdir / board).resolve()
-            if folder not in target.parents or not target.is_file():
+            try:
+                target = (rdir / board).resolve()
+            except (OSError, ValueError):  # an embedded NUL is no path
+                target = None
+            if target is None or folder not in target.parents or not target.is_file():
                 out.append(f"{swhere}: board {board!r} does not exist in the round")
     return ids
 
@@ -918,18 +934,40 @@ def round_catalogue(root: Path, rnd: Round, base: str | None) -> list[str] | Non
     import check_review as _review  # noqa: PLC0415
     states: list[str] = []
     found = False
+    at_base = lambda r, b=base: _review._show(root, b, r)  # type: ignore[misc]  # noqa: E731
+    present = {rel for rel, _data in rnd.entries}
+    values = []
     for rel, data in rnd.entries:
-        values = [(data.get("state_catalogue"), _worktree_text(root))]
+        values.append((data.get("state_catalogue"), _worktree_text(root)))
         old = _entry_at(root, base, rel) if base else None
         if isinstance(old, dict):
-            values.append((old.get("state_catalogue"),
-                           lambda r, b=base: _review._show(root, b, r)))  # type: ignore[misc]
-        for value, read in values:
-            got, _problem = state_catalogue(root, value, read)
-            if got is not None:
-                found = True
-                states += [s for s in got if s not in states]
+            values.append((old.get("state_catalogue"), at_base))
+    # an entry of the round at the fork point that this push deletes or moves away keeps
+    # its catalogue: dropping the entry drops no state (DeepSeek review v2.93)
+    for rel, old in _base_entries(root, base) if base else []:
+        if rel not in present and _status(old) != "legacy" and _norm(old.get("reference")) \
+                and posixpath.normpath(_norm(old["reference"])) == rnd.key:
+            values.append((old.get("state_catalogue"), at_base))
+    for value, read in values:
+        got, _problem = state_catalogue(root, value, read)
+        if got is not None:
+            found = True
+            states += [s for s in got if s not in states]
     return states if found else None
+
+
+def _base_entries(root: Path, base: str) -> list[tuple[str, dict]]:
+    """The registry entries at the fork point that parse to an object."""
+    import check_review as _review  # noqa: PLC0415
+    names = _review._git_bytes(root, "ls-tree", "-z", "--name-only", base, "--", f"{REGISTRY_DIR}/")
+    out = []
+    for rel in sorted((names or b"").decode(errors="surrogateescape").split("\0")):
+        if rel.endswith(".json") and not rel.endswith(".example.json") \
+                and posixpath.dirname(rel) == REGISTRY_DIR:
+            data = _entry_at(root, base, rel)
+            if isinstance(data, dict):
+                out.append((rel, data))
+    return out
 
 
 # --- coverage: which visible acceptance items a round covers (#404 B4) -----------------
@@ -1060,7 +1098,15 @@ _DECISION_ID = re.compile(r"[A-Z][A-Z0-9]*-?\d+")
 _ITEM_REF = r"[A-Za-z][\w.-]*#AC[1-9]\d*(?![\w-])"
 _COVERS = re.compile(rf"^(?P<verb>change|drop)[ \t]+(?P<refs>{_ITEM_REF}(?:[ \t]*,[ \t]*{_ITEM_REF})*)"
                      r"(?P<rest>.*)$")
-_REASON = re.compile(r"^[ \t]*(?:—|–|--?)[ \t]*\S")
+_REASON_LEAD = r"^[ \t]*(?:—|–|--?)[ \t]*"
+
+
+@functools.cache
+def _reason() -> re.Pattern[str]:
+    """A reason after the dash — no placeholder (`<reason>`, `TODO`, `…`): the review gate's
+    placeholder grammar, one owner."""
+    from check_review import PLACEHOLDER  # noqa: PLC0415
+    return re.compile(_REASON_LEAD + PLACEHOLDER + r"\S")
 
 
 @functools.cache
@@ -1086,7 +1132,7 @@ class Decision:
 def decisions_in(text: str, source: str) -> list[Decision]:
     """The owner decisions with an ID in a file's unfenced text."""
     out: list[Decision] = []
-    for m in _owner_line().finditer(_unfenced(text)):
+    for m in _owner_line().finditer(_readable(text)):
         head, sep, raw = m.group("token").rpartition("/")
         bound = head.rsplit("/", 1)[-1] if sep else None
         if not _DECISION_ID.fullmatch(raw) or bound == "":
@@ -1098,7 +1144,7 @@ def decisions_in(text: str, source: str) -> list[Decision]:
         out.append(Decision(source, raw, canonical(raw, _DECISION_ID), bound,
                             " ".join(re.sub(r"[*_]+", "", plain).split()),
                             cover.group("verb") if cover else None, refs,
-                            bool(cover and _REASON.match(cover.group("rest")))))
+                            bool(cover and _reason().match(cover.group("rest")))))
     return out
 
 
@@ -1269,7 +1315,7 @@ def _says_go(root: Path, data: dict) -> bool:
     path = _inside(root, review) if review else None
     if _status(data) != "accepted" or path is None or not path.is_file():
         return False
-    verdict = _verdict(_unfenced(_read(path)))
+    verdict = _verdict(_readable(_read(path)))
     return verdict is not None and verdict.upper() == "GO"
 
 

@@ -416,7 +416,7 @@ def load_registry_at(root: Path, rev: str) -> tuple[Registry | None, list[str]]:
                       f"not compared with a base"]
     try:
         listing = _rev_listing(root, rev, cfg["root"])
-    except review.GitReadError as exc:
+    except (review.GitReadError, ValueError) as exc:  # ValueError: a NUL in the root
         return None, [f"{NO_BASE}: {cfg['root']} {at} cannot be read ({exc}) — item ids are "
                       f"not compared with a base"]
     if not listing.present:

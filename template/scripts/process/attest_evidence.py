@@ -1226,8 +1226,12 @@ def _cited_elsewhere(plan: str, declared_in: str | None = None) -> tuple[str, se
 _BARE_MENTION = re.compile(r"\b" + _AC + r"(?!\w)")
 # a feature-registry item ref, `NAV-US-003#AC19` (v2.93 I4.7): the item of a story, not a
 # criterion of the work. The story id is read loosely — the registry's `id_pattern` is the
-# project's, and a plan is read without it; a URL anchor (`spec#AC4`) has no story id
-_REGISTRY_REF = re.compile(r"(?<![\w-])[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+#AC[1-9]\d*(?![\w-])")
+# project's, and a plan is read without it: a token with a digit or a hyphen (`US12`,
+# `nav-us-003`), never after `/` or `.` — a URL anchor (`spec#AC4`, `x.md#AC4`) is no
+# story. A list `STORY-1#AC2,AC3` is one ref
+_ITEM = r"AC[1-9]\d*(?![\w-])"
+_REGISTRY_REF = re.compile(r"(?<![\w/.-])(?=[A-Za-z][\w-]*[\d-][\w-]*#)[A-Za-z][\w-]*#" + _ITEM
+                           + r"(?:[ \t]*,[ \t]*" + _ITEM + r")*")
 
 
 def _registry_refs_blanked(text: str) -> str:

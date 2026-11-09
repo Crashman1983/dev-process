@@ -2861,3 +2861,7 @@ def test_a_registry_item_ref_is_no_criterion_of_the_plan(ev_mod):
     assert req("issue: #7\n", "- AC19: When x, y shall z.\nSee NAV-US-003#AC19.\n") == {"19"}
     # Wächter: a URL anchor without a story id in front is no registry ref
     assert req("issue: #7\nSee https://example.com/spec#AC4.\n", "") == {"4"}
+    # refute v2.93: ids without a hyphen or in lower case, and a list form, are refs too
+    for ref in ("US12#AC3", "nav-us-003#AC3", "STORY-0001#AC2,AC3", "STORY-0001#AC2, AC3"):
+        assert req(f"issue: #7\nSiehe {ref}.\n- AC-1: When x, y shall z.\n", "") == {"1"}, ref
+    assert req("issue: #7\nSee docs/x.md#AC4.\n", "") == {"4"}  # Wächter: a file anchor
