@@ -6,10 +6,22 @@
 **Seal reviewed:** manifest.sha256 = `<64-hex>` (`scripts/process/seal.py --verify <round dir>` passed)
 **Decision:** GO | GO with conditions | NO GO
 
-The gate reads two things from this file: the `Decision:` line, and the
-seal hash. A contract becomes `accepted` only on a GO, and only for the
+The gate reads the `Decision:` line, the seal hash and owner decisions with
+an ID (below) from this file. A contract becomes `accepted` only on a GO, and only for the
 boards this hash names; a re-sealed round needs a new review file (or a
-new round section with its own hash).
+new round section with its own hash). Leave one verdict on the `Decision:`
+line — the unfilled choice `GO | GO with conditions | NO GO` is no decision.
+Any change to this file touches the round: its `states.json` is then
+required, so keep one review file per round.
+
+The gate computes which acceptance items the round covers (the round's
+`states.json`, the items' design anchors, the owner decisions); this review
+does not copy that table. An owner decision taken during the review that
+changes or drops an item is written with an ID:
+
+```
+DECISION <date> owner <ID>: change|drop <Story>#AC<n>[, …] — <reason>
+```
 
 ## Verified scope
 
