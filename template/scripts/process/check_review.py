@@ -1764,10 +1764,16 @@ def _journal_blobs(root: Path, commit: str, *, strict: bool) -> list[tuple[str, 
     return blobs
 
 
-def _blob_texts(root: Path, shas: list[str]) -> dict[str, str]:
+def _blob_texts(root: Path, shas: list[str], *, strict: bool = False) -> dict[str, str]:
     """The text of each blob, read in ONE `cat-file --batch` (a base holds hundreds of shards)
-    — once per run: a blob id names its content (`_PURE`, #398)."""
-    todo = [sha for sha in dict.fromkeys(shas) if ("blob", str(root), sha) not in _PURE]
+    — once per run: a blob id names its content (`_PURE`, #398).
+
+    Lenient by default: bytes that are no UTF-8 are replaced. `strict` raises GitReadError
+    on such a blob instead — a reader for whom a broken file is unreadable, never silently
+    readable (the feature registry at a base, v2.93). Each mode has its own cache key, so a
+    lenient read never answers a strict one."""
+    kind = "blob-strict" if strict else "blob"
+    todo = [sha for sha in dict.fromkeys(shas) if (kind, str(root), sha) not in _PURE]
     if todo:
         try:
             result = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"],
@@ -1784,9 +1790,13 @@ def _blob_texts(root: Path, shas: list[str]) -> dict[str, str]:
             if len(parts) != 3 or parts[1] != b"blob" or not parts[2].isdigit() or len(data) <= int(parts[2]):
                 raise GitReadError(f"git cat-file cannot read the blob {sha}")
             size = int(parts[2])
-            _PURE[("blob", str(root), sha)] = data[:size].decode("utf-8", errors="replace")
+            try:
+                text = data[:size].decode("utf-8", errors="strict" if strict else "replace")
+            except UnicodeDecodeError as exc:
+                raise GitReadError(f"the blob {sha} is no UTF-8 text ({exc.reason})") from None
+            _PURE[(kind, str(root), sha)] = text
             data = data[size + 1:]
-    return {sha: _PURE[("blob", str(root), sha)] for sha in shas}  # type: ignore[misc]
+    return {sha: _PURE[(kind, str(root), sha)] for sha in shas}  # type: ignore[misc]
 
 
 def range_records(root: Path, base: str, tip: str) -> RangeRecords:
