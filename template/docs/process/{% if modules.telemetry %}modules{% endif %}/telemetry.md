@@ -80,6 +80,19 @@ gap. `finish.py` and `cost --issue N` print `tokens: not measured (<reason>)`
 or `tokens: N output over M sessions (partial: <reason>)`; sessions are the
 top-level transcripts, a subagent's file counts toward its session.
 
+Tokens come from the policy's `transcripts` glob (`model-policy.local.json`).
+For Claude Code: `"transcripts": "~/.claude/projects/{worktree_slug}/**/*.jsonl"`
+— `{worktree_slug}` is the dispatched worktree's path as Claude Code names its
+project directory (every character but A-Z, a-z and 0-9 becomes `-`, built from
+the path and its realpath; past 200 characters the hash Claude Code appends is
+globbed), and a session counts only when its transcript carries the worktree as
+`cwd`. With `CLAUDE_CONFIG_DIR` set, Claude Code keeps `projects/` there: write
+that path instead of `~/.claude`. `{worktree}` stays the path itself, for a
+harness that keeps its transcripts under the worktree. An issue's sum covers
+its sessions on every branch it was dispatched on, from its first phase start
+to the merge, across stopped and restarted phases (the phase history
+`phases/<issue>.json` keeps the windows, worktrees and remote phases).
+
 | family | measures | action (threshold → act) |
 |---|---|---|
 | `cost` | `--transcripts DIR` token medians per session (a message counts once, read through dispatch's transcript reader — v2.81) (harness-specific, `~approx`); `--issue N` one issue's output tokens from the policy's `transcripts` glob (`finish.py` prints the same line), else `not measured (<reason>)` | a work item far above the median → look at its rounds (`rounds`) before its model |
