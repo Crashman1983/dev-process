@@ -1254,6 +1254,20 @@ def test_a_review_file_shared_by_two_rounds_is_red_when_touched(render, tmp_path
     assert r.returncode == 1 and "share the review" in "\n".join(_hard(r)), r.stdout
 
 
+def test_two_reference_folders_with_one_name_are_red_when_touched(render, tmp_path):
+    # v2.93 B3: anchors and bound decisions name a round by its folder name
+    other = f"docs/design/archive/{Path(ROUND).name}"
+    out = _repo(render, tmp_path, lambda o: _shared(o, other))
+    _write(out, "server/api.py", "x = 1\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0 and "share the folder name" in r.stdout, r.stdout
+    _write(out, REVIEW, (out / REVIEW).read_text() + "\n## ios\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "share the folder name" in "\n".join(_hard(r)), r.stdout
+
+
 def test_a_new_section_in_a_shared_review_of_one_round_touches_it(render, tmp_path):
     def base(out):
         _round_without_states(out, reference=ROUND, adr=ADR, review=REVIEW, status="accepted")
