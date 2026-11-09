@@ -13,9 +13,9 @@ def _render(render, tmp_path, **extra):
     return render(tmp_path, {"project_name": "d", "modules": {"feature_registry": True}, **extra})
 
 
-def _gate(out):
+def _gate(out, *args):
     return subprocess.run(
-        [sys.executable, str(out / "scripts/process/check_feature_registry.py"), "."],
+        [sys.executable, str(out / "scripts/process/check_feature_registry.py"), ".", *args],
         cwd=out, capture_output=True, text=True)
 
 
@@ -719,3 +719,89 @@ def test_strict_item_tests_on_fails_an_item_without_tests(render, tmp_path):
     out = _green_kenni(render, tmp_path, strict_item_tests=True)
     r = _gate(out)
     assert r.returncode == 1 and "CLI-US-001#AC1: no existing test (strict_item_tests)" in r.stdout, r.stdout
+
+
+# --- v2.92 M1: --assign-ids [--write] ---
+
+def _raw_entry(out, text, name="STORY-0002.json"):
+    d = out / REG
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_text(text, encoding="utf-8")
+    return d / name
+
+
+def _acceptance(path):
+    return json.loads(path.read_text(encoding="utf-8"))["acceptance"]
+
+
+def test_assign_ids_numbers_strings_by_position(render, tmp_path):
+    out = _render(render, tmp_path)
+    p = _raw_entry(out, json.dumps({"id": "STORY-0002", "acceptance": ["a", "b", {"text": "c"}]}, indent=2))
+    r = _gate(out, "--assign-ids", "--write")
+    assert r.returncode == 0, r.stdout
+    assert _acceptance(p) == [{"id": "AC1", "text": "a"}, {"id": "AC2", "text": "b"},
+                              {"id": "AC3", "text": "c"}]
+
+
+def test_assign_ids_collision_takes_the_maximum_plus_one(render, tmp_path):
+    # AC2 is taken by an existing item, AC3 then by this run's own assignment
+    out = _render(render, tmp_path)
+    p = _raw_entry(out, json.dumps({"id": "STORY-0002", "acceptance": [
+        "a", "b", {"id": "AC2", "text": "c"}, "d"]}, indent=2))
+    r = _gate(out, "--assign-ids", "--write")
+    assert r.returncode == 0, r.stdout
+    assert [i["id"] for i in _acceptance(p)] == ["AC1", "AC3", "AC2", "AC4"]
+    p = _raw_entry(out, json.dumps({"id": "STORY-0002", "acceptance": [
+        {"id": "AC2", "text": "a"}, "b", "c"]}, indent=2))
+    assert _gate(out, "--assign-ids", "--write").returncode == 0
+    assert [i["id"] for i in _acceptance(p)] == ["AC2", "AC3", "AC4"]
+
+
+def test_assign_ids_reports_a_nonconforming_id(render, tmp_path):
+    out = _render(render, tmp_path)
+    p = _raw_entry(out, json.dumps({"id": "STORY-0002", "acceptance": [{"id": "AC-1", "text": "a"}, "b"]}))
+    r = _gate(out, "--assign-ids", "--write")
+    assert r.returncode == 1 and "STORY-0002: item id 'AC-1' does not match" in r.stdout, r.stdout
+    assert [i["id"] for i in _acceptance(p)] == ["AC-1", "AC2"]  # reported, never rewritten
+
+
+def test_assign_ids_without_write_changes_nothing(render, tmp_path):
+    out = _render(render, tmp_path)
+    text = json.dumps({"id": "STORY-0002", "acceptance": ["a"]}, indent=2) + "\n"
+    p = _raw_entry(out, text)
+    r = _gate(out, "--assign-ids")
+    assert r.returncode == 0 and "would assign 1 item id(s)" in r.stdout and "--write" in r.stdout, r.stdout
+    assert p.read_text(encoding="utf-8") == text
+
+
+def test_assign_ids_twice_changes_nothing_the_second_time(render, tmp_path):
+    out = _render(render, tmp_path)
+    p = _raw_entry(out, json.dumps({"id": "STORY-0002", "acceptance": ["a", "b"]}, indent=4))
+    assert _gate(out, "--assign-ids", "--write").returncode == 0
+    once = p.read_text(encoding="utf-8")
+    r = _gate(out, "--assign-ids", "--write")
+    assert r.returncode == 0 and "nothing to assign" in r.stdout, r.stdout
+    assert p.read_text(encoding="utf-8") == once
+
+
+def test_assign_ids_keeps_indent_and_umlauts(render, tmp_path):
+    out = _render(render, tmp_path)
+    p = _raw_entry(out, '{\n    "id": "STORY-0002",\n    "acceptance": [\n        "Größe ändert sich"\n    ]\n}')
+    assert _gate(out, "--assign-ids", "--write").returncode == 0
+    assert p.read_text(encoding="utf-8") == (
+        '{\n    "id": "STORY-0002",\n    "acceptance": [\n        {\n'
+        '            "id": "AC1",\n            "text": "Größe ändert sich"\n        }\n    ]\n}\n')
+
+
+def test_assign_ids_migrates_the_kenni_layout(render, tmp_path):
+    out = _kenni(render, tmp_path, ids=False)
+    _edit(out, "captures/CAP-US-004.json", test_mapping={"web": []})
+    assert _gate(out).returncode == 1  # string items carry no id yet
+    r = _gate(out, "--assign-ids", "--write")
+    assert r.returncode == 0 and "docs/feature-registry/clients/CLI-US-002.json: assigned 13 item id(s)" \
+        in r.stdout, r.stdout
+    items = _acceptance(out / KREG / "clients/CLI-US-002.json")
+    assert [i["id"] for i in items] == [f"AC{n}" for n in range(1, 14)]
+    assert _gate(out).returncode == 0
+    head = (out / KREG / "clients/_capability.json").read_text(encoding="utf-8")
+    assert '"prefix": "CLI"' in head  # heads are no stories: untouched
