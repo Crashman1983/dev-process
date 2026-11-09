@@ -88,7 +88,7 @@ def test_cost_per_issue_reads_the_policy_transcripts_or_says_not_measured(render
     out = _render(render, tmp_path)
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
     r = _kpis(out, "cost", "--issue", "7")
-    assert r.returncode == 0 and "issue #7" in r.stdout and "tokens: not measured" in r.stdout, r.stdout + r.stderr
+    assert r.returncode == 0 and "issue #7" in r.stdout and "tokens: not measured (not-configured)" in r.stdout, r.stdout + r.stderr
     (tmp_path / "t").mkdir()
     (tmp_path / "t" / "s.jsonl").write_text('{"output_tokens": 5}\n')
     (out / ".git/process-dispatch").mkdir()
@@ -2150,10 +2150,10 @@ def test_an_empty_value_names_why_it_is_empty(render, tmp_path):
     _train_merge(out, "41-a", [("feat: a (#41)", {"src/a.py": _lines(4)}, _at(2))],
                  "train: merge 41-a\n\nCloses #41", _at(2, 12))
     text = _cli(out, "baseline")
-    assert "tokens — transcripts not configured" in text, text
+    assert "tokens — not-configured" in text, text
     assert "escapes — no Regression-of trailer since the window's start — unmeasured, not zero" in text, text
     losses = _cli(out, "losses", "--days", "3650")
-    assert "transcripts not configured" in losses or "no dispatched issue" in losses, losses
+    assert "not-configured" in losses or "no dispatched issue" in losses, losses
 
 
 def test_baseline_names_the_outliers_share_and_the_revert_rate(render, tmp_path):

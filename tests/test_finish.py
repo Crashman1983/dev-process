@@ -279,12 +279,12 @@ def test_finish_names_tokens_and_apply_writes_them_into_done(render, tmp_path):
     import json
     out, _bare = _repo_with_origin(render, tmp_path)
     r = _run(out)
-    assert r.returncode == 0 and "finish: tokens: not measured" in r.stdout, r.stdout
+    assert r.returncode == 0 and "finish: tokens: not measured (not-configured)" in r.stdout, r.stdout
     r = _run_args(out, "--apply", "--tests-passed")
-    assert r.returncode == 0 and "finish: tokens: not measured" in r.stdout, r.stdout + r.stderr
+    assert r.returncode == 0 and "finish: tokens: not measured (not-configured)" in r.stdout, r.stdout + r.stderr
     ledger = out / ".git/process-tower/reports.jsonl"
     done = [json.loads(line) for line in ledger.read_text().splitlines()]
-    assert done[-1]["state"] == "done" and done[-1]["note"] == "tokens: not measured"
+    assert done[-1]["state"] == "done" and done[-1]["note"] == "tokens: not measured (not-configured)"
     assert done[-1]["worker"] == "feature"
 
 
@@ -304,7 +304,7 @@ def test_done_is_written_once_the_merge_is_pushed_even_if_the_branch_delete_fail
                                 capture_output=True, text=True).stdout
     assert "archive plan(s)" in remote_log  # the merge is pushed
     done = [json.loads(line) for line in (out / ".git/process-tower/reports.jsonl").read_text().splitlines()]
-    assert done[-1]["state"] == "done" and done[-1]["note"] == "tokens: not measured"
+    assert done[-1]["state"] == "done" and done[-1]["note"] == "tokens: not measured (not-configured)"
 
 
 def test_a_failing_done_report_does_not_end_a_pushed_merge_in_a_traceback(render, tmp_path, monkeypatch):
@@ -332,7 +332,7 @@ def test_issue_tokens_sum_the_policy_transcripts_of_its_worktrees(render, tmp_pa
     spec = importlib.util.spec_from_file_location("finish_t", out / "scripts/process/finish.py")
     finish = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(finish)
-    assert finish.usage(out, "7-widget") == (7, "tokens: not measured")
+    assert finish.usage(out, "7-widget") == (7, "tokens: not measured (not-configured)")
     wt = tmp_path / "wt [7]"  # glob characters in a worktree path are literal
     (wt / "t").mkdir(parents=True)
     (wt / "t" / "a.jsonl").write_text('{"usage": {"output_tokens": 40}}\n{"output_tokens": 2}\n')
@@ -343,7 +343,7 @@ def test_issue_tokens_sum_the_policy_transcripts_of_its_worktrees(render, tmp_pa
     (records / "8-other.json").write_text(json.dumps({"issue": 8, "worktree": str(tmp_path), "phase": "plan"}))
     (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
     assert finish.usage(out, "7-widget") == (7, "tokens: 142 output over 2 sessions")
-    assert finish.usage(out, "feature") == (None, "tokens: not measured")
+    assert finish.usage(out, "feature") == (None, "tokens: not measured (no-record)")
     # the same reader gives input and cache shares apart; a field the harness never
     # wrote stays absent (not measured), never a zero
     (wt / "t" / "a.jsonl").write_text('{"usage": {"input_tokens": 5, "cache_read_input_tokens": 900, '

@@ -68,14 +68,21 @@ issue claims, merges whose plans git could not read (their issue unknown, not
 a lower bound — no strays or mixing counted for them), commits outside a merge
 range, works joined to no plan and no `REVIEW` line, events reached through a
 merge without marker, and a shallow clone (its boundary cuts the history). An
-empty token or escape value names its reason (`transcripts not configured`,
-`no dispatch log on this checkout`, `no Regression-of trailer since the window's
-start — unmeasured, not zero`): a project's missing configuration is not the
-template's gap.
+empty token or escape value names its reason: for tokens the one owner is
+`dispatch.token_reason` — `not-configured` (no `transcripts` glob), `no-record`
+(no phase history and no dispatch record), `no-files:<glob>` (the glob as
+written), `remote` (only sessions on another host), and `partial: <what is
+missing>` beside a sum that is measured in part (`remote`, `no-files:<glob>`,
+`unknown`: an unreadable transcript, an opaque line, a message without a
+timestamp); for escapes `no Regression-of trailer since the window's start —
+unmeasured, not zero`. A project's missing configuration is not the template's
+gap. `finish.py` and `cost --issue N` print `tokens: not measured (<reason>)`
+or `tokens: N output over M sessions (partial: <reason>)`; sessions are the
+top-level transcripts, a subagent's file counts toward its session.
 
 | family | measures | action (threshold → act) |
 |---|---|---|
-| `cost` | `--transcripts DIR` token medians per session (a message counts once, read through dispatch's transcript reader — v2.81) (harness-specific, `~approx`); `--issue N` one issue's output tokens from the policy's `transcripts` glob (`finish.py` prints the same line), else `not measured` | a work item far above the median → look at its rounds (`rounds`) before its model |
+| `cost` | `--transcripts DIR` token medians per session (a message counts once, read through dispatch's transcript reader — v2.81) (harness-specific, `~approx`); `--issue N` one issue's output tokens from the policy's `transcripts` glob (`finish.py` prints the same line), else `not measured (<reason>)` | a work item far above the median → look at its rounds (`rounds`) before its model |
 | `cfr` | DORA change failure rate: `feat:` with a corrective `fix:` ≤7 d sharing a code file (proxy) | trend over ≥3 windows only; rising despite catch>0 → tighten the test/review gate |
 | `clusters` | rule 6 across sessions: `fix:` commits (14 d) sharing a subject token — each session sees its fix as a first attempt; git sees the series | a cluster ≥3 → stop path-patching, write the invariant record (Type: invariant) with its table test (`workflow.md`, Debug) |
 | `rounds` | per work item: **compliance** (v2.81): ROOT-CAUSE for every blocked code round and REPLAN for every blocked round after a work's first, both from v2.77, and `kind=` on blockers from v2.70 (a doc duty no gate checks) — written against owed, from the template version at the head the review saw (a version that is no release tag is `unknown`, never old), `sites: none` and reasoned skips fulfilling, REPLAN variants named `unparsed`, and the rounds after a `rebuild`; **coverage** apart: the share of blocker/major findings carrying `origin=`, `at=`, `class=` (and `kind=` on majors), Codex against the others — optional or gate-enforced fields, never a duty here; tier, rounds to the first pass and blocked rounds (journal `REVIEW` lines); blockers per `FINDING`, by `origin=draft\|fix\|late` where the reports carry it, and by `kind=` (plan reviews — header `phase: plan` — apart from code reviews; `kind=` is the finding's sort, not the `cause:*` label of `outcomes`) — read through `check_issues.py` when the `github-issues` module is installed, else "not read"; a reader that is installed but cannot import (PyYAML missing — `uv run` resolves the script's header) is named as such; **old-code blocks** (#311): the `sev=blocker` findings of code reviews in round ≥ 2 whose `at=` lines stand as they did at a head of round 1 (a tree comparison: a rebase changes nothing while round 1's head exists), as unchanged/measured with the share, per round and per work, and what was not measured by reason (`no-at`, `no-place`, `no-line`, `not-code`, `no-round1`, `no-head`, `missing-commit`, `outside`, `git-failed`, `unreadable-report`) — measured only for findings that carry `at=` (v2.78), and a work whose round-1 head the repository no longer has is unmeasurable; **by round** (#318): per round 1, 2, 3 and ≥ 4, code reviews apart from plan reviews (`<work>-plan` REVIEW lines, `phase: plan` reports) — the median blockers per work and round, the works whose round blocked of all works reviewed, the share of those blocks on lines unchanged since round 1 (code reviews only; plan reviews `n/a`) and the round's median cost in tokens where a review run stated its usage (`report.py --usage`, phase `review`; the n-th such run of an issue is read as its round n — an estimate; plan rounds carry none) — a round without a stated cost is `unknown`, never free | proxy; within one tier over time: `fix` blockers dominate → regression tests and a re-check of the fixed class (`verification-independence.md`, "What each round judges"); `late` dominates → a more complete round 1 |
