@@ -217,10 +217,14 @@ def _check_issues(run: Run, data: dict, rel: str) -> None:
         refs = data[name]
     else:
         run.hard.append(f"{rel}: 'issues' must be a list (it may be empty)")
+    # the template's own `issue` field is a provenance pointer for humans — an issue or
+    # the PR that delivered the capability (module doc) — so a ref parse_issue_ref does
+    # not know is a note there; a project that configures `issues` asks for the format
     for ref in refs:
         if not isinstance(ref, str) or parse_issue_ref(ref.strip()) is None:
-            run.hard.append(f"{rel}: malformed issue ref {ref!r} in '{name}' "
-                            f"(want '#N', 'owner/repo#N', or a github issue URL)")
+            (run.soft if name == "issue" else run.hard).append(
+                f"{rel}: malformed issue ref {ref!r} in '{name}' "
+                f"(want '#N', 'owner/repo#N', or a github issue URL)")
     required_for = issues_cfg["required_for"]
     if required_for is not None and data.get("status") == required_for and not refs:
         run.hard.append(f"{rel}: status {required_for!r} needs at least one ref in '{name}'")
