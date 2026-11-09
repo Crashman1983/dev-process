@@ -810,3 +810,13 @@ def test_the_unfilled_template_decision_line_is_no_decision(render, tmp_path):
     r = _gate(out)
     assert r.returncode == 0, r.stdout  # guard: the last decision stands
 
+
+def test_a_contract_id_only_in_a_decision_line_is_not_defined(render, tmp_path):
+    out = _render(render, tmp_path)
+    c = _write(out, CONTRACT, CONTRACT_TEXT + "\n## 9. Decisions\n\n"
+               "- DECISION 2026-11-09 owner D7: S3 entfällt — kein Platz\n")
+    _entry(out, pin=f"sha256:{_sha(c)}")
+    _write(out, ".process-work/plans/2026-11-09-x.md", "# Plan\n\ntier: 2\ndesign-contract: web\n\nImplements S3.\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "cites web design-contract ID S3" in r.stdout, r.stdout
+
