@@ -1378,7 +1378,7 @@ def _note_phase(phases: Path, issue: int, branch: str, rec: dict) -> None:
             _save_json(path, history)
         with _FileLock(phases / "branches.lock"):
             index = _load_json_dict(phases / BRANCH_INDEX)
-            on_branch = [i for i in index.get(branch) or [] if isinstance(i, int)]
+            on_branch = _index_issues(index, branch)
             if issue not in on_branch:
                 index[branch] = [*on_branch, issue]
                 _save_json(phases / BRANCH_INDEX, index)
@@ -1388,6 +1388,13 @@ def _note_phase(phases: Path, issue: int, branch: str, rec: dict) -> None:
     except (OSError, ValueError) as exc:
         print(f"dispatch: the phase history of #{issue} was not written ({exc}) — its tokens may read "
               "as not measured", file=sys.stderr)
+
+
+def _index_issues(index: dict, branch: str) -> list[int]:
+    """The issues the branch index names for `branch` — a damaged value (not a list)
+    names none, so a hand-edited index never makes a write raise (v2.92 refute)."""
+    value = index.get(branch)
+    return [i for i in value if isinstance(i, int) and not isinstance(i, bool)] if isinstance(value, list) else []
 
 
 def _close_window(phases: Path, issue: int, branch: str, end: float) -> None:
@@ -1414,7 +1421,7 @@ def close_windows(root: Path, branch: str) -> None:
     if not phases.is_dir():
         return
     with _FileLock(phases / "branches.lock"):
-        issues = [i for i in _load_json_dict(phases / BRANCH_INDEX).get(branch) or [] if isinstance(i, int)]
+        issues = _index_issues(_load_json_dict(phases / BRANCH_INDEX), branch)
     now = int(time.time())
     for issue in issues:
         _close_window(phases, issue, branch, now)
@@ -1453,6 +1460,8 @@ def _token_sources(root: Path, issue: int | None) -> list[dict]:
                                 "windows": [w for w in entry.get("windows") or [] if _is_window(w)],
                                 "remote": entry.get("remote") is True})
     for p in sorted(d.glob("*.json")):
+        if p.name == ISSUES_FILE:  # the issue map, no session record (v2.92 refute)
+            continue
         rec = _load_json_dict(p)
         if not rec or str(rec.get("issue")) in from_history:
             continue
@@ -1517,6 +1526,8 @@ def _token_state(root: Path, issue: int | None, *, every: bool) -> tuple[str | N
     if not files:
         return (f"no-files:{pattern}" if missing or not remote else "remote"), None
     coverage = _coverage(files)
+    if not coverage[1]:  # files found, but no line in any window: nothing was measured
+        return (f"no-files:{pattern}" if missing or not remote else "remote"), None
     gaps = [*(["remote"] if remote else []), *([f"no-files:{pattern}"] if missing else []),
             *(["unknown"] if coverage[4] else [])]
     return (f"partial: {', '.join(gaps)}" if gaps else None), coverage

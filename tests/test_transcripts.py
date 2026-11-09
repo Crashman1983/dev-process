@@ -460,3 +460,43 @@ def test_why_missing_takes_the_overall_reason_from_dispatch(render, tmp_path):
     _phase(d, out, "2-b", 2, t0, remote=True, phase="review")
     assert d.token_reason(out, None) == "partial: remote"
     assert kpis.why_missing(out, lo, hi, None)["tokens"] == "partial: remote"
+
+
+def test_the_issue_map_is_no_session_record(render, tmp_path):
+    """v2.92 Refute: `issues.json` liegt neben den Records; als Quelle gelesen machte es jede
+    Gesamtsicht zu `partial: no-files`."""
+    import time
+    out, _records = _setup(render, tmp_path, "{worktree}/t/*.jsonl")
+    d = _load_dispatch(out)
+    wt = tmp_path / "wt"
+    t0 = time.time() - 1000
+    _phase(d, out, "1-a", 1, t0, wt=wt)
+    _write(wt / "t" / "s.jsonl", _msg("m1", 10, ts=t0 + 10))
+    d._remember_issue(out, 1, "1-a")
+    assert d.token_reason(out, None) is None
+    assert d.token_reason(out, 1) is None
+
+
+def test_files_without_a_line_in_any_window_measure_nothing(render, tmp_path):
+    """v2.92 Refute: Dateien gefunden, aber keine Zeile im Fenster — nicht gemessen, nicht `0 über 0`."""
+    import time
+    out, _records = _setup(render, tmp_path, "{worktree}/t/*.jsonl")
+    d = _load_dispatch(out)
+    wt = tmp_path / "wt"
+    t0 = time.time() - 1000
+    _phase(d, out, "1-a", 1, t0, wt=wt)
+    _write(wt / "t" / "old.jsonl", _msg("m0", 10, ts=t0 - 5000))
+    assert d.token_reason(out, 1).startswith("no-files:")
+    assert d.tokens_line(out, 1).startswith("tokens: not measured (no-files:")
+
+
+def test_a_damaged_branch_index_never_makes_a_write_raise(render, tmp_path):
+    """v2.92 Refute: ein Index-Wert, der keine Liste ist, darf `start` nach dem Worker-Start nicht abbrechen."""
+    import time
+    out, _records = _setup(render, tmp_path, "{worktree}/t/*.jsonl")
+    d = _load_dispatch(out)
+    phases = d.common_dir(out) / d.DISPATCH_DIR / "phases"
+    phases.mkdir(parents=True, exist_ok=True)
+    (phases / d.BRANCH_INDEX).write_text(json.dumps({"1-a": 5}))
+    _phase(d, out, "1-a", 1, time.time(), wt=tmp_path / "wt")
+    d.close_windows(out, "1-a")

@@ -391,6 +391,18 @@ def test_default_issue_field_pr_link_is_a_note_not_a_failure(render, tmp_path):
     assert "malformed issue ref" in r.stdout and "note" in r.stdout, r.stdout
 
 
+def test_default_issue_null_or_non_string_is_no_failure(render, tmp_path):
+    """Wächter (v2.92 Refute): `issue: null` gilt als nicht gesetzt, ein anderer Typ ist ein Hinweis."""
+    out = _render(render, tmp_path)
+    _entry(out, issue=None)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    _entry(out, issue=412)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "'issue' should be a string" in r.stdout, r.stdout
+
+
 def test_empty_test_mapping_list_outside_deferred_is_hard(render, tmp_path):
     out = _green_kenni(render, tmp_path)
     _edit(out, "clients/CLI-US-002.json", test_mapping={"ios": []})
