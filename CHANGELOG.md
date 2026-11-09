@@ -10,6 +10,70 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.92.0 — One registry checker for template and project; tokens from Claude Code transcripts · 2026-11-09
+
+**Why.**
+- Downstream, the project ran its own feature-registry checker beside the template's. It had a different layout, a different story shape and status, and tests per platform. Its 1714 acceptance items were plain strings, referenced by position (#404).
+- Token cost was never measured. The `transcripts` glob could not address Claude Code's per-project directory, so `cost --issue`, `models` and `finish` said `not measured` (#403).
+
+**What changes.**
+- **Configurable registry checker** (#404 part A, owner decision).
+  - `docs/process/feature-registry.json` holds the template defaults, and a project's choices go into `docs/process/feature-registry.local.json`. Without a local file the checker behaves as before, apart from the item ids below.
+  - A `capabilities` layout puts one directory per capability, with a head file `_capability.json` that carries the id `prefix`, and one file per story.
+  - Configurable:
+    - the id pattern;
+    - required story fields;
+    - platforms (`surfaces`) and shared proof layers;
+    - `tests` or per-platform `test_mapping`;
+    - an issue list;
+    - an optional story status;
+    - roots for test references;
+    - `planned:` placeholders;
+    - retired fields.
+  - Unknown configuration keys fail.
+  - Both configuration files count as gate code.
+- **Acceptance items carry an `id`** (`AC<n>`, unique per story; references are `<story>#AC<n>`). Optional item fields are validated where present:
+  - `surfaces`;
+  - `state` (`proven`/`target`, per platform possible; a target needs an `issue`);
+  - `tests` per platform;
+  - `owned_by` for behaviour a shared layer such as the backend proves for every platform.
+
+  An item without any platform has an implicit one.
+- **Test references:** the file must exist. A `::node` is checked segment by segment (AST for Python, substring otherwise), as a note by default or as a failure with `node_check: hard`. A `planned:` placeholder is never proof.
+- **One loader for every reader.** The product-frame, issues and plan-structure gates read the registry through the new core module `registry_config.py`.
+  - The issues gate checks existence with batched GraphQL queries instead of one `gh` call per reference.
+  - Its rule "done needs an issue", which no configuration could reach any more, is gone.
+  - The plan-structure gate takes the story pattern from the registry only where the local registry file exists at the integration ref.
+- **Migration:** `check_feature_registry.py --assign-ids [--write]` numbers items by position, takes the next free number on a collision, reports ids that do not conform, and keeps the files' formatting.
+- **Tokens from Claude Code** (#403).
+  - The placeholder `{worktree_slug}` follows Claude Code's project-directory rule; the recommended glob is `~/.claude/projects/{worktree_slug}/**/*.jsonl`.
+  - A session file counts only when its `cwd` is the worktree, and its subagent files follow it.
+  - The phase history keeps time windows per issue and branch, so every phase of an issue counts, even after the chain stopped the session. A reused branch name, a reopened issue and two issues alternating on one branch are attributed right.
+  - One owner, `dispatch.token_reason`, names why tokens are missing: `not-configured`, `no-record`, `no-files`, `remote` or `partial`.
+- **Testing guidance:** a fake returns its producer's real wire format, with time zones; time-dependent suites run outside UTC; failure paths are tested from later states too.
+- **Probe build:** a cheap build from the design package alone, before the freeze, finds the places an implementer would have to improvise.
+
+**Effect.**
+- The project can drop its own checker and keep only project rules. On the project's real registry, the checker finds exactly the 1714 items without an id, and `--assign-ids --write` migrates them.
+- Token cost per issue becomes measurable for Claude Code sessions.
+
+**Changed sections.**
+- `feature-registry.md` (rewritten: Proven behaviour and addressable targets — not a work log; Acceptance items; Writing rule and split rule; Test refs; Configuration; Overlay: the project's choices; Migration)
+- `github-issues.md` (Prerequisites (optional); The issue field)
+- `telemetry.md` (The KPI cockpit)
+- `testing.md` (What earns a test beyond the happy path)
+- `design-contracts.md` (Probe build — a completeness check before the freeze)
+- `workflow.md` (Spike)
+- `journal-state-plans.md` (Plans)
+- `overlays.md` (Where an overlay lives)
+
+**Update.**
+- Projects with acceptance items without an `id` run `python scripts/process/check_feature_registry.py --assign-ids --write` once.
+- Items that already carry `surfaces` or `tests` need the project's `surfaces` in `feature-registry.local.json`.
+- For token measurement, set `"transcripts": "~/.claude/projects/{worktree_slug}/**/*.jsonl"` in `model-policy.local.json`; with `CLAUDE_CONFIG_DIR`, use that path.
+
+Details: [Plan](docs/analysis/2026-11-09-v2.92.md) #404 #403
+
 ## v2.91.0 — The train plans faster and says who stays behind · 2026-11-04
 
 **Why.** Downstream, with 603 branches and 247 journal shards:

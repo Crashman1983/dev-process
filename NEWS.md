@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.92.0 — One registry checker for template and project; tokens from Claude Code transcripts
+
+A project's list of what the product can do (the feature registry) can now take its own shape: one folder per capability, tests per platform, a story status. The template checks it, so a project needs no checker of its own. Every acceptance criterion gets a stable identifier and can say whether it already works or is still a target, and on which platform. One command assigns the identifiers to an existing registry. The process can also now count how many tokens the Claude Code sessions of an issue used, across all of its phases.
+
 ## v2.91.0 — The train plans faster and says who stays behind
 
 Before it leaves, the merge train works out which branches may board. In a large repository with hundreds of old branches, that took over a quarter of an hour. It now reads only what it needs and asks git far fewer questions: on a test repository with 600 branches, planning drops from 44 to 9 seconds, with the same result. Every train run also says, for each branch that stays behind, why. Before, only the separate planning view did.
