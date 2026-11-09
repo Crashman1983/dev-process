@@ -826,6 +826,10 @@ def forget_branch(root: Path, branch: str) -> None:
                 _record_path(root, rec["branch"]).unlink()
             except OSError:
                 pass
+    try:
+        close_windows(root, branch)  # the issues' token windows end with the merge
+    except OSError:
+        pass
 
 def worktree_entries(root: Path) -> list[dict]:
     """Every worktree git knows, in its order: path, branch (None when detached),
@@ -1299,15 +1303,121 @@ def _write_record(root: Path, branch: str, rec: dict) -> None:
     try:
         staging.write_text(json.dumps(rec, indent=2), encoding="utf-8")
         os.replace(staging, path)
-        if rec.get("issue") is not None and rec.get("phase") in PHASES:
-            history = path.parent / "phases" / f"{int(rec['issue'])}.json"
-            history.parent.mkdir(exist_ok=True)
-            pending = history.with_suffix(f".{os.getpid()}.tmp")
-            pending.write_text(json.dumps({"phase": rec["phase"], "branch": branch}))
-            os.replace(pending, history)
     except OSError:
         staging.unlink(missing_ok=True)
         raise
+    if rec.get("issue") is not None and rec.get("phase") in PHASES:
+        _note_phase(path.parent / "phases", int(rec["issue"]), branch, rec)
+
+
+# The phase history `phases/<issue>.json` outlives the records (`stop` deletes a
+# record, and the chain stops a phase before it starts the next): `phase` and
+# `branch` of the last phase (read by `start`), and per branch the issue's
+# time windows, the local worktrees and whether a phase ran on another host —
+# what the token readers need after the sessions are gone (#403).
+# `phases/branches.json` is the reverse index {branch: [issue, …]}.
+BRANCH_INDEX = "branches.json"
+
+
+def _load_json_dict(path: Path) -> dict:
+    """The JSON object at `path`; {} when absent or unreadable."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_json(path: Path, data: dict) -> None:
+    pending = path.with_name(f"{path.stem}.{os.getpid()}.tmp")
+    pending.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(pending, path)
+
+
+def _is_window(w: object) -> bool:
+    def num(v: object) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+    return isinstance(w, list) and len(w) == 2 and num(w[0]) and (w[1] is None or num(w[1]))
+
+
+def _branch_entry(history: dict, branch: str) -> dict:
+    """The history's entry for `branch`, its fields cleaned, set in place."""
+    branches = history.get("branches") if isinstance(history.get("branches"), dict) else {}
+    old = branches.get(branch) if isinstance(branches.get(branch), dict) else {}
+    windows = old.get("windows") if isinstance(old.get("windows"), list) else []
+    worktrees = old.get("worktrees") if isinstance(old.get("worktrees"), list) else []
+    entry = {"windows": [w for w in windows if _is_window(w)],
+             "worktrees": list(dict.fromkeys(w for w in worktrees if isinstance(w, str))),
+             "remote": old.get("remote") is True}
+    branches[branch] = entry
+    history["branches"] = branches
+    return entry
+
+
+def _note_phase(phases: Path, issue: int, branch: str, rec: dict) -> None:
+    """A phase of `issue` started on `branch`: its window opens unless one is
+    open (the chain's next phase, a re-dispatch), its worktree joins the list,
+    `remote` stays once set, and the open windows of the branch's other issues
+    close at this start. One lock per file, taken one after the other, never
+    nested. `start` refused an unreadable history before the worker started;
+    one that became unreadable since is rewritten here — from the worker's
+    start on, this never raises."""
+    started = rec.get("started") or int(time.time())
+    try:
+        phases.mkdir(exist_ok=True)
+        with _FileLock(phases / f"{issue}.lock"):
+            path = phases / f"{issue}.json"
+            history = _load_json_dict(path)
+            entry = _branch_entry(history, branch)
+            if rec.get("worktree") and str(rec["worktree"]) not in entry["worktrees"]:
+                entry["worktrees"].append(str(rec["worktree"]))
+            entry["remote"] = entry["remote"] or rec.get("remote") is True
+            if not entry["windows"] or entry["windows"][-1][1] is not None:
+                entry["windows"].append([started, None])
+            history.update(phase=rec["phase"], branch=branch)
+            _save_json(path, history)
+        with _FileLock(phases / "branches.lock"):
+            index = _load_json_dict(phases / BRANCH_INDEX)
+            on_branch = [i for i in index.get(branch) or [] if isinstance(i, int)]
+            if issue not in on_branch:
+                index[branch] = [*on_branch, issue]
+                _save_json(phases / BRANCH_INDEX, index)
+        for other in on_branch:
+            if other != issue:
+                _close_window(phases, other, branch, started)
+    except (OSError, ValueError) as exc:
+        print(f"dispatch: the phase history of #{issue} was not written ({exc}) — its tokens may read "
+              "as not measured", file=sys.stderr)
+
+
+def _close_window(phases: Path, issue: int, branch: str, end: float) -> None:
+    """Closes `issue`'s open window on `branch` at `end`; a history it cannot
+    read stays as it is (`start` names it)."""
+    with _FileLock(phases / f"{issue}.lock"):
+        path = phases / f"{issue}.json"
+        try:
+            history = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        branches = history.get("branches") if isinstance(history, dict) else None
+        entry = branches.get(branch) if isinstance(branches, dict) else None
+        windows = entry.get("windows") if isinstance(entry, dict) else None
+        if isinstance(windows, list) and windows and _is_window(windows[-1]) and windows[-1][1] is None:
+            windows[-1][1] = max(end, windows[-1][0])
+            _save_json(path, history)
+
+
+def close_windows(root: Path, branch: str) -> None:
+    """The branch's work is merged: every issue's open window on it closes now
+    (`forget_branch` for the train, `finish` for its own merge)."""
+    phases = common_dir(root) / DISPATCH_DIR / "phases"
+    if not phases.is_dir():
+        return
+    with _FileLock(phases / "branches.lock"):
+        issues = [i for i in _load_json_dict(phases / BRANCH_INDEX).get(branch) or [] if isinstance(i, int)]
+    now = int(time.time())
+    for issue in issues:
+        _close_window(phases, issue, branch, now)
 
 
 # the transcript shape is harness-specific; this is the one reader of it
@@ -1318,21 +1428,56 @@ TOKEN_FIELDS = ("output_tokens", "input_tokens", "cache_read_input_tokens", "cac
 USAGE_TOKENS = re.compile(r'"(' + "|".join(TOKEN_FIELDS) + r')":\s*(\d+)')
 
 
-def _issue_transcripts(root: Path, issue: int | None) -> set[str] | None:
-    """The transcript files of the issue's dispatched worktrees (every
-    dispatched worktree's with `issue` None); None without a `transcripts`
-    glob in the policy (`{worktree}` or `{worktree_slug}` substituted; default none)."""
+Windows = list[list[float | None]] | None  # [[start, end|None], …]; None: no time bound
+
+
+def _token_sources(root: Path, issue: int | None) -> list[dict]:
+    """[{"worktrees", "windows", "remote"}] of the issue's dispatched sessions
+    (every issue's with `issue` None): per branch from the phase history,
+    which outlives the records, else — a history from before v2.92 carries no
+    `branches` — from the issue's records, without a time bound, as before.
+    Read-only: no directory is created."""
+    d = common_dir(root) / DISPATCH_DIR
+    phases = d / "phases"
+    paths = [phases / f"{issue}.json"] if issue is not None else sorted(phases.glob("*.json"))
+    sources: list[dict] = []
+    from_history: set[str] = set()
+    for p in paths:
+        branches = _load_json_dict(p).get("branches") if p.stem.isdigit() else None
+        if not isinstance(branches, dict):
+            continue
+        from_history.add(p.stem)
+        for entry in branches.values():
+            if isinstance(entry, dict):
+                sources.append({"worktrees": [w for w in entry.get("worktrees") or [] if isinstance(w, str)],
+                                "windows": [w for w in entry.get("windows") or [] if _is_window(w)],
+                                "remote": entry.get("remote") is True})
+    for p in sorted(d.glob("*.json")):
+        rec = _load_json_dict(p)
+        if not rec or str(rec.get("issue")) in from_history:
+            continue
+        if issue is None or str(rec.get("issue")) == str(issue):
+            sources.append({"worktrees": [str(rec["worktree"])] if rec.get("worktree") else [],
+                            "windows": None, "remote": rec.get("remote") is True})
+    return sources
+
+
+def _issue_transcripts(root: Path, issue: int | None) -> dict[str, Windows] | None:
+    """{transcript file: its windows} of the issue's dispatched worktrees
+    (every dispatched worktree's with `issue` None); None without a
+    `transcripts` glob in the policy (`{worktree}` or `{worktree_slug}`
+    substituted; default none). A file two sources name takes both windows."""
     pattern = transcripts_pattern(root)
     if pattern is None:
         return None
-    files: set[str] = set()
-    for p in sorted((common_dir(root) / DISPATCH_DIR).glob("*.json")):  # read-only: no mkdir
-        try:
-            rec = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if isinstance(rec, dict) and (issue is None or str(rec.get("issue")) == str(issue)):
-            files |= _transcript_files(pattern, rec)
+    files: dict[str, Windows] = {}
+    for src in _token_sources(root, issue):
+        for wt in src["worktrees"]:
+            for f in _worktree_files(pattern, wt):
+                if f in files and files[f] is None or src["windows"] is None:
+                    files[f] = None
+                else:
+                    files[f] = [*(files.get(f) or []), *src["windows"]]
     return files
 
 
@@ -1340,11 +1485,12 @@ UNKNOWN_MODEL = "model not recorded"
 
 
 def model_token_usage(root: Path) -> tuple[dict[str, dict[str, int]], int] | None:
-    """({model: {field: tokens}}, unreadable transcripts) over every dispatched
+    """({model: {field: tokens}}, unknown sources) over every dispatched
     session's transcripts — subagents (sidechains) included, since a step
     delegated to a smaller model is what this measures (#125). Usage without a
     model on its message (another harness's shape, a non-JSON line) counts
-    under UNKNOWN_MODEL; an unreadable transcript makes every share partial.
+    under UNKNOWN_MODEL; an unreadable transcript (or, within the issues'
+    windows, a message without a timestamp) makes every share partial.
     None when not measured (no glob, no dispatch record, or no transcript)."""
     files = _issue_transcripts(root, None)
     if not files:
@@ -1392,30 +1538,65 @@ def _usage_events(data: object) -> list[dict[str, int]]:
     return events
 
 
-def _transcript_usage(files: set[str]) -> tuple[list[tuple[str, dict[str, int], bool]], int]:
-    """([(model, usage, opaque)] per usage event, unreadable transcripts) —
-    the one reading of the transcripts' token counts. Claude Code writes one
+def _timestamp(ts: object) -> float | None:
+    """An ISO timestamp as epoch seconds; None when absent or unreadable — a
+    reader bounded by time keeps such a message (unlike `_epoch`, never +inf)."""
+    if not isinstance(ts, str) or not ts:
+        return None
+    try:
+        return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _in_windows(t: float, windows: list) -> bool:
+    return any(start <= t < (math.inf if end is None else end) for start, end in windows)
+
+
+def _transcript_usage(files: set[str] | dict[str, Windows], kept: set[str] | None = None,
+                      ) -> tuple[list[tuple[str, dict[str, int], bool]], int]:
+    """([(model, usage, opaque)] per usage event, unknown sources) — the one
+    reading of the transcripts' token counts. Claude Code writes one
     line per content block of an API message, each repeating the message's
     usage: a message counts once, with the largest value each field reached
     on any of its lines (a streamed message may carry interim counts). A line
     without a message id is its own event. A non-JSON line with token fields
     is an opaque event: its counts are real, its completeness unknown. The
-    model is the message's (`message.model`), UNKNOWN_MODEL without one."""
+    model is the message's (`message.model`), UNKNOWN_MODEL without one.
+    `files` may map each file to its time windows: a line stamped outside
+    them is not read; a line without a stamp is, and its message counts as an
+    unknown source beside the unreadable transcripts. `kept` collects the
+    files a counted line came from."""
+    windows_of = files if isinstance(files, dict) else dict.fromkeys(files)
     events: list[tuple[str, dict[str, int], bool]] = []
     unreadable = 0
+    unstamped: set[object] = set()
     messages: dict[tuple[str, object], tuple[str, dict[str, int]]] = {}
-    for f in sorted(files):
+    for f in sorted(windows_of):
+        windows = windows_of[f]
         try:
             text = Path(f).read_text(errors="ignore")
         except OSError:
             unreadable += 1
             continue
-        for line in text.splitlines():
+        for n_line, line in enumerate(text.splitlines()):
             if not USAGE_TOKENS.search(line):
                 continue
             try:
                 data = json.loads(line)
             except ValueError:
+                data = None
+            if windows is not None and data is not None:
+                t = _timestamp(data.get("timestamp")) if isinstance(data, dict) else None
+                if t is None:
+                    message = data.get("message") if isinstance(data, dict) else None
+                    mid = message.get("id") if isinstance(message, dict) else None
+                    unstamped.add((mid, data.get("requestId")) if isinstance(mid, str) else (f, n_line))
+                elif not _in_windows(t, windows):
+                    continue
+            if kept is not None:
+                kept.add(f)
+            if data is None:
                 usage: dict[str, int] = {}
                 for field, n in USAGE_TOKENS.findall(line):
                     usage[field] = usage.get(field, 0) + int(n)
@@ -1437,12 +1618,15 @@ def _transcript_usage(files: set[str]) -> tuple[list[tuple[str, dict[str, int], 
                 continue
             events += [(model, event, False) for event in _usage_events(data)]
     events += [(model, merged, False) for model, merged in messages.values() if merged]
-    return events, unreadable
+    return events, unreadable + len(unstamped)
 
 
 def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, dict[str, int], int, int] | None:
     """(totals, sessions, {field: usage events that carried it}, usage events,
-    unknown sources: opaque lines plus unreadable transcripts).
+    unknown sources: opaque lines, unreadable transcripts and messages without
+    a timestamp where the issue's windows bound the time).
+    Sessions are the top-level transcripts a counted line came from (all of
+    them without windows); a subagent's file is no session of its own.
     Completeness is counted per usage event, not per session: a call that
     lacks a field leaves that field a partial sum, even when another call in
     the same transcript carried it — a variant whose calls write fewer input
@@ -1454,7 +1638,8 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
     files = _issue_transcripts(root, issue)
     if not files:
         return None
-    events, unknown = _transcript_usage(files)
+    kept: set[str] = set()
+    events, unknown = _transcript_usage(files, kept)
     totals: dict[str, int] = {}
     covered: dict[str, int] = {}
     for _model, usage, opaque in events:
@@ -1463,7 +1648,8 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
             totals[field] = totals.get(field, 0) + n
             if not opaque:
                 covered[field] = covered.get(field, 0) + 1
-    return totals, sum(not _is_subagent(f) for f in files), covered, len(events), unknown
+    sessions = sum(not _is_subagent(f) and (w is None or f in kept) for f, w in files.items())
+    return totals, sessions, covered, len(events), unknown
 
 
 def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
@@ -2579,26 +2765,37 @@ def _queue_path(root: Path) -> Path:
     return _queue_dir(root) / QUEUE_FILE
 
 
-class _QueueLock:
-    """One writer at a time for the queue — a steward tick, a manual `queue
-    add` and a second drain would otherwise lose lines or start one twice."""
+class _FileLock:
+    """One writer at a time for whatever `path` guards (an exclusive flock on it)."""
 
-    def __init__(self, root: Path):
-        self.root = root
-        self.path = _queue_dir(root) / "queue.lock"
+    def __init__(self, path: Path):
+        self.path = path
         self.fh = None
 
     def __enter__(self):
         import fcntl
         self.fh = open(self.path, "a+")
         fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
-        _migrate_queue(self.root)
         return self
 
     def __exit__(self, *_exc):
         import fcntl
         fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
         self.fh.close()
+
+
+class _QueueLock(_FileLock):
+    """One writer at a time for the queue — a steward tick, a manual `queue
+    add` and a second drain would otherwise lose lines or start one twice."""
+
+    def __init__(self, root: Path):
+        super().__init__(_queue_dir(root) / "queue.lock")
+        self.root = root
+
+    def __enter__(self):
+        super().__enter__()
+        _migrate_queue(self.root)
+        return self
 
 
 def _valid_entry(e: object) -> dict | None:

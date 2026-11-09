@@ -663,6 +663,11 @@ def _done(root: Path, branch: str) -> None:
     issue, tokens = usage(root, branch)
     print(f"finish: {tokens}")
     try:
+        import dispatch as _dispatch
+        _dispatch.close_windows(root, branch)  # the issues' token windows end with the merge
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        print(f"finish: merged, but the token windows of {branch} stay open ({exc})", file=sys.stderr)
+    try:
         import report as _report
         _report.write_report(root, "done", issue=issue, note=tokens,
                              worker=os.environ.get("PROCESS_WORKER") or branch)
