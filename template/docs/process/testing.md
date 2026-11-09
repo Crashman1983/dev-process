@@ -74,6 +74,22 @@ path real callers take, at the cheapest level that reaches it. Two patterns wort
   behavior — gets a test that fails on the old behavior; the suite is the
   ratchet that keeps a caught defect caught.
 
+Two more places where a green suite proves less than it seems:
+
+- **A fake speaks its producer's wire format.** A fake for a producer — an
+  API, a WebSocket, a queue — returns what the producer really sends: the
+  same field names, types, nulls and encodings, and for time, the same
+  zone and offset (`2026-11-07T09:00:00+00:00`, not a naive local time). A
+  suite with time in it runs in a time zone other than UTC, so a missing
+  offset shows up as a wrong hour instead of passing by accident.
+  Downstream, every implementation passed all of its acceptance tests
+  because the fake returned naive local times, the producer sent UTC with an
+  offset, and the run was in UTC; a runtime review found the blockers.
+- **Failure paths from more than the start state.** A refusal, a timeout or
+  a lost connection is tested from the states a user actually reaches — after
+  an edit, mid-list, with a dialog open — not only from a freshly loaded
+  screen. The same failure from a later state is a different test.
+
 Two tests that pass and prove nothing (adapted from Matt Pocock's `tdd`, MIT):
 
 - **Tautological:** the expected value is computed the way the code computes

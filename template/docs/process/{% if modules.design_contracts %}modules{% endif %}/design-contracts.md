@@ -153,6 +153,22 @@ the order visible: a code diff that touches surface paths with an unchanged
 pin implements the contract as it stands; a changed pin says the norm moved
 and the amendment log says why.
 
+## Probe build — a completeness check before the freeze
+
+A design package can look complete and still leave an implementer guessing.
+Before a round is frozen, an optional **probe build** finds out cheaply: a
+low-cost implementer builds one surface from the package alone — boards,
+contract, the stories' acceptance items — with no other context and no
+questions. Every place where it had to improvise (an element no board
+places, a state no board draws, a value no contract carries) is recorded as
+a gap in the package and closed, or decided by the owner, before the freeze.
+The probe's code is thrown away; only the list of gaps counts.
+
+Downstream, three implementers built the same surface from one package and
+all three improvised in exactly the same places — the places the boards were
+silent. A probe build would have found those gaps before any of the three
+started.
+
 ## What stays project-specific
 
 The **render kit** (how boards are produced), the **mechanical floor** it
