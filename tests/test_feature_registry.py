@@ -381,6 +381,16 @@ def test_malformed_issue_ref_is_hard(render, tmp_path):
     assert r.returncode == 1 and "malformed issue ref '116'" in r.stdout, r.stdout
 
 
+def test_default_issue_field_pr_link_is_a_note_not_a_failure(render, tmp_path):
+    """Wächter: Das Template-Feld `issue` ist ein Herkunftsverweis — Issue oder PR (Modul-Doku);
+    ein PR-Link oder anderes Format ist ein Hinweis, kein Fehler wie vor v2.92."""
+    out = _render(render, tmp_path)
+    _entry(out, issue="https://github.com/o/r/pull/12")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "malformed issue ref" in r.stdout and "note" in r.stdout, r.stdout
+
+
 def test_empty_test_mapping_list_outside_deferred_is_hard(render, tmp_path):
     out = _green_kenni(render, tmp_path)
     _edit(out, "clients/CLI-US-002.json", test_mapping={"ios": []})
