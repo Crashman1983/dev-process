@@ -559,7 +559,7 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     sections = data.get("sections", [])
     registry: set[str] | None = None
     project_registry = None
-    if not (data.get("story_id") and data.get("registry")):  # the project's own keys win
+    if not (data.get("story_id") or data.get("registry")):  # either own key: the project's own rule wins
         project_registry, note = _ProjectRegistry.at(root, ref)
         soft += [note] if note else []
     hard += _spec_plan_findings(root, ref, spec_plans)

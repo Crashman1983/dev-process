@@ -137,7 +137,7 @@ def problems(cfg: dict) -> list[str]:
         if key in cfg and not _string_list(cfg[key]):
             out.append(f"{where}: `{key}` must be a list of non-empty strings")
     root = cfg.get("root")
-    if isinstance(root, str) and (Path(root).is_absolute() or ".." in Path(root).parts):
+    if isinstance(root, str) and (not root.strip() or Path(root).is_absolute() or ".." in Path(root).parts):
         out.append(f"{where}: `root` must be a path inside the repository")
     pattern = cfg.get("id_pattern")
     if isinstance(pattern, str) and pattern:

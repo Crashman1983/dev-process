@@ -835,3 +835,11 @@ def test_assign_ids_migrates_the_kenni_layout(render, tmp_path):
     assert _gate(out).returncode == 0
     head = (out / KREG / "clients/_capability.json").read_text(encoding="utf-8")
     assert '"prefix": "CLI"' in head  # heads are no stories: untouched
+
+
+def test_an_empty_root_is_refused(render, tmp_path):
+    """v2.92 Code-Review: ein leerer `root` hieße die Repo-Wurzel."""
+    out = _render(render, tmp_path)
+    (out / "docs/process/feature-registry.local.json").write_text(json.dumps({"root": " "}))
+    r = _gate(out)
+    assert r.returncode == 1 and "`root` must be a path inside the repository" in r.stdout, r.stdout
