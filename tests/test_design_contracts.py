@@ -811,6 +811,44 @@ def test_the_unfilled_template_decision_line_is_no_decision(render, tmp_path):
     assert r.returncode == 0, r.stdout  # guard: the last decision stands
 
 
+def test_a_table_after_a_later_no_go_keeps_it_the_decision(render, tmp_path):
+    # refute v2.93: `(?!\s*\|)` read across the newline, so a NO GO before a table vanished
+    out = _render(render, tmp_path)
+    _accepted(out)
+    _write(out, REVIEW, "# R\n\n## Runde 1\n\n**Decision:** GO\n\n## Runde 2\n\n**Decision:** NO GO\n\n"
+                        "| Kriterium | Gewicht |\n|---|---|\n| a | 20 |\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "NO GO" in r.stdout, r.stdout
+    _write(out, REVIEW, "# R\n\n**Decision:** GO\n\n| a | b |\n|---|---|\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout  # guard: a GO with a table after it is a decision
+
+
+@pytest.mark.parametrize("line", ["GO / NO GO", "GO or NO GO", "GO, GO with conditions, NO GO",
+                                  "GO | GO with conditions | NO GO"])
+def test_an_unfilled_choice_is_no_decision(render, tmp_path, line):
+    out = _render(render, tmp_path)
+    _accepted(out, decision=line)
+    r = _gate(out)
+    assert r.returncode == 1 and "records no decision line" in r.stdout, r.stdout
+
+
+def test_a_no_go_with_blockers_after_a_bar_stays_no_go(render, tmp_path):
+    out = _render(render, tmp_path)
+    _accepted(out)
+    _write(out, REVIEW, "# R\n\nDecision: GO\n\n**Decision:** NO GO | Blocker F1, F2\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "NO GO" in r.stdout, r.stdout
+
+
+def test_a_go_in_an_html_comment_is_no_decision(render, tmp_path):
+    out = _render(render, tmp_path)
+    _accepted(out)
+    _write(out, REVIEW, "# R\n\nDecision: NO GO\n\n<!--\nDecision: GO\n-->\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "NO GO" in r.stdout, r.stdout
+
+
 def test_a_contract_id_only_in_a_decision_line_is_not_defined(render, tmp_path):
     out = _render(render, tmp_path)
     c = _write(out, CONTRACT, CONTRACT_TEXT + "\n## 9. Decisions\n\n"
@@ -1067,6 +1105,21 @@ def test_a_branch_cannot_drop_a_state_from_the_catalogue_for_its_own_go(render, 
     out = _repo(render, tmp_path, base)
     _write(out, "docs/design/zustaende.json", json.dumps(["default"]))
     _go(out, _states(), state_catalogue="docs/design/zustaende.json")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "view 'shell-open' has no state 'loading'" in r.stdout, r.stdout
+
+
+def test_deleting_the_entry_that_carries_the_catalogue_drops_no_state(render, tmp_path):
+    # DeepSeek review v2.93: the union read only the entries present today
+    def base(out):
+        _write(out, "docs/design/zustaende.json", json.dumps(["default", "loading"]))
+        web = _entry(out, reference=ROUND)
+        _write(out, f"{REG}/ios.json", json.dumps({**web, "surface": "ios",
+                                                   "state_catalogue": "docs/design/zustaende.json"}))
+    out = _repo(render, tmp_path, base)
+    (out / f"{REG}/ios.json").unlink()
+    _go(out, _states())
     _commit(out)
     r = _gate(out)
     assert r.returncode == 1 and "view 'shell-open' has no state 'loading'" in r.stdout, r.stdout
@@ -1398,6 +1451,19 @@ def test_a_decision_in_the_round_folder_covers(render, tmp_path):
     out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=lambda o: _decide(o, DECISIONS, DROP2))
     r = _gate(out)
     assert r.returncode == 0, r.stdout
+
+
+@pytest.mark.parametrize("reason", ["<Grund>", "<reason>", "TODO", "todo", "…", "..."])
+def test_a_placeholder_reason_covers_nothing(render, tmp_path, reason):
+    line = f"DECISION 2026-11-09 owner D-7: drop STORY-0001#AC2 — {reason}"
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=lambda o: _decide(o, DECISIONS, line))
+    _uncovered(_gate(out), "AC2")
+
+
+def test_a_decision_in_an_html_comment_covers_nothing(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None),
+               before=lambda o: _decide(o, DECISIONS, "<!--", DROP2, "-->"))
+    _uncovered(_gate(out), "AC2")
 
 
 def test_a_decision_in_the_review_covers(render, tmp_path):
