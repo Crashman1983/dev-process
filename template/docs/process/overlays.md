@@ -15,9 +15,9 @@ mismatch visible.
   harness would load it as a command of its own
 
 The template never ships, renders or overwrites a `*.local.*` file. Data
-overlays (`model-policy.local.json`, `testing.local.json`, `gates.local.json`)
-are laid over their file by the scripts that read them; this page is about the
-prose ones.
+overlays (`model-policy.local.json`, `testing.local.json`, `gates.local.json`,
+`feature-registry.local.json`) are laid over their file by the scripts that read
+them; this page is about the prose ones.
 
 ## What an overlay says
 

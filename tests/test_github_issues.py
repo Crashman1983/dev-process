@@ -256,8 +256,16 @@ def test_feature_registry_doc_states_worklog_split(render, tmp_path):
     # work log in GitHub Issues — the inventory doc states the split
     out = _render(render, tmp_path)
     t = (out / "docs/process/modules/feature-registry.md").read_text()
-    assert "Inventory, not work log" in t
+    assert "not a work log" in t
     assert "GitHub" in t
+
+
+def test_module_doc_states_issue_lists_and_batching(render, tmp_path):
+    # v2.92 K3: one ref or a list, existence asked in batched GraphQL queries
+    out = _render(render, tmp_path)
+    t = (out / "docs/process/modules/github-issues.md").read_text()
+    assert '"issues": ["#412", "#413"]' in t and "up to 100" in t and "null" in t
+    assert "issue_waived" not in t
 
 
 def test_module_doc_names_issue_before_code(render, tmp_path):

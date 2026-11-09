@@ -1,66 +1,255 @@
 # Module: feature-registry — the feature inventory
 
-The capability inventory of **{{ project_name }}**: what can the product do
-today, and where is that proven? One entry per shipped capability, each
-tracing to its acceptance criteria and the tests that prove them. Runs via
-`process-gates` (hosted CI with `ci.github: true`, and the pre-push hook) and locally via
-`python scripts/process/check_feature_registry.py`.
+The capability inventory of **{{ project_name }}**: what can the product do,
+where is that proven, and which behaviour is an addressed target? One entry per
+capability (a story), each tracing to its acceptance items and the tests that
+prove them. Runs via `process-gates` (hosted CI with `ci.github: true`, and the
+pre-push hook) and locally via `python scripts/process/check_feature_registry.py`.
 
-## Inventory, not work log
+## Proven behaviour and addressable targets — not a work log
 
 Two questions used to share this registry; the lean pass split them:
 
 - **"What is in flight?"** is the work log — owned by **GitHub
   Issues/Sub-Issues/Projects** (status labels, `blocked_by` issue links,
-  board columns).
-  The retired fields `status`, `blocked_by`, and `parent` are **hard
-  failures** here — a leftover is stale double bookkeeping.
-- **"What exists and is proven?"** is this inventory. A hundred closed issues
-  answer "what happened", not "what is": capabilities span many issues and
-  get reshaped by later ones. The inventory scales with capabilities
-  (dozens, slowly), not work items (hundreds, fast) — it stays readable.
+  board columns). The retired fields `status`, `blocked_by`, and `parent` are
+  **hard failures** here — a leftover is stale double bookkeeping (a project
+  that keeps a story status declares it, see Configuration).
+- **"What does the product do, and what is it meant to do next?"** is this
+  inventory. It holds **proven behaviour and addressable targets**: every
+  acceptance item has an id and is referred to as `<story id>#<item id>`
+  (`STORY-0007#AC3`). An item is `proven` by default; an item marked
+  `"state": "target"` states behaviour that does not exist yet and names the
+  issue that delivers it. The work on a target — its plan, its progress, its
+  discussion — stays in that issue; the registry only makes the target
+  addressable, so a plan, a design round or a test can point at it before it
+  exists.
 
-The inventory is fed at merge: a feature's spec user stories are promoted
-here with their test references — the durable yield of the pruned spec
-artifacts (see the speckit module's merge ritual, where installed).
+A hundred closed issues answer "what happened", not "what is": capabilities span
+many issues and get reshaped by later ones. The inventory scales with
+capabilities (dozens, slowly), not work items (hundreds, fast) — it stays
+readable. It is fed at merge: a feature's spec user stories are promoted here
+with their test references — the durable yield of the pruned spec artifacts
+(see the speckit module's merge ritual, where installed).
 
 ## One entry per file
 
-Create `docs/process/feature-registry/STORY-NNNN.json` (one file per entry so
-entries diff and merge independently):
+In the template's layout, create `docs/process/feature-registry/STORY-NNNN.json`
+(one file per entry so entries diff and merge independently):
 
 - **id** — `STORY-NNNN` (four digits), unique across the inventory.
 - **title** — a short label.
 - **story** — one sentence in EARS form: *As a `<role>`, when `<trigger>`,
   the system shall `<response>`.* Wording is graded by humans, not the gate.
-- **acceptance** — a non-empty list of `{id, text}`; each `text` is a
-  gradeable, testable statement. The `id` is how everything else refers to
-  the criterion (plans, tasks, test names, review findings: `AC-n`); this
-  gate validates `text`.
-- **tests** — a **non-empty** list of paths (optionally with a `::node`
-  selector) to the tests that prove the acceptance. An inventory entry
-  without a resolvable test is a claim, not an inventory item.
+- **acceptance** — a non-empty list of items (below).
+- **tests** — a **non-empty** list of test refs that prove the entry; at least
+  one names an existing test. An inventory entry without a resolvable test is a
+  claim, not an inventory item.
 - **adr** (optional) — `ADR-NNNN` linking a decision under
   `docs/process/adr/`.
 - **issue** (optional) — provenance: the issue or PR that delivered the
-  capability. A pointer for humans; the gate does not resolve it.
+  capability, as `#N`, `owner/repo#N` or a GitHub issue URL.
 - **links** (optional) — free-form coupling notes (consumed contracts, pins).
 
 A retired capability is **deleted** (git history is the archive) — the
-inventory lists what exists, not what once did.
+inventory lists what exists or is addressed, not what once was.
+
+## Acceptance items
+
+Each item is an object; only `id` and `text` are required, every other field is
+checked once it is there:
+
+- **id** (required) — `AC<n>` (`^AC[1-9]\d*$`), unique within the story. It is
+  assigned once and never renumbered: references (`STORY-0007#AC3`), plans,
+  test names and review findings carry it. A removed item's id is not reused.
+- **text** (required) — the behaviour, by the writing rule below.
+- **surfaces** — the surfaces (platforms) the item applies to: a subset of the
+  story's surfaces, or of the project's declared `surfaces` where the story has
+  none. Without the field the item applies to all of them. A project that
+  declares no surfaces gets a note asking to declare them, and the field is not
+  checked; its items have **one implicit surface**.
+- **state** — `"proven"` (the default) or `"target"`, or a map from the item's
+  surfaces to one of them (`{"web": "proven", "ios": "target"}`). An item with
+  one implicit surface takes a single value. A target on any surface needs an
+  **issue** on the item.
+- **tests** — a map from the item's surfaces (and its `owned_by` layer) to test
+  refs: `{"web": ["…"], "ios": ["…"]}`. Each surface is proven by the tests under
+  its own key. A plain list is shorthand for an item with exactly one surface,
+  the implicit one included; on an item with more surfaces it fails, so one
+  test cannot pass for several surfaces at once.
+- **owned_by** — one of the project's `shared_proof_layers` (e.g. `backend`):
+  behaviour a shared layer owns for every surface of the item, proven by the
+  tests under that layer's key. A shared-layer key in `tests` without the
+  matching `owned_by` fails — a backend test does not stand in for client
+  behaviour. Whether a behaviour really belongs to the shared layer stays review
+  judgment; the gate's report states the share of `owned_by` items per
+  capability, so client items drifting into a shared layer show in the number.
+- **design** — the item's anchor in a design round. Accepted, not yet checked:
+  a later template release fixes the anchor format and checks it.
+
+`strict_item_tests` decides what an item without an existing test is: a failure
+when on, otherwise one note per capability (or for the inventory) that counts
+them. The checker proves that a test file and its `::node` exist, not that the
+test tests the item — that stays review judgment.
+
+## Writing rule and split rule
+
+- **One behaviour per item, in the present tense.** `text` states what the
+  system does — for a proven item and for a target alike. Whether the behaviour
+  exists yet is said only by `state`.
+- **No history, plans or issue numbers in `text`.** "No longer", "replaces",
+  "since #123" and "will" belong in the issue or the spec; the item's issue goes
+  in its `issue` field, the story's issues in the story's field.
+- **No surface prefix in `text`.** "Web: …" becomes `"surfaces": ["web"]`.
+- **Removing a behaviour removes its item and its tests in the same change**,
+  and retires its id: the id is never given to another item.
+- **Split rule.** A behaviour with a part a shared layer owns and a part each
+  client shows is split: one item `owned_by` the shared layer (its proof under
+  that layer's key), and one client item for each display, each proven on its
+  own surface. No item mixes both — otherwise a server test would prove a
+  client's behaviour.
+- **Splitting a long item.** The part that keeps the original main behaviour
+  keeps the old id; the parts split off get new ids, so existing references
+  stay valid.
+
+## Test refs
+
+A test ref is a repository path, optionally with a `::node` selector:
+`tests/<area>/test_<x>.py::<Class>::<test>`, or `web/<x>.spec.ts::<test title>`.
+
+- The file must exist (hard).
+- Each `::` segment is checked: in a `.py` file against the functions and
+  classes it defines (read by AST, never imported), in any other file as a
+  substring. Whether a dead node is a note or a failure is `node_check`
+  (default: note); an unparsable `.py` file counts the same way.
+- With `test_ref_roots`, every ref starts with one of them.
+- With `planned_refs`, a ref may be a placeholder `planned:#<issue>:<text>` for
+  a test that does not exist yet. A placeholder is never proof: an entry whose
+  `tests` are all placeholders fails, and an item with only placeholders counts
+  as untested.
+
+## Configuration
+
+How the registry is laid out and which rules bind is configuration, read by
+`scripts/process/registry_config.py` — the one owner of configuration and
+loader for every gate that reads the registry. `docs/process/feature-registry.json`
+is the template's file: each key's meaning stands in its `_comment`, and its
+values are the template's behaviour described above. Unknown keys — also nested
+ones, such as `issues.requird` — fail the registry gate, so a typo cannot drop a
+rule silently; `_comment` is allowed at any level.
+
+| Key | Template value | What it decides |
+|---|---|---|
+| `layout` | `flat` | `flat`: one file per story in `root`. `capabilities`: a directory per capability with a head `_capability.json` and one `<id>.json` per story. |
+| `root` | `docs/process/feature-registry` | where the registry lives |
+| `id_pattern` | `^STORY-\d{4}$` | a story id; `{prefix}` is the capability's prefix (capabilities layout) |
+| `require_registry` | `false` | an absent registry, no capability or an empty capability fails instead of being a note |
+| `story_text_fields` | `title`, `story` | story fields that must be non-empty text |
+| `story_surfaces`, `surfaces` | `none`, `[]` | whether a story carries `surfaces` (`optional`, `required`), and the declared surfaces |
+| `shared_proof_layers` | `[]` | layers an item may be `owned_by` |
+| `story_tests` | `tests` | `tests` (a list) or `test_mapping` (a map from surface or shared layer to a list) |
+| `issues` | `issue`, not required | the story's issue field (`issue` or a list `issues`), whether it is required, and which status needs a ref (`required_for`) |
+| `story_status` | `null` | `null`: `status` stays retired. An object: `status` is required, one of `values`; a `deferred` story may leave a test-mapping list empty |
+| `test_ref_roots`, `planned_refs`, `node_check` | `[]`, `false`, `note` | test refs, above |
+| `retired_fields` | `status`, `blocked_by`, `parent` | fields that fail as retired (`status` drops out with `story_status`) |
+| `extra_fields` | `[]` | further story fields the project knows; other unknown fields are a note |
+| `strict_item_tests` | `false` | an item without an existing test fails |
+
+**The capabilities layout.** Each capability is a directory under `root` with a
+head `_capability.json`: `schema_version` 1, `capability` equal to the
+directory name, and `prefix` (`^[A-Z]+$`) when `id_pattern` uses `{prefix}`.
+Further head fields are the project's. A story file is named after its id, an id
+carries its capability's prefix and is unique across the registry, and JSON
+directly in `root` fails (except `*.example.json`). The prefix is data, not
+configuration: a new capability changes only its own head.
+
+Who else reads the registry, through the same module: the product frame
+(`check_product_frame.py`, a story reference in `PRODUCT.md` must resolve;
+a reference in the loose form of `id_pattern` that the strict pattern refuses
+is a note), the github-issues gate (where installed) and the plan-structure
+gate, which binds story ids in new plans to the registry once a project file
+stands at the integration ref (`journal-state-plans.md`).
+
+## Overlay: the project's choices
+
+A project writes its choices into `docs/process/feature-registry.local.json`;
+the template never ships, renders or overwrites it. It is laid over the
+template file: mappings merge key by key, everything else — lists included —
+replaces whole, so a project's `retired_fields` list is the whole list. For
+example, a registry with capability directories, per-capability prefixes, a
+story status and a test mapping:
+
+```json
+{
+  "_comment": "Capabilities with a status and a test mapping per surface.",
+  "layout": "capabilities",
+  "root": "docs/feature-registry",
+  "id_pattern": "^{prefix}-US-\\d{3}$",
+  "require_registry": true,
+  "story_surfaces": "required",
+  "surfaces": ["web", "ios", "android"],
+  "shared_proof_layers": ["backend"],
+  "story_tests": "test_mapping",
+  "issues": {"field": "issues", "required": true, "required_for": "covered"},
+  "story_status": {"values": ["covered", "partial", "planned", "deferred"],
+                   "deferred": "deferred", "deferred_allows_empty_tests": true},
+  "retired_fields": ["blocked_by", "parent"],
+  "extra_fields": ["notes"]
+}
+```
+
+Both files are read from the working tree, like `gates.local.json`, and both are
+**gate configuration** (`check_review.GATE_FILES`): a change to either owes a
+refute, and a plan that names one needs a cross-model plan review. The
+plan-structure gate reads them at the integration ref instead, so a branch
+cannot set the pattern its own plan is checked against.
+
+## Migration
+
+The item ids are a tightening without a project choice: an item without `id`
+fails. Give every item one, once:
+
+```
+python scripts/process/check_feature_registry.py --assign-ids          # preview
+python scripts/process/check_feature_registry.py --assign-ids --write
+```
+
+- A string item and an object without `id` become `{"id": "AC<n>", "text": …}`,
+  `n` being its position from 1 — an old positional reference "item 9 of
+  STORY-0007" becomes `STORY-0007#AC9` without lookup.
+- Where the story already holds `AC<n>` — from before or assigned in the same
+  run — the item gets the highest id plus one.
+- An existing id that does not match `^AC[1-9]\d*$` is reported, never
+  rewritten (references may name it), and the run exits 1.
+- A second run changes nothing. The file keeps its indentation, non-ASCII text
+  stays as written, and it ends with a newline. Both layouts migrate.
+
+Then, per area and reviewed: move surface prefixes from `text` into `surfaces`;
+apply the writing rule (issue references to the issue fields, history and plans
+to issues or specs, long items split); add item `tests` as items are touched;
+switch `strict_item_tests` on once coverage allows. A project that adds item
+`surfaces` or `tests` must declare its `surfaces`; without them its items keep
+one implicit surface and stay green.
 
 ## Hard vs. best-effort (no false-green)
 
-**Hard (CI fails):** invalid JSON; missing/duplicate/misshaped `id`; missing
-`title`/`story`; empty `acceptance` or criterion without text; empty `tests`
-or a test path that does not exist; a retired work-log field; a dangling
-`adr` link.
+**Hard (CI fails):** an unusable or unknown configuration key; invalid JSON;
+missing/duplicate/misshaped story `id`; a missing text field; empty
+`acceptance`; an item without `id`, with a misshaped or duplicate id, or
+without text; an item field outside its rules (surfaces, state, a target
+without an issue, tests, `owned_by`); story tests that are empty, all
+placeholders or name a path that does not exist; a retired field; a dangling
+`adr` link; a malformed issue ref; with a project configuration, its rules
+(layout, heads, prefixes, surfaces, status, test mapping, required issues).
 
 **Best-effort (note, never fails):** an empty inventory ("no entries yet");
-unknown fields; the under-granularity advisory (an entry with ≤2 criteria
-but ≥5 mapped tests likely under-describes its tested behaviour). Whether a
-test *semantically* proves its criterion is review judgment
-(`review-checklist.md`, Tests prove acceptance) — the gate never fakes that.
+unknown story or item fields; a dead `::node` (unless `node_check` is `hard`);
+items without an existing test (unless `strict_item_tests`); item surfaces
+without declared project surfaces; the under-granularity advisory (an entry
+with ≤2 criteria but ≥5 mapped tests likely under-describes its tested
+behaviour). Whether a test *semantically* proves its criterion is review
+judgment (`review-checklist.md`, Tests prove acceptance) — the gate never fakes
+that.
 
 **One owner per criterion.** A criterion's wording lives in one place at a
 time. While the work is in flight, the spec owns it (`specs/<dir>/spec.md`,
@@ -68,8 +257,10 @@ or the issue where no spec is written). The change that delivers the
 capability writes the inventory entry from the spec's final `AC-n` lines,
 as its last step before the review bundle; from the merge on, the inventory
 owns the wording and the spec is pruned (the speckit merge ritual, where
-installed) or is history. Plans, tasks, tests and reports refer to a
-criterion by its id and never restate its text, so there is no second copy
-to drift. A later change to a shipped criterion edits the inventory entry.
-Whether the entry matches the spec it was promoted from is checked by the
-review, which sees both in the same diff (`review-checklist.md`).
+installed) or is history. A target item is the exception that proves the rule:
+its wording is the registry's from the start, and its issue owns the work.
+Plans, tasks, tests and reports refer to a criterion by its id and never
+restate its text, so there is no second copy to drift. A later change to a
+shipped criterion edits the inventory entry. Whether the entry matches the
+spec it was promoted from is checked by the review, which sees both in the
+same diff (`review-checklist.md`).

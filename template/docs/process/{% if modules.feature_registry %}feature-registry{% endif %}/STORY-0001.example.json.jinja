@@ -3,7 +3,8 @@
   "title": "Example inventory entry for {{ project_name }} — replace every <placeholder>, the test path, and the ADR link with real values before the gate passes",
   "story": "As a <role>, when <trigger>, the system shall <response>.",
   "acceptance": [
-    {"id": "AC1", "text": "A gradeable, testable statement of one accepted behaviour."}
+    {"id": "AC1", "text": "One current, proven behaviour, stated in the present tense.", "tests": ["tests/<area>/test_<behaviour>.py::test_<case>"]},
+    {"id": "AC2", "text": "One behaviour that is a target yet, stated in the present tense too.", "state": "target", "issue": "#<n>"}
   ],
   "tests": ["tests/<area>/test_<behaviour>.py"],
   "adr": "ADR-NNNN",

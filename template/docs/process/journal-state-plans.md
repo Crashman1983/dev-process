@@ -88,7 +88,12 @@ the integration branch is history:
 A project adds its own duties in `docs/process/plan-structure.local.json`,
 read at the integration ref so a branch cannot lift its own: required
 `sections` (`["Anchor Delta"]`), `shall_words`, and a `story_id` pattern with
-the `registry` glob its ids must stand in.
+the `registry` glob its ids must stand in. Without those two, a project whose
+feature registry has its own configuration (`docs/process/feature-registry.local.json`
+at the integration ref, read there too) gets the registry's id pattern and
+stories instead: a story id the plan names must be a registered story, and a ref
+in the loose form of the pattern that the strict one refuses (`DOC-US-12` for
+three digits) fails as well.
 
 **Plans have exactly one home.** Every presence guarantee downstream (review
 attestation, archive ritual, issue-before-code) keys on `.process-work/plans/`
