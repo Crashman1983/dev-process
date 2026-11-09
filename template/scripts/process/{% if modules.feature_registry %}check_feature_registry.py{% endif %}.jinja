@@ -22,7 +22,9 @@ test *semantically* proves its criterion is not mechanically decidable and is
 review judgment. Language-agnostic; stdlib only (plus the shared adr glob)."""
 from __future__ import annotations
 
+import argparse
 import ast
+import json
 import re
 import sys
 from dataclasses import dataclass, field
@@ -514,8 +516,96 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     return run.hard, run.soft
 
 
+# --- migration: --assign-ids [--write] ------------------------------------------
+
+def _numbered(items: list) -> tuple[list, int, list[str]]:
+    """(the items with an id each, how many were assigned, non-conforming ids kept).
+    A string or an object without `id` gets `AC<position>`; a position whose id the
+    story already holds — from before or from this run — gets the maximum plus one."""
+    taken = {it["id"] for it in items
+             if isinstance(it, dict) and isinstance(it.get("id"), str) and ITEM_ID.match(it["id"])}
+    odd = [repr(it["id"]) for it in items
+           if isinstance(it, dict) and "id" in it and not (isinstance(it["id"], str) and ITEM_ID.match(it["id"]))]
+    out: list = []
+    assigned = 0
+    for position, item in enumerate(items, 1):
+        if (isinstance(item, dict) and "id" in item) or not isinstance(item, (str, dict)):
+            out.append(item)
+            continue
+        iid = f"AC{position}"
+        if iid in taken:
+            iid = f"AC{max(int(t[2:]) for t in taken) + 1}"
+        taken.add(iid)
+        assigned += 1
+        out.append({"id": iid, "text": item} if isinstance(item, str) else {"id": iid, **item})
+    return out, assigned, odd
+
+
+def _indent(text: str) -> int | str | None:
+    """The file's own indentation: its first indented line's, None for a one-line file."""
+    m = re.search(r"\n([ \t]+)\S", text)
+    if not m:
+        return None
+    return "\t" if m.group(1).startswith("\t") else len(m.group(1))
+
+
+def assign_ids(root: Path, write: bool) -> int:
+    """Give every acceptance item an id, in either layout; a preview without `write`.
+    Idempotent: a second run changes nothing. Exit 1 when an id needs a human."""
+    try:
+        cfg = registry_config.config(root)
+    except registry_config.ConfigError as exc:
+        print(f"assign-ids: FAILED: {exc}")
+        return 1
+    problems = registry_config.problems(cfg)
+    if problems:
+        print("assign-ids: FAILED:\n" + "\n".join(f"  - {p}" for p in problems))
+        return 1
+    changed = 0
+    odd_found = False
+    for story in registry_config.load_registry(root, cfg).stories:
+        rel = story.path.relative_to(root).as_posix()
+        data = story.data
+        if story.error or not isinstance(data, dict) or not isinstance(data.get("acceptance"), list):
+            print(f"assign-ids: {rel}: skipped — no readable acceptance list (the gate says why)")
+            continue
+        items, assigned, odd = _numbered(data["acceptance"])
+        sid = data.get("id", rel)
+        for iid in odd:
+            odd_found = True
+            print(f"assign-ids: {rel}: {sid}: item id {iid} does not match {ITEM_ID.pattern} "
+                  f"— rename it by hand (references may name it)")
+        if not assigned:
+            continue
+        changed += 1
+        if not write:
+            print(f"assign-ids: {rel}: would assign {assigned} item id(s)")
+            continue
+        text = story.path.read_text(encoding="utf-8")
+        data["acceptance"] = items
+        story.path.write_text(json.dumps(data, indent=_indent(text), ensure_ascii=False) + "\n",
+                              encoding="utf-8")
+        print(f"assign-ids: {rel}: assigned {assigned} item id(s)")
+    if not changed:
+        print("assign-ids: nothing to assign")
+    elif not write:
+        print(f"assign-ids: {changed} file(s) would change — rerun with --write")
+    return 1 if odd_found else 0
+
+
 def main() -> int:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    ap = argparse.ArgumentParser(description="Validate the feature registry, or migrate its "
+                                             "acceptance items to ids (--assign-ids).")
+    ap.add_argument("root", nargs="?", default=".")
+    ap.add_argument("--assign-ids", action="store_true",
+                    help="give every acceptance item an id AC<n> (a preview without --write)")
+    ap.add_argument("--write", action="store_true", help="with --assign-ids: write the files")
+    args = ap.parse_args()
+    root = Path(args.root).resolve()
+    if args.write and not args.assign_ids:
+        ap.error("--write only goes with --assign-ids")
+    if args.assign_ids:
+        return assign_ids(root, args.write)
     hard, soft = check(root)
     for note in soft:
         print(f"inventory-gate: note: {note}")
