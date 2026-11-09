@@ -1267,3 +1267,443 @@ def test_a_new_section_in_a_shared_review_of_one_round_touches_it(render, tmp_pa
     assert "share the review" not in r.stdout, r.stdout
     hard = _hard(r)
     assert hard and all("has no states.json" in h and "review file changed" in h for h in hard), r.stdout
+
+
+# --- v2.93 B4: the coverage is computed; a GO only with full coverage -------------------
+# Red fixtures touch the round (the GO lands on `feature`), like the B1 tests — except the
+# lost-coverage ones: that rule is a delta, hard for an untouched round too.
+
+FREG = "docs/process/feature-registry"
+ANCHOR = "web-round-1/shell-open#default"
+DECISIONS = f"{ROUND}/entscheidungen.md"
+LOCAL_REG = "docs/process/feature-registry.local.json"
+
+
+def _ac(n: int, design: str | None = ANCHOR, **over) -> dict:
+    return {"id": f"AC{n}", "text": f"Verhalten {n}.", **({"design": design} if design else {}), **over}
+
+
+def _story(out: Path, *items: dict, sid: str = "STORY-0001", **over) -> None:
+    data = {"id": sid, "title": "Shell", "story": "Als Nutzer sehe ich die Shell.",
+            "acceptance": list(items), "tests": ["tests/test_shell.py"], **over}
+    _write(out, f"{FREG}/{sid}.json", json.dumps(data))
+
+
+def _cov(render, tmp_path, *items: dict, before=None, base=None, stories=("STORY-0001",), **states):
+    """Both modules; `feature` adds STORY-0001 with `items` and a GO on the round, whose
+    states.json lists `stories`; `before(out)` runs ahead of the seal."""
+    out = _repo(render, tmp_path, base, feature_registry=True)
+    _story(out, *items)
+    if before:
+        before(out)
+    _go(out, _states(stories=list(stories), **states))
+    _commit(out)
+    return out
+
+
+def _decide(out: Path, rel: str, *lines: str) -> None:
+    have = (out / rel).read_text(encoding="utf-8") if (out / rel).exists() else "# Entscheidungen\n"
+    _write(out, rel, have + "\n" + "".join(f"{ln}\n" for ln in lines))
+
+
+def _uncovered(r, *acs: str) -> None:
+    hard = [h for h in _hard(r) if "uncovered" in h]
+    assert r.returncode == 1 and len(hard) == 1, r.stdout
+    assert all(ac in hard[0] for ac in acs), r.stdout
+
+
+DROP2 = "DECISION 2026-11-09 owner D-7: drop STORY-0001#AC2 — entfällt im Pilot"
+
+
+def test_a_go_with_full_coverage_is_green(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2))
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "uncovered" not in r.stdout and "visible" not in r.stdout, r.stdout
+
+
+def test_a_visible_item_without_coverage_is_red_naming_every_one(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), _ac(3, None))
+    _uncovered(_gate(out), "STORY-0001#AC2", "STORY-0001#AC3")
+
+
+def test_an_item_owned_by_a_shared_layer_does_not_count(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None, owned_by="backend"))
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def _two_surfaces(out: Path) -> None:
+    _write(out, LOCAL_REG, json.dumps({"story_surfaces": "optional", "surfaces": ["web", "ios"]}))
+
+
+def test_an_item_on_another_surface_does_not_count(render, tmp_path):
+    def items(out):
+        _two_surfaces(out)
+        _story(out, _ac(1, surfaces=["ios"]), _ac(2, None, surfaces=["web"]), surfaces=["web", "ios"])
+    out = _cov(render, tmp_path, before=items, surfaces=["ios"])
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    _go(out, _states(stories=["STORY-0001"], surfaces=["web", "ios"]))
+    _commit(out)
+    _uncovered(_gate(out), "STORY-0001#AC2")
+
+
+def test_round_surfaces_outside_the_registry_surfaces_are_red(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), before=_two_surfaces, surfaces=["web", "tv"])
+    r = _gate(out)
+    assert r.returncode == 1 and "'surfaces' names 'tv', which the feature registry does not declare" \
+        in "\n".join(_hard(r)), r.stdout
+
+
+def test_an_unknown_story_in_stories_is_red(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), stories=("STORY-0001", "STORY-0009"))
+    r = _gate(out)
+    assert r.returncode == 1 and "'stories' names STORY-0009, which the feature registry does not hold" \
+        in "\n".join(_hard(r)), r.stdout
+
+
+def test_a_story_without_a_visible_item_is_a_note(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), stories=("STORY-0001", "STORY-0002"),
+               before=lambda o: _story(o, _ac(1, None, owned_by="backend"), sid="STORY-0002"))
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "story STORY-0002 has no acceptance item visible to the round" in r.stdout, r.stdout
+
+
+def test_a_duty_round_needs_one_visible_item(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1, None, owned_by="backend"))
+    r = _gate(out)
+    assert r.returncode == 1 and "no story in 'stories' has an acceptance item visible to the round" \
+        in "\n".join(_hard(r)), r.stdout
+
+
+# owner decisions with an ID
+
+def test_a_decision_in_the_round_folder_covers(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=lambda o: _decide(o, DECISIONS, DROP2))
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_decision_in_the_review_covers(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None))
+    _decide(out, REVIEW, DROP2)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def _contract_decision(*lines: str):
+    return lambda out: _write(out, CONTRACT, CONTRACT_TEXT + "\n## 9. Decisions\n\n"
+                              + "".join(f"{ln}\n" for ln in lines))
+
+
+@pytest.mark.parametrize("token", ["web-round-1/D-7", "docs/web-round-1/D-7"])
+def test_in_the_contract_only_a_decision_bound_to_the_round_covers(render, tmp_path, token):
+    line = DROP2.replace("owner D-7", f"owner {token}")
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=_contract_decision(line))
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "names no round" not in r.stdout, r.stdout
+
+
+def test_an_unbound_contract_decision_covers_nothing_and_asks_to_bind_it(render, tmp_path):
+    question = "DECISION 2026-11-09 owner D-8: die Shell bleibt blau — Markenfarbe"
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=_contract_decision(DROP2, question))
+    r = _gate(out)
+    _uncovered(r, "STORY-0001#AC2")
+    assert "owner decision D-7 changes acceptance items but names no round" in r.stdout, r.stdout
+    assert "D-8" not in r.stdout, r.stdout
+
+
+def test_a_contract_decision_needs_a_new_pin(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2))
+    _contract_decision(DROP2.replace("owner D-7", "owner web-round-1/D-7"))(out)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "changed without a re-pin" in r.stdout, r.stdout
+
+
+def test_a_decision_bound_to_another_round_does_not_cover(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None))
+    _decide(out, REVIEW, DROP2.replace("owner D-7", "owner web-round-0/D-7"))
+    _commit(out)
+    _uncovered(_gate(out), "STORY-0001#AC2")
+
+
+@pytest.mark.parametrize("line", [
+    "DECISION 2026-11-09 owner: drop STORY-0001#AC2 — ohne ID",
+    "DECISION 2026-11-09 agent D-7: drop STORY-0001#AC2 — nicht vom Owner",
+    f"```\n{DROP2}\n```",
+    "DECISION 2026-11-09 owner D-7: drop STORY-0001#AC2",
+])
+def test_a_decision_without_id_owner_reason_or_outside_a_fence_does_not_cover(render, tmp_path, line):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=lambda o: _decide(o, DECISIONS, line))
+    _uncovered(_gate(out), "STORY-0001#AC2")
+
+
+def test_zero_padding_is_one_decision_id(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=lambda o: _decide(
+        o, DECISIONS, DROP2.replace("D-7", "D7"),
+        "DECISION 2026-11-09 owner D07: change STORY-0001#AC2 — anders formuliert"))
+    r = _gate(out)
+    assert r.returncode == 1 and "owner decision D7 stands 2 times with different text" \
+        in "\n".join(_hard(r)), r.stdout
+
+
+def test_a_dash_makes_another_decision_id(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=lambda o: _decide(
+        o, DECISIONS, DROP2, "DECISION 2026-11-09 owner D7: change STORY-0001#AC2 — anders formuliert"))
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_repeated_decision_id_is_a_quote_only_word_for_word(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=lambda o: _decide(o, DECISIONS, DROP2))
+    _decide(out, REVIEW, "- **" + DROP2.replace("  ", " ") + "**")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    _decide(out, REVIEW, DROP2.replace("entfällt im Pilot", "kommt später"))
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "owner decision D-7 stands" in "\n".join(_hard(r)), r.stdout
+
+
+def test_a_decision_on_an_item_that_never_existed_is_red(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), before=lambda o: _decide(
+        o, DECISIONS, "DECISION 2026-11-09 owner D-9: drop STORY-0001#AC9 — Tippfehler"))
+    r = _gate(out)
+    assert r.returncode == 1 and "names STORY-0001#AC9, never an item of STORY-0001" \
+        in "\n".join(_hard(r)), r.stdout
+
+
+def test_a_decision_on_a_retired_id_or_a_deleted_story_is_a_note(render, tmp_path):
+    def before(out):
+        _story(out, _ac(1), retired=[{"id": "AC3"}])
+        _decide(out, DECISIONS, "DECISION 2026-11-09 owner D-3: drop STORY-0001#AC3 — gestrichen",
+                "DECISION 2026-11-09 owner D-4: drop STORY-0005#AC1 — Story gelöscht")
+    out = _cov(render, tmp_path, before=before)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "STORY-0001#AC3, a retired id" in r.stdout and "STORY-0005#AC1, a story the registry" \
+        in r.stdout, r.stdout
+
+
+def test_a_contract_decision_of_an_older_round_neither_covers_nor_collides(render, tmp_path):
+    def before(out):
+        _contract_decision("DECISION 2026-11-09 owner web-round-0/F1: drop STORY-0001#AC2 — alt")(out)
+        _decide(out, DECISIONS, "DECISION 2026-11-09 owner F1: die Shell bleibt blau — Marke")
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), before=before)
+    r = _gate(out)
+    _uncovered(r, "STORY-0001#AC2")
+    assert "stands" not in r.stdout, r.stdout
+
+
+# the touched-round principle with the registry (B1 Grundsatz)
+
+def _covered_base(*stories: str):
+    """main: STORY-0001 (AC1, AC2 anchored) and the stories named, a GO on the round."""
+    def base(out):
+        _story(out, _ac(1), _ac(2))
+        for sid in stories:
+            _story(out, _ac(1), sid=sid)
+        _go(out, _states(stories=["STORY-0001", *stories]))
+    return base
+
+
+def _touch(out: Path) -> None:
+    _write(out, REVIEW, (out / REVIEW).read_text() + "\n## Nachtrag\n")
+    _commit(out)
+
+
+def test_a_deleted_story_is_a_note_while_untouched_and_red_once_touched(render, tmp_path):
+    out = _repo(render, tmp_path, _covered_base("STORY-0002"), feature_registry=True)
+    (out / FREG / "STORY-0002.json").unlink()
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "'stories' names STORY-0002, which the feature registry does not hold" in r.stdout, r.stdout
+    assert "lost" not in r.stdout, r.stdout
+    _touch(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "names STORY-0002" in "\n".join(_hard(r)), r.stdout
+
+
+def test_a_new_item_in_a_covered_story_is_a_note_while_untouched(render, tmp_path):
+    out = _repo(render, tmp_path, _covered_base(), feature_registry=True)
+    _story(out, _ac(1), _ac(2), _ac(3, None))
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0 and "STORY-0001#AC3" in r.stdout, r.stdout
+    _touch(out)
+    _uncovered(_gate(out), "STORY-0001#AC3")
+
+
+def test_the_push_after_a_deletion_leaves_the_untouched_round_a_note(render, tmp_path):
+    def base(out):
+        _covered_base("STORY-0002")(out)
+        (out / FREG / "STORY-0002.json").unlink()  # deleted on main already
+        _decide(out, DECISIONS, "DECISION 2026-11-09 owner D-2: drop STORY-0002#AC1 — Story weg")
+        _go(out, _states(stories=["STORY-0001", "STORY-0002"]))
+    out = _repo(render, tmp_path, base, feature_registry=True)
+    _write(out, "server/api.py", "x = 1\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "names STORY-0002" in r.stdout and "STORY-0002#AC1, a story the registry" in r.stdout, r.stdout
+
+
+def test_a_decision_on_an_item_removed_without_retired_suggests_retired(render, tmp_path):
+    def base(out):
+        _story(out, _ac(1), _ac(3, None))
+        _decide(out, DECISIONS, "DECISION 2026-11-09 owner D-3: drop STORY-0001#AC3 — gestrichen")
+        _go(out, _states(stories=["STORY-0001"]))
+    out = _repo(render, tmp_path, base, feature_registry=True)
+    _story(out, _ac(1))
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "STORY-0001#AC3, which the fork point holds but this tree does not" in r.stdout \
+        and "'retired'" in r.stdout, r.stdout
+
+
+# lost coverage: a delta rule, hard for an untouched round too
+
+def _lost(r, ac: str) -> None:
+    hard = _hard(r)
+    assert r.returncode == 1 and len(hard) == 1, r.stdout
+    assert ac in hard[0] and "lost its coverage" in hard[0], r.stdout
+
+
+def test_a_retired_anchored_item_is_green(render, tmp_path):
+    out = _repo(render, tmp_path, _covered_base(), feature_registry=True)
+    _story(out, _ac(1), retired=[{"id": "AC2"}])
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_an_anchor_gone_from_a_standing_item_is_red(render, tmp_path):
+    out = _repo(render, tmp_path, _covered_base(), feature_registry=True)
+    _story(out, _ac(1), _ac(2, None))
+    _commit(out)
+    _lost(_gate(out), "STORY-0001#AC2")
+
+
+def _decided_base(contract_line: str):
+    def base(out):
+        _story(out, _ac(1), _ac(2, None))
+        _contract_decision(contract_line)(out)
+        _go(out, _states(stories=["STORY-0001"]))
+    return base
+
+
+BOUND2 = DROP2.replace("owner D-7", "owner web-round-1/D-7")
+
+
+def test_a_dropped_bound_contract_decision_is_red(render, tmp_path):
+    out = _repo(render, tmp_path, _decided_base(BOUND2), feature_registry=True)
+    _write(out, CONTRACT, CONTRACT_TEXT)
+    _entry(out, **{k: v for k, v in json.loads((out / f"{REG}/web.json").read_text()).items()
+                   if k != "pin"})  # re-pinned: the pin is no trigger
+    _commit(out)
+    _lost(_gate(out), "STORY-0001#AC2")
+
+
+def test_a_changed_contract_path_that_loses_the_decision_is_red(render, tmp_path):
+    out = _repo(render, tmp_path, _decided_base(BOUND2), feature_registry=True)
+    other = "docs/design/web-contract-2.md"
+    _write(out, other, CONTRACT_TEXT)
+    entry = json.loads((out / f"{REG}/web.json").read_text())
+    entry.update(contract=other, pin=f"sha256:{_sha(out / other)}")
+    _write(out, f"{REG}/web.json", json.dumps(entry))
+    _commit(out)
+    _lost(_gate(out), "STORY-0001#AC2")
+
+
+def test_a_reference_moved_out_of_a_shared_round_is_red(render, tmp_path):
+    ios_contract = "docs/design/ios-contract.md"
+    other = "docs/design/concepts/ios-round-1"
+
+    def base(out):
+        _story(out, _ac(1), _ac(2, None))
+        _go(out, _states(stories=["STORY-0001"]))
+        _write(out, ios_contract, CONTRACT_TEXT + f"\n## 9. Decisions\n\n{BOUND2}\n")
+        _write(out, f"{REG}/ios.json", json.dumps({
+            "surface": "ios", "contract": ios_contract, "status": "draft",
+            "pin": f"sha256:{_sha(out / ios_contract)}", "id_prefixes": ["S"], "reference": ROUND}))
+    out = _repo(render, tmp_path, base, feature_registry=True)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout  # the ios contract's bound decision covers AC2
+    _sealed(out, _states(stories="n/a: nur die iOS-Shell"), round_rel=other)
+    ios = json.loads((out / f"{REG}/ios.json").read_text())
+    _write(out, f"{REG}/ios.json", json.dumps({**ios, "reference": other}))
+    _commit(out)
+    _lost(_gate(out), "STORY-0001#AC2")
+
+
+def _uncovered_base(contract: str = CONTRACT):
+    """main: a GO on the round with STORY-0001#AC2 uncovered there already."""
+    def base(out):
+        _story(out, _ac(1), _ac(2, None))
+        _go(out, _states(stories=["STORY-0001"]), contract=contract)
+    return base
+
+
+def test_an_item_uncovered_at_the_base_too_is_a_note_while_untouched(render, tmp_path):
+    """Wächter: no coverage lost, the round untouched — the GO's gap is a note."""
+    out = _repo(render, tmp_path, _uncovered_base(), feature_registry=True)
+    _write(out, "server/api.py", "x = 1\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0 and "STORY-0001#AC2" in r.stdout and "lost" not in r.stdout, r.stdout
+
+
+def test_a_base_contract_that_cannot_be_read_counts_as_changed(render, tmp_path):
+    out = _repo(render, tmp_path, _uncovered_base("docs/design/never-committed.md"),
+                feature_registry=True)
+    _entry(out, **{k: v for k, v in json.loads((out / f"{REG}/web.json").read_text()).items()
+                   if k not in ("pin", "contract")})
+    _commit(out)
+    r = _gate(out)
+    _lost(r, "STORY-0001#AC2")
+    assert "cannot be read at the fork point" in r.stdout, r.stdout
+
+
+def test_without_a_base_registry_lost_anchors_are_not_compared(render, tmp_path):
+    def base(out):
+        _covered_base()(out)
+        _write(out, LOCAL_REG, json.dumps({"layout": "bogus"}))
+    out = _repo(render, tmp_path, base, feature_registry=True)
+    (out / LOCAL_REG).unlink()
+    _story(out, _ac(1), _ac(2, None))
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "no base registry" in r.stdout and "lost design anchors are not compared" in r.stdout, r.stdout
+
+
+# the table: --coverage and the review bundle
+
+def test_coverage_prints_the_table_and_the_bundle_shows_it(render, tmp_path):
+    out = _cov(render, tmp_path, _ac(1), _ac(2, None), _ac(3, None),
+               before=lambda o: _decide(o, DECISIONS, DROP2.replace("AC2", "AC3")))
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_design_contracts.py"),
+                        str(out), "--coverage", "web"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = r.stdout.splitlines()
+    assert "| AC | covered by | viewports | themes | variants |" in lines, r.stdout
+    assert "| STORY-0001#AC1 | web-round-1/shell-open#default | phone, standard | light, dark | ax3 |" \
+        in lines, r.stdout
+    assert "| STORY-0001#AC2 | **uncovered** | — | — | — |" in lines, r.stdout
+    assert "| STORY-0001#AC3 | decision D-7 (drop) | — | — | — |" in lines, r.stdout
+    r = subprocess.run([sys.executable, str(out / "scripts/process/check_design_contracts.py"),
+                        str(out), "--coverage", "tv"], capture_output=True, text=True)
+    assert r.returncode == 1 and "no design-contract entry for surface 'tv'" in r.stdout, r.stdout
+    r = subprocess.run([sys.executable, str(out / "scripts/process/make_review_bundle.py"),
+                        "--base", "main", "--skip-preflight"], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "  | STORY-0001#AC2 | **uncovered** | — | — | — |" in r.stdout, r.stdout
+
