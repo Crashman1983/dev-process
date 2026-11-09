@@ -545,3 +545,177 @@ def test_a_planned_ref_is_never_proof(render, tmp_path):
     _entry(out, tests=["planned:#12:the widget test"])
     r = _gate(out)
     assert r.returncode == 1 and "no existing test" in r.stdout, r.stdout
+
+
+# --- v2.92 I1: item ids (#404 AC-1, AC-14) ---
+
+def test_item_without_id_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, acceptance=[{"text": "Saved widgets survive a restart."}])
+    r = _gate(out)
+    assert r.returncode == 1 and "acceptance[0] has no 'id'" in r.stdout and "--assign-ids" in r.stdout, r.stdout
+
+
+def test_string_item_is_hard(render, tmp_path):
+    # Kenni's items today: plain strings, references by position
+    out = _kenni(render, tmp_path, ids=False)
+    r = _gate(out)
+    assert r.returncode == 1 and "CLI-US-001.json: acceptance[0] has no 'id'" in r.stdout, r.stdout
+
+
+def test_duplicate_item_id_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, acceptance=[{"id": "AC1", "text": "a"}, {"id": "AC1", "text": "b"}])
+    r = _gate(out)
+    assert r.returncode == 1 and "STORY-0002#AC1 is used twice" in r.stdout, r.stdout
+
+
+def test_lower_case_item_id_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, acceptance=[{"id": "ac1", "text": "a"}])
+    r = _gate(out)
+    assert r.returncode == 1 and "acceptance[0] 'id' must match ^AC[1-9]\\d*$, got 'ac1'" in r.stdout, r.stdout
+
+
+# --- v2.92 I2: item fields (#404 AC-2, AC-3, AC-3a, AC-15, AC-22) ---
+
+def _item(out, rel, **fields):
+    """CLI-US-001's (web, ios, macos) first item, with `fields` set on it."""
+    p = out / KREG / rel
+    d = json.loads(p.read_text(encoding="utf-8"))
+    d["acceptance"][0].update(fields)
+    p.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+BACKEND_TEST = "backend/tests/api/v1/test_clients.py"
+WEB_TEST = "frontend-react/src/api/engagements.test.ts"
+
+
+def test_item_fields_on_kenni_are_green(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", surfaces=["web", "ios"], state={"web": "proven", "ios": "target"},
+          issue="#874", tests={"web": [WEB_TEST]}, design="anchor reserved for #404 B")
+    _item(out, "clients/CLI-US-002.json", owned_by="backend", tests={"backend": [BACKEND_TEST]})
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_report_states_the_owned_by_share_per_capability(render, tmp_path):
+    # #404 AC-22: client items drifting into "owned_by" show up in the number
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-002.json", owned_by="backend", tests={"backend": [BACKEND_TEST]})
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "items owned_by a shared proof layer, per capability: captures 0/40, clients 1/21" in r.stdout, r.stdout
+
+
+def test_item_surfaces_outside_the_story_are_hard(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-002.json", surfaces=["web"])  # the story is ios, macos
+    r = _gate(out)
+    assert r.returncode == 1 and "CLI-US-002#AC1: surfaces ['web'] outside" in r.stdout, r.stdout
+
+
+def test_state_key_outside_the_item_surfaces_is_hard(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", surfaces=["web"], state={"ios": "proven"})
+    r = _gate(out)
+    assert r.returncode == 1 and "state key(s) ['ios'] outside the item's surfaces" in r.stdout, r.stdout
+
+
+def test_unknown_state_value_is_hard(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", state="done")
+    r = _gate(out)
+    assert r.returncode == 1 and "state must be 'proven' or 'target'" in r.stdout, r.stdout
+
+
+def test_target_without_issue_is_hard(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", state={"web": "target"})
+    r = _gate(out)
+    assert r.returncode == 1 and "CLI-US-001#AC1: state 'target' needs an 'issue'" in r.stdout, r.stdout
+
+
+def test_tests_list_on_two_surfaces_is_hard(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", surfaces=["web", "ios"], tests=[WEB_TEST])
+    r = _gate(out)
+    assert r.returncode == 1 and "a plain 'tests' list fits an item with exactly one surface" in r.stdout, r.stdout
+
+
+def test_tests_list_on_one_surface_is_green(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", surfaces=["web"], tests=[WEB_TEST])
+    assert _gate(out).returncode == 0
+
+
+def test_tests_key_for_a_surface_the_item_lacks_is_hard(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", surfaces=["web"], tests={"ios": [WEB_TEST]})
+    r = _gate(out)
+    assert r.returncode == 1 and "tests key 'ios' is neither one of the item's surfaces" in r.stdout, r.stdout
+
+
+def test_shared_layer_tests_without_owned_by_are_hard(render, tmp_path):
+    # a backend test must not stand in for client behaviour (AC-22)
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", tests={"backend": [BACKEND_TEST]})
+    r = _gate(out)
+    assert r.returncode == 1 and "tests key 'backend' is a shared proof layer" in r.stdout, r.stdout
+
+
+def test_owned_by_outside_the_shared_layers_is_hard(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", owned_by="server")
+    r = _gate(out)
+    assert r.returncode == 1 and "owned_by 'server' is not one of shared_proof_layers" in r.stdout, r.stdout
+
+
+def test_dead_item_test_path_is_hard(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    _item(out, "clients/CLI-US-001.json", tests={"web": ["frontend-react/gone.test.ts"]})
+    r = _gate(out)
+    assert r.returncode == 1 and "CLI-US-001#AC1: tests.web: test path does not exist" in r.stdout, r.stdout
+
+
+def test_item_surfaces_without_project_surfaces_are_a_note(render, tmp_path):
+    # AC-3: no declared surfaces — a note asking to declare them, no subset check
+    out = _render(render, tmp_path)
+    _entry(out, acceptance=[{"id": "AC1", "text": "a", "surfaces": ["web"], "state": "proven",
+                             "tests": ["tests/test_widget.py"]}])
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "STORY-0002#AC1: item 'surfaces' without project surfaces — declare `surfaces`" in r.stdout, r.stdout
+
+
+def test_implicit_surface_rejects_a_state_map(render, tmp_path):
+    # AC-3a: one implicit surface takes a single state value, not a map
+    out = _render(render, tmp_path)
+    _entry(out, acceptance=[{"id": "AC1", "text": "a", "state": {"web": "proven"}}])
+    r = _gate(out)
+    assert r.returncode == 1 and "state key(s) ['web'] outside the item's surfaces" in r.stdout, r.stdout
+
+
+def test_story_without_surfaces_falls_back_to_the_project_surfaces(render, tmp_path):
+    out = _render(render, tmp_path)
+    _local(out, {"surfaces": ["web", "ios"], "story_surfaces": "optional"})
+    _entry(out, acceptance=[{"id": "AC1", "text": "a", "surfaces": ["ios"], "tests": ["tests/test_widget.py"]}])
+    assert _gate(out).returncode == 0
+    _entry(out, acceptance=[{"id": "AC1", "text": "a", "surfaces": ["cli"]}])
+    r = _gate(out)
+    assert r.returncode == 1 and "surfaces ['cli'] outside" in r.stdout, r.stdout
+
+
+def test_strict_item_tests_off_is_one_note_per_capability(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    notes = [line for line in r.stdout.splitlines() if "acceptance item(s) without an existing test" in line]
+    assert len(notes) == 2 and any("docs/feature-registry/clients: 21 " in n for n in notes), notes
+
+
+def test_strict_item_tests_on_fails_an_item_without_tests(render, tmp_path):
+    out = _green_kenni(render, tmp_path, strict_item_tests=True)
+    r = _gate(out)
+    assert r.returncode == 1 and "CLI-US-001#AC1: no existing test (strict_item_tests)" in r.stdout, r.stdout
