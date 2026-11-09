@@ -1321,7 +1321,7 @@ USAGE_TOKENS = re.compile(r'"(' + "|".join(TOKEN_FIELDS) + r')":\s*(\d+)')
 def _issue_transcripts(root: Path, issue: int | None) -> set[str] | None:
     """The transcript files of the issue's dispatched worktrees (every
     dispatched worktree's with `issue` None); None without a `transcripts`
-    glob in the policy (`{worktree}` is substituted; default none)."""
+    glob in the policy (`{worktree}` or `{worktree_slug}` substituted; default none)."""
     pattern = transcripts_pattern(root)
     if pattern is None:
         return None
@@ -1366,6 +1366,9 @@ def issue_token_usage(root: Path, issue: int) -> tuple[dict[str, int], int] | No
     return None if got is None else (got[0], got[1])
 
 
+SKIPPED_USAGE = ("total_token_usage", "toolUseResult")
+
+
 def _usage_events(data: object) -> list[dict[str, int]]:
     """The usage events of one parsed transcript line: every JSON object that
     carries a TOKEN_FIELDS count, with the fields it carries."""
@@ -1375,8 +1378,10 @@ def _usage_events(data: object) -> list[dict[str, int]]:
         node = stack.pop()
         if isinstance(node, dict):
             # a running total beside the per-call usage (Codex's `total_token_usage`)
-            # would count every call again
-            node = {k: v for k, v in node.items() if k != "total_token_usage"}
+            # would count every call again; Claude Code's Agent tool puts a
+            # subagent's usage into the parent's `toolUseResult`, and the
+            # subagent's own transcript already counts it, under its model
+            node = {k: v for k, v in node.items() if k not in SKIPPED_USAGE}
             got = {k: v for k, v in node.items()
                    if k in TOKEN_FIELDS and isinstance(v, int) and not isinstance(v, bool)}
             if got:
@@ -1458,13 +1463,13 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
             totals[field] = totals.get(field, 0) + n
             if not opaque:
                 covered[field] = covered.get(field, 0) + 1
-    return totals, len(files), covered, len(events), unknown
+    return totals, sum(not _is_subagent(f) for f in files), covered, len(events), unknown
 
 
 def issue_tokens(root: Path, issue: int) -> tuple[int, int] | None:
     """(output tokens, sessions) of the issue's dispatched worktrees — None
-    when not measured: no `transcripts` glob in the policy (`{worktree}` is
-    substituted; default none), no dispatch record, or no transcript."""
+    when not measured: no `transcripts` glob in the policy (`{worktree}` or
+    `{worktree_slug}` substituted; default none), no dispatch record, or no transcript."""
     got = issue_token_usage(root, issue)
     if got is None:
         return None
@@ -1479,10 +1484,78 @@ def transcripts_pattern(root: Path) -> str | None:
     return pattern if isinstance(pattern, str) and pattern.strip() else None
 
 
+SLUG_MAX = 200  # Claude Code cuts a longer project directory name here and appends a hash
+
+
+def worktree_slug(path: str) -> str:
+    """The name Claude Code gives a working directory's project directory
+    (`~/.claude/projects/<slug>/`): every character but [A-Za-z0-9] becomes `-`."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
+
+
+def _slug_globs(worktree: str) -> set[str]:
+    """`{worktree_slug}` for the path and for its realpath — Claude Code names the
+    directory after `realpath(cwd)` (macOS: /tmp is /private/tmp); a slug over
+    SLUG_MAX characters is its first SLUG_MAX and `-*` for the hash."""
+    out = set()
+    for path in {worktree, os.path.realpath(worktree)}:
+        slug = worktree_slug(path)
+        out.add(slug if len(slug) <= SLUG_MAX else slug[:SLUG_MAX] + "-*")
+    return out
+
+
+def _session_of_cwd(path: str, cwds: set[str]) -> bool:
+    """A line of the session transcript carries `cwd` = the worktree (or its
+    realpath). A slug is not unique — `a_b`, `a.b` and `a-b` share one, and so
+    do two long paths with one prefix — the `cwd` tells the sessions apart."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        if '"cwd"' not in line:
+            continue
+        try:
+            cwd = json.loads(line).get("cwd")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(cwd, str) and cwd and (cwd in cwds or os.path.realpath(cwd) in cwds):
+            return True
+    return False
+
+
+def _is_subagent(path: str) -> bool:
+    """A subagent transcript (`<session>/subagents/*.jsonl`) — no session of its own."""
+    return Path(path).parent.name == "subagents"
+
+
 def _transcript_files(pattern: str, rec: dict) -> set[str]:
-    if not rec.get("worktree"):
+    return _worktree_files(pattern, rec.get("worktree"))
+
+
+def _worktree_files(pattern: str, worktree: object) -> set[str]:
+    """The transcripts the policy's glob names for one worktree. `{worktree}` is
+    the path itself (another harness's transcripts carry no `cwd`: none is
+    checked); `{worktree_slug}` is Claude Code's project directory, read per
+    session file by its `cwd`, and a subagent file counts when its session did."""
+    if not worktree:
         return set()
-    return set(glob.glob(os.path.expanduser(pattern.replace("{worktree}", glob.escape(str(rec["worktree"]))))))
+    wt = str(worktree)
+    base = pattern.replace("{worktree}", glob.escape(wt))
+    if "{worktree_slug}" not in pattern:
+        return set(glob.glob(os.path.expanduser(base), recursive=True))
+    found: set[str] = set()
+    for slug in _slug_globs(wt):
+        found |= set(glob.glob(os.path.expanduser(base.replace("{worktree_slug}", slug)), recursive=True))
+    cwds = {wt.rstrip("/") or "/", os.path.realpath(wt)}
+    own: dict[str, bool] = {}
+
+    def counted(session: str) -> bool:
+        if session not in own:
+            own[session] = os.path.isfile(session) and _session_of_cwd(session, cwds)
+        return own[session]
+    return {f for f in found
+            if counted(str(Path(f).parent.parent) + ".jsonl" if _is_subagent(f) else f)}
 
 
 def _epoch(ts: object) -> float:
