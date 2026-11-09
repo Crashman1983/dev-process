@@ -91,7 +91,7 @@ def test_module_off_absent_on_present(render, tmp_path):
     assert (on / "scripts/process/seal.py").is_file()
     assert (on / "docs/process/modules/design-contracts.md").is_file()
     assert (on / f"{REG}/surface.example.json").is_file()
-    for t in ("surface-contract.md", "independent-review.md", "round-README.md"):
+    for t in ("surface-contract.md", "independent-review.md", "round-README.md", "states.example.json"):
         assert (on / f"{REG}/templates/{t}").is_file()
 
 
@@ -820,3 +820,450 @@ def test_a_contract_id_only_in_a_decision_line_is_not_defined(render, tmp_path):
     r = _gate(out)
     assert r.returncode == 1 and "cites web design-contract ID S3" in r.stdout, r.stdout
 
+
+# --- v2.93 B1/B2: states.json in the round, required once a push touches it -----------
+
+BOARD = "boards/S01-desktop-light.png"
+STATES_REL = f"{ROUND}/states.json"
+
+
+def _states(**over) -> dict:
+    data = {
+        "schema_version": 1,
+        "surfaces": ["web"],
+        "viewports": [{"id": "phone", "width": 402, "height": 874},
+                      {"id": "standard", "width": 1280, "height": 800}],
+        "themes": ["light", "dark"],
+        "variants": ["ax3"],
+        "elements": [{"id": "btn", "owner": "rs/Button", "role": "main"}],
+        "views": [{"id": "shell-open", "elements": ["btn"],
+                   "states": [{"id": "default", "viewports": ["phone", "standard"],
+                               "themes": ["light", "dark"], "variants": ["ax3"], "boards": [BOARD]}],
+                   "not_applicable": {"offline": "die Shell hat keinen eigenen Netzzustand"}}],
+    }
+    data.update(over)
+    return data
+
+
+def _commit(out: Path, msg: str = "work") -> None:
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "--allow-empty", "-m", msg)
+
+
+def _sealed(out: Path, states: dict | None = None, *, round_rel: str = ROUND) -> str:
+    """Boards (and states.json) in the round, sealed against the contract; the seal hex."""
+    if not (out / CONTRACT).exists():
+        _write(out, CONTRACT, CONTRACT_TEXT)
+    _write(out, f"{round_rel}/boards/S01-desktop-light.png", "png-bytes-1")
+    _write(out, f"{round_rel}/boards/S01-desktop-dark.png", "png-bytes-2")
+    _write(out, f"{round_rel}/README.md", "# round\n")
+    if states is not None:
+        _write(out, f"{round_rel}/states.json", json.dumps(states))
+    r = _seal(out, "--seal", round_rel, "--dep", CONTRACT)
+    assert r.returncode == 0, r.stderr
+    return (out / round_rel / "manifest.sha256").read_text().split()[0]
+
+
+def _go(out: Path, states: dict | None = None, *, seal_line: bool = True, **over) -> dict:
+    """An accepted `web` entry on a sealed round with a GO review."""
+    hexd = _sealed(out, states)
+    _write(out, ADR, "# ADR-0009\n\n## Status\nAccepted\n")
+    seal = f"Seal reviewed: manifest.sha256 = `{hexd}`\n\n" if seal_line else ""
+    _write(out, REVIEW, f"# Review\n\n{seal}**Decision:** GO\n")
+    return _entry(out, status="accepted", adr=ADR, review=REVIEW, reference=ROUND, **over)
+
+
+def _repo(render, tmp_path, base=None, **mods) -> Path:
+    """main holds what `base(out)` writes (a draft `web` entry without a round by default);
+    work goes on `feature`."""
+    out = _render(render, tmp_path, **mods)
+    (base or _entry)(out)
+    _git(out, "init", "-q", "-b", "main")
+    _commit(out, "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    return out
+
+
+def _hard(r) -> list[str]:
+    return [ln for ln in r.stdout.splitlines() if ln.startswith("  - ")]
+
+
+def test_a_valid_states_json_with_variants_is_green(render, tmp_path):
+    out = _repo(render, tmp_path)
+    _go(out, _states(_comment="Runde 1"))
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "states.json" not in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("level", ["root", "viewports", "elements", "views", "states"])
+def test_an_unknown_key_in_states_json_is_red_at_every_level(render, tmp_path, level):
+    out = _repo(render, tmp_path)
+    states = _states()
+    target = {"root": states, "viewports": states["viewports"][0], "elements": states["elements"][0],
+              "views": states["views"][0], "states": states["views"][0]["states"][0]}[level]
+    target["colour"] = "red"
+    _go(out, states)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "unknown key(s) 'colour'" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("level", ["root", "viewports", "elements", "views", "states", "not_applicable"])
+def test_a_comment_is_allowed_at_every_level(render, tmp_path, level):
+    out = _repo(render, tmp_path)
+    states = _states()
+    view = states["views"][0]
+    target = {"root": states, "viewports": states["viewports"][0], "elements": states["elements"][0],
+              "views": view, "states": view["states"][0], "not_applicable": view["not_applicable"]}[level]
+    target["_comment"] = "Notiz"
+    _go(out, states)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+@pytest.mark.parametrize("axis,value,needle", [
+    ("viewports", ["tablet"], "unknown viewport 'tablet'"),
+    ("themes", ["sepia"], "unknown theme 'sepia'"),
+    ("variants", ["ax5"], "unknown variant 'ax5'"),
+    ("boards", ["boards/missing.png"], "board 'boards/missing.png' does not exist"),
+    ("boards", ["../../../../outside.png"], "board '../../../../outside.png' does not exist"),
+])
+def test_a_state_names_only_what_the_round_has(render, tmp_path, axis, value, needle):
+    out = _repo(render, tmp_path)
+    _write(out, "outside.png", "x")
+    states = _states()
+    states["views"][0]["states"][0][axis] = value
+    _go(out, states)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and needle in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("change,needle", [
+    (lambda s: s.update(schema_version=2), "'schema_version' must be 1"),
+    (lambda s: s.pop("schema_version"), "'schema_version' must be 1"),
+    (lambda s: s.update(surfaces=[]), "'surfaces' must be a non-empty list"),
+    (lambda s: s.update(stories=[]), "'stories' must be a non-empty list"),
+    (lambda s: s.update(stories="n/a"), "'stories': `n/a` without a reason"),
+    (lambda s: s.update(stories="n/a:  "), "'stories': `n/a` without a reason"),
+    (lambda s: s.update(stories="DOC-US-001"), "'stories' must be a non-empty list"),
+    (lambda s: s.update(views=[]), "'views' must be a non-empty list"),
+    (lambda s: s["views"][0]["not_applicable"].update(offline=" "), "'offline' has no reason"),
+    (lambda s: s["views"][0]["not_applicable"].update(default="doppelt"),
+     "'default' is in `states` and in `not_applicable`"),
+    (lambda s: s["views"].append(dict(s["views"][0])), "view 'shell-open' twice"),
+])
+def test_states_json_shape_errors_are_red(render, tmp_path, change, needle):
+    out = _repo(render, tmp_path)
+    states = _states()
+    change(states)
+    _go(out, states)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and needle in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("change,needle", [
+    (lambda s: s["elements"].append({"id": "btn", "owner": "rs/Other"}), "element 'btn' twice"),
+    (lambda s: s["elements"][0].update(owner=" "), "'owner' must be a non-empty string"),
+    (lambda s: s["elements"][0].pop("owner"), "'owner' must be a non-empty string"),
+    (lambda s: s["elements"][0].update(role=3), "'role' must be a string"),
+    (lambda s: s["views"][0]["elements"].append("nav"), "names element 'nav'"),
+])
+def test_the_element_map_gives_each_element_one_owner(render, tmp_path, change, needle):
+    out = _repo(render, tmp_path)
+    states = _states()
+    change(states)
+    _go(out, states)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and needle in r.stdout, r.stdout
+
+
+def test_the_shipped_states_example_is_a_valid_states_json(render, tmp_path):
+    """Guard: the seed a project copies into its round reads clean (its board exists)."""
+    out = _render(render, tmp_path)
+    example = json.loads((out / f"{REG}/templates/states.example.json").read_text())
+    _write(out, STATES_REL, json.dumps(example))
+    _write(out, f"{ROUND}/boards/shell-open-phone-light.png", "png")
+    code = ("import sys; sys.path.insert(0, 'scripts/process'); from pathlib import Path; "
+            "import check_design_contracts as dc; "
+            f"data, problems = dc.load_states(Path('.').resolve(), Path('{ROUND}').resolve()); "
+            "print(problems, data is not None)")
+    r = subprocess.run([sys.executable, "-c", code], cwd=out, capture_output=True, text=True)
+    assert r.stdout.strip() == "[] True", r.stdout + r.stderr
+    assert "n/a: <reason>" in example["_comment"]
+
+
+def test_an_element_without_role_is_fine(render, tmp_path):
+    out = _repo(render, tmp_path)
+    states = _states()
+    del states["elements"][0]["role"]
+    _go(out, states)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+# --- the state catalogue ---------------------------------------------------------------
+
+def test_every_catalogue_state_is_rendered_or_not_applicable(render, tmp_path):
+    out = _repo(render, tmp_path)
+    _go(out, _states(), state_catalogue=["default", "offline"])
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    _go(out, _states(), state_catalogue=["default", "offline", "loading"])
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "view 'shell-open' has no state 'loading'" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("value,needle", [
+    (5, "'state_catalogue' must be a list of state IDs or a repo path"),
+    ({"default": 1}, "'state_catalogue' must be a list of state IDs or a repo path"),
+    ([1, "default"], "'state_catalogue' must hold non-empty state IDs"),
+    ("docs/design/missing.json", "'state_catalogue' docs/design/missing.json does not exist"),
+    ("../outside.json", "'state_catalogue' path '../outside.json' escapes the repo root"),
+    ("docs/design/catalogue-object.json", "must hold a JSON list of state IDs"),
+])
+def test_a_bad_state_catalogue_is_red(render, tmp_path, value, needle):
+    out = _repo(render, tmp_path)
+    _write(out, "docs/design/catalogue-object.json", json.dumps({"states": ["default"]}))
+    _write(out.parent, "outside.json", json.dumps(["default"]))  # exists, yet outside the repo
+    _go(out, _states(), state_catalogue=value)
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and needle in r.stdout, r.stdout
+
+
+def test_a_catalogue_path_acts_like_the_list(render, tmp_path):
+    out = _repo(render, tmp_path)
+    _write(out, "docs/design/zustaende.json", json.dumps(["default", "loading"]))
+    _go(out, _states(), state_catalogue="docs/design/zustaende.json")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "view 'shell-open' has no state 'loading'" in r.stdout, r.stdout
+
+
+def test_two_entries_of_one_round_unite_their_catalogues(render, tmp_path):
+    out = _repo(render, tmp_path)
+    _go(out, _states(), state_catalogue=["default"])
+    ios = json.loads((out / f"{REG}/web.json").read_text())
+    ios.update(surface="ios", state_catalogue=["error"])
+    _write(out, f"{REG}/ios.json", json.dumps(ios))
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "view 'shell-open' has no state 'error'" in r.stdout, r.stdout
+
+
+def test_a_branch_cannot_drop_a_state_from_the_catalogue_for_its_own_go(render, tmp_path):
+    def base(out):
+        _write(out, "docs/design/zustaende.json", json.dumps(["default", "loading"]))
+        _entry(out, state_catalogue="docs/design/zustaende.json")
+    out = _repo(render, tmp_path, base)
+    _write(out, "docs/design/zustaende.json", json.dumps(["default"]))
+    _go(out, _states(), state_catalogue="docs/design/zustaende.json")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "view 'shell-open' has no state 'loading'" in r.stdout, r.stdout
+
+
+# --- the unknown-key note on the registry entry -----------------------------------------
+
+def test_an_unknown_registry_key_is_a_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, refrence=ROUND)
+    r = _gate(out)
+    assert r.returncode == 0 and "unknown key(s) 'refrence'" in r.stdout, r.stdout
+
+
+def test_the_seed_keys_and_an_accepted_entry_raise_no_unknown_key_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    seed = json.loads((out / f"{REG}/surface.example.json").read_text())
+    extra = {k: v for k, v in seed.items() if k not in ("surface", "contract", "status", "pin", "id_prefixes",
+                                                        "adr", "review", "reference")}
+    _write(out, "docs/design/zustaende.json", json.dumps(["default"]))
+    extra["state_catalogue"] = "docs/design/zustaende.json"
+    _go(out, _states(), **extra)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "unknown key" not in r.stdout, r.stdout
+
+
+# --- the duty: states.json once a push touches the round -------------------------------
+
+def _round_without_states(out: Path, **entry) -> None:
+    """main: a sealed round without states.json and a `web` entry as given."""
+    _sealed(out)
+    _write(out, ADR, "# ADR-0009\n\n## Status\nAccepted\n")
+    _write(out, REVIEW, "# Review\n\n**Decision:** GO\n")
+    _entry(out, **entry)
+
+
+def _needs_states(r, why: str) -> None:
+    assert r.returncode == 1, r.stdout
+    hard = _hard(r)
+    assert len(hard) == 1 and "has no states.json" in hard[0] and why in hard[0], r.stdout
+
+
+def test_setting_the_reference_requires_states_json(render, tmp_path):
+    out = _repo(render, tmp_path, lambda o: _round_without_states(o))
+    _entry(out, reference=ROUND)
+    _commit(out)
+    _needs_states(_gate(out), "reference changed")
+
+
+def test_draft_to_accepted_requires_states_json(render, tmp_path):
+    out = _repo(render, tmp_path, lambda o: _round_without_states(o, reference=ROUND, adr=ADR, review=REVIEW))
+    _entry(out, reference=ROUND, adr=ADR, review=REVIEW, status="accepted")
+    _commit(out)
+    _needs_states(_gate(out), "status became accepted")
+
+
+def test_a_new_review_path_requires_states_json(render, tmp_path):
+    out = _repo(render, tmp_path, lambda o: _round_without_states(
+        o, reference=ROUND, adr=ADR, review=REVIEW, status="accepted"))
+    moved = REVIEW.replace("review.md", "review-2.md")
+    _git(out, "mv", REVIEW, moved)
+    _entry(out, reference=ROUND, adr=ADR, review=moved, status="accepted")
+    _commit(out)
+    _needs_states(_gate(out), "review path changed")
+
+
+def test_a_new_seal_on_the_same_reference_requires_states_json(render, tmp_path):
+    # the review names no seal: only the states.json message counts
+    out = _repo(render, tmp_path, lambda o: _round_without_states(
+        o, reference=ROUND, adr=ADR, review=REVIEW, status="accepted"))
+    _write(out, f"{ROUND}/boards/S02-desktop-light.png", "png-bytes-3")
+    assert _seal(out, "--seal", ROUND, "--dep", CONTRACT).returncode == 0
+    _commit(out)
+    _needs_states(_gate(out), "seal changed")
+
+
+def test_a_changed_review_file_requires_states_json(render, tmp_path):
+    out = _repo(render, tmp_path, lambda o: _round_without_states(
+        o, reference=ROUND, adr=ADR, review=REVIEW, status="accepted"))
+    _write(out, REVIEW, (out / REVIEW).read_text() + "\n## Round 1.1\n\nDecision: GO\n")
+    _commit(out)
+    _needs_states(_gate(out), "review file changed")
+
+
+def test_a_new_entry_file_requires_states_json(render, tmp_path):
+    out = _repo(render, tmp_path, lambda o: _sealed(o))
+    _entry(out, reference=ROUND)
+    _commit(out)
+    _needs_states(_gate(out), "new registry entry")
+
+
+def test_an_untouched_accepted_round_without_states_json_stays_a_note(render, tmp_path):
+    out = _repo(render, tmp_path, lambda o: _round_without_states(
+        o, reference=ROUND, adr=ADR, review=REVIEW, status="accepted"))
+    _write(out, "server/api.py", "x = 1\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "has no states.json" in r.stdout and "not touched" in r.stdout, r.stdout
+
+
+def test_without_a_fork_point_the_duty_is_a_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _round_without_states(out, reference=ROUND)
+    _git(out, "init", "-q", "-b", "main")
+    _commit(out, "base")  # on main itself: no push range
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "fork point" in r.stdout and ROUND in r.stdout, r.stdout
+
+
+# --- stories: the declaration (B4 judges the registry side) ------------------------------
+
+@pytest.mark.parametrize("stories,ok", [
+    ("absent", True),
+    ("n/a: Pilot ohne Registry", True),
+    (["DOC-US-001"], False),
+])
+def test_without_the_registry_module_stories_are_na_or_absent(render, tmp_path, stories, ok):
+    out = _repo(render, tmp_path)
+    states = _states() if stories == "absent" else _states(stories=stories)
+    _go(out, states)
+    _commit(out)
+    r = _gate(out)
+    assert (r.returncode == 0) is ok, r.stdout
+    if not ok:
+        assert "no feature registry" in r.stdout, r.stdout
+
+
+def test_with_the_registry_module_a_touched_round_names_its_stories(render, tmp_path):
+    out = _repo(render, tmp_path, feature_registry=True)
+    _go(out, _states())
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "'stories' is required" in r.stdout, r.stdout
+    _go(out, _states(stories="n/a: reine Shell, keine Story"))
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+# --- the touched-round principle ----------------------------------------------------------
+
+def test_an_untouched_round_gives_notes_where_a_touched_one_is_red(render, tmp_path):
+    out = _repo(render, tmp_path, lambda o: _go(o, _states(stories=["DOC-US-001"]), state_catalogue=["default"]))
+    # a new catalogue state and a story list without a registry: notes while untouched
+    entry = json.loads((out / f"{REG}/web.json").read_text())
+    entry["state_catalogue"] = ["default", "loading"]
+    _write(out, f"{REG}/web.json", json.dumps(entry))
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "has no state 'loading'" in r.stdout and "no feature registry" in r.stdout, r.stdout
+    # the push touches the round (a new review section): the same findings are red
+    _write(out, REVIEW, (out / REVIEW).read_text() + "\n## Nachtrag\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1, r.stdout
+    hard = "\n".join(_hard(r))
+    assert "has no state 'loading'" in hard and "no feature registry" in hard, r.stdout
+
+
+def _shared(out: Path, other_round: str) -> None:
+    """`web` on ROUND and `ios` on `other_round`, one review file naming both seals."""
+    seals = [_sealed(out, _states())]
+    if other_round != ROUND:
+        seals.append(_sealed(out, _states(), round_rel=other_round))
+    _write(out, ADR, "# ADR-0009\n\n## Status\nAccepted\n")
+    _write(out, REVIEW, "# Review\n\n" + "".join(f"manifest.sha256: {s}\n" for s in seals) + "\nDecision: GO\n")
+    web = _entry(out, status="accepted", adr=ADR, review=REVIEW, reference=ROUND)
+    _write(out, f"{REG}/ios.json", json.dumps({**web, "surface": "ios", "reference": other_round}))
+
+
+def test_a_review_file_shared_by_two_rounds_is_red_when_touched(render, tmp_path):
+    other = "docs/design/concepts/ios-round-1"
+    out = _repo(render, tmp_path, lambda o: _shared(o, other))
+    _write(out, "server/api.py", "x = 1\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 0 and "share the review" in r.stdout, r.stdout
+    _write(out, REVIEW, (out / REVIEW).read_text() + "\n## ios\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "share the review" in "\n".join(_hard(r)), r.stdout
+
+
+def test_a_new_section_in_a_shared_review_of_one_round_touches_it(render, tmp_path):
+    def base(out):
+        _round_without_states(out, reference=ROUND, adr=ADR, review=REVIEW, status="accepted")
+        web = json.loads((out / f"{REG}/web.json").read_text())
+        _write(out, f"{REG}/ios.json", json.dumps({**web, "surface": "ios"}))
+    out = _repo(render, tmp_path, base)
+    _write(out, REVIEW, (out / REVIEW).read_text() + "\n## ios\n\nDecision: GO\n")
+    _commit(out)
+    r = _gate(out)
+    assert r.returncode == 1, r.stdout
+    assert "share the review" not in r.stdout, r.stdout
+    hard = _hard(r)
+    assert hard and all("has no states.json" in h and "review file changed" in h for h in hard), r.stdout
