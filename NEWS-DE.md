@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.93.0 — Stabile AC-Kennungen; ein Design-GO nur mit voller Abdeckung
+
+Jedes Akzeptanzkriterium behält seine Kennung jetzt dauerhaft: Ein gelöschtes wird als zurückgezogen markiert, statt zu verschwinden, und die Prüfung vergleicht mit dem Stand, an dem der Branch begann. So wird ein Kriterium nicht mehr versehentlich umnummeriert. Ein Plan, der ein Kriterium aus der Liste des Produkts zitiert, gilt nicht mehr fälschlich als Träger eines eigenen Kriteriums. Eine Design-Runde listet jetzt ihre Ansichten, Zustände, Bildschirmgrößen und Themes in einer Datei, und ein GO verlangt, dass jedes Kriterium, das sie zeigt, durch einen Design-Zustand oder eine Owner-Entscheidung mit ID abgedeckt ist. Diese Tabelle berechnet die Prüfung selbst.
+
 ## v2.92.0 — Ein Registry-Checker für Template und Projekt; Tokens aus Claude-Code-Transkripten
 
 Die Liste dessen, was das Produkt kann (die Feature-Registry), darf jetzt die Form eines Projekts annehmen: ein Ordner je Fähigkeit, Tests je Plattform, ein Story-Status. Das Template prüft sie, ein Projekt braucht keinen eigenen Checker mehr. Jedes Akzeptanzkriterium bekommt eine feste Kennung und kann sagen, ob es schon funktioniert oder noch ein Ziel ist, und auf welcher Plattform. Ein Befehl vergibt die Kennungen für eine bestehende Registry. Außerdem kann der Prozess jetzt zählen, wie viele Tokens die Claude-Code-Sitzungen eines Issues verbraucht haben, über alle seine Phasen.

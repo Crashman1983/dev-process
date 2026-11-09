@@ -9,6 +9,55 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.93.0 — Stabile AC-Kennungen; ein Design-GO nur mit voller Abdeckung · 2026-11-09
+
+**Warum.**
+- Die ID eines Akzeptanzkriteriums war nur je Story eindeutig. Ein gelöschtes Item hinterließ eine Lücke, die `--assign-ids` wieder füllte, und wer Text nach oben schob, nummerierte still um. Ein Plan, der `NAV-US-003#AC19` zitiert, konnte dann ein anderes Item meinen, und `attest` las dieses `AC19` als Kriterium der Arbeit (#404 I4).
+- Eine Design-Runde erreichte GO, ohne dass jemand prüfte, ob jedes sichtbare Akzeptanzkriterium einen Design-Zustand oder eine Owner-Entscheidung hat. Nichts listete die Zustände, Viewports und Themes der Runde, „abgedeckt“ war eine Behauptung in der Review-Datei (#404 B).
+- Die unausgefüllte Auswahl `GO | GO with conditions | NO GO` der Review-Vorlage galt als GO.
+
+**Was sich ändert.**
+- **Stabile IDs, verglichen am Fork-Punkt** (#404 I4).
+  - Ein gelöschtes Item kommt in die Liste `retired` der Story, wahlweise mit `split_into` für seine Nachfolger. Eine zurückgezogene ID wird nie wieder vergeben.
+  - Der Checker liest die Registry am Fork-Punkt (`merge_base`) und prüft jede Story, die dort und heute existiert:
+    - eine Basis-ID verschwindet nicht ohne `retired`;
+    - eine neue ID ist höher als jede Basis-ID;
+    - der Text eines Items wandert nicht auf eine andere ID.
+  - Ohne Basis (dort noch keine Registry, eine unlesbare oder ungültige Basis-Konfiguration, ein Symlink oder ein Blob ohne UTF-8, ein flacher Klon, Criss-Cross, die Integrationsbasis selbst) gibt der Checker einen Hinweis, nie einen Fehler und nie ein stilles OK.
+  - Verweise `<Story>#AC<n>` müssen auf ein vorhandenes Item zeigen. Ein Verweis auf eine zurückgezogene ID mit `split_into` ist ein Hinweis.
+  - `--assign-ids` zählt vom Maximum aus, die Basis eingeschlossen, und vergibt nie eine ID, die die Basis hatte.
+  - `stable_ids: false` in `feature-registry.json` schaltet den Vergleich ab. Es gilt nur, wenn Basis und Branch beide false sagen; ein Branch hebt die Pflicht nicht für sich selbst auf.
+- **`attest` liest `NAV-US-003#AC19` als Registry-Verweis, nicht als Plan-Kriterium.** Ein eigenes `AC-19` und ein bloßes `AC19` zählen weiter.
+- **Design-Runden listen ihre Zustände** (#404 B).
+  - Ein Runden-Ordner trägt `states.json`: Plattformen, Stories, Viewports, Themes, Varianten, die Elementkarte (jedes Element mit einem Owner und optionaler Rolle) und die Ansichten mit ihren Zuständen. `not_applicable` nimmt Katalog-Zustände mit Grund auf.
+  - `state_catalogue` im Registry-Eintrag nennt die Zustände, die jede Ansicht beantworten muss. Der Katalog ist die Vereinigung von Basis und Branch; ein Push streicht keinen Zustand für sein eigenes GO.
+  - Die Pflicht beginnt, wenn ein Push die Runde berührt: eine neue Referenz, `draft` → `accepted`, ein geänderter Review-Pfad, ein geändertes Siegel oder eine geänderte Review-Datei, eine neue Eintragsdatei.
+  - Eine akzeptierte, versiegelte Runde wird nur hart geprüft, wenn der Push sie berührt. Änderungen an Registry oder Katalog an anderer Stelle geben Hinweise; das Aufräumen von Stories macht fremde Pushes nie rot.
+- **Anker und berechnete Abdeckung.**
+  - `design` eines Items trägt Anker `<runde>/<ansicht>#<zustand>`. Der Registry-Checker prüft sie, wenn das Modul Design-Contracts aktiv ist.
+  - Sichtbar für eine Runde ist ein Item ohne `owned_by`, dessen Plattformen die der Runde treffen. Abgedeckt ist es durch einen Anker oder eine Owner-Entscheidung mit ID: `DECISION <datum> owner <ID>: change|drop <Story>#AC<n> — <Grund>`. Im Vertrag zählt eine Entscheidung nur an ihre Runde gebunden (`owner <runde>/<ID>`).
+  - Ein `accepted`-Eintrag mit GO, dessen Runde ein sichtbares Item ohne Abdeckung hat, ist ein Fehler, der jedes Item nennt.
+  - Gegenüber dem Fork-Punkt verlorene Abdeckung ist ein Fehler für ein Item, das an beiden Enden existiert und sichtbar ist. Gelöschte Stories und zurückgezogene Items zählen nicht.
+  - `check_design_contracts.py --coverage <surface>` druckt die Tabelle, das Review-Bundle zeigt sie.
+- **Entscheidungszeilen.** Eine unausgefüllte Auswahl (`GO | GO with conditions | NO GO`, `GO / NO GO`, `GO or NO GO`) ist keine Entscheidung. Eine Tabelle nach der Zeile verdeckt sie nicht. Entscheidungen in HTML-Kommentaren und Gründe, die Platzhalter geblieben sind (`<reason>`, `TODO`, `…`), entscheiden nichts.
+
+**Wirkung.**
+- Ein Verweis auf ein Akzeptanzkriterium meint über Releases hinweg dasselbe Item, und ein Umnummerieren zeigt sich im Gate.
+- Ein Design-GO sagt in einer berechneten Tabelle, welche Items es abdeckt und warum.
+
+**Geänderte Abschnitte.**
+- `feature-registry.md` (Acceptance items; Writing rule and split rule; Stable ids (neu); Configuration; Migration; Hard vs. best-effort (no false-green))
+- `design-contracts.md` (The registry entry; Hard vs. best-effort (no false-green); The round's state list and element map (neu); Coverage — computed, and a GO only with all of it (neu); Seed)
+- `round-README.md` (Contents; states.json — state list and element map (neu); Workflow of a round)
+- `surface-contract.md` (9. Decisions)
+- `independent-review.md`
+
+**Update.**
+- Projekte, die Akzeptanzkriterien löschen, führen sie in `retired` oder setzen `"stable_ids": false` in `feature-registry.json`. Die Einstellung wirkt erst nach dem Merge des Updates, weil sie an der Basis gelesen wird.
+- Eine Design-Runde, die ein Push berührt, braucht `states.json` im Ordner; `templates/states.example.json` zeigt die Form. Owner-Entscheidungen zu Items tragen eine ID, Items tragen `design`-Anker.
+
+Details: [Plan](docs/analysis/2026-11-09-v2.93.md) #404
+
 ## v2.92.0 — Ein Registry-Checker für Template und Projekt; Tokens aus Claude-Code-Transkripten · 2026-11-09
 
 **Warum.**

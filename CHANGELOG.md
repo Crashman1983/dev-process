@@ -10,6 +10,55 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.93.0 — Stable acceptance ids; a design GO only with full coverage · 2026-11-09
+
+**Why.**
+- An acceptance item's id was only unique per story. A deleted item left a gap that `--assign-ids` refilled, and moving text up renumbered items silently. A plan citing `NAV-US-003#AC19` could then mean another item, and `attest` read that `AC19` as a criterion of the work (#404 I4).
+- A design round reached GO without anyone checking that every visible acceptance item had a design state or an owner decision. Nothing listed the round's states, viewports and themes, so "covered" was a claim in a review file (#404 B).
+- The review template's unfilled choice `GO | GO with conditions | NO GO` read as GO.
+
+**What changes.**
+- **Stable ids, compared at the fork point** (#404 I4).
+  - A deleted item goes into the story's `retired` list, optionally with `split_into` naming its successors. A retired id is never reused.
+  - The checker reads the registry at the fork point (`merge_base`) and checks every story that exists there and today:
+    - a base id must not vanish without `retired`;
+    - a new id must be higher than every base id;
+    - an item's text must not move to another id.
+  - Without a base (no registry there yet, an unreadable or invalid base configuration, a symlink or a non-UTF-8 blob, a shallow clone, criss-cross, the integration base itself), the checker gives a note, never an error and never a silent OK.
+  - References `<Story>#AC<n>` must point at an existing item. A reference to a retired id with `split_into` is a note.
+  - `--assign-ids` numbers from the maximum, the base included, so it never reuses an id the base held.
+  - `stable_ids: false` in `feature-registry.json` turns the comparison off. It counts only when both the base and the branch say false, so a branch cannot lift the duty for itself.
+- **`attest` reads `NAV-US-003#AC19` as a registry reference, not a plan criterion.** An own `AC-19` and a bare `AC19` still count.
+- **Design rounds list their states** (#404 B).
+  - A round folder carries `states.json`: surfaces, stories, viewports, themes, variants, the element map (each element with one owner and an optional role), and views with their states. `not_applicable` holds catalogue states with a reason.
+  - `state_catalogue` on the registry entry names the states every view must answer. The catalogue is the union of the base and the branch, so a push cannot drop a state for its own GO.
+  - The duty starts when a push touches the round: a new reference, `draft` → `accepted`, a changed review path, seal or review file, or a new entry file.
+  - An accepted, sealed round is checked hard only when the push touches it. Registry or catalogue changes elsewhere give notes, so cleaning up stories never turns unrelated pushes red.
+- **Anchors and computed coverage.**
+  - An item's `design` holds anchors `<round>/<view>#<state>`. The registry checker validates them when the design-contracts module is active.
+  - An item is visible to a round when it has no `owned_by` and its surfaces meet the round's. It is covered by an anchor or by an owner decision with an ID: `DECISION <date> owner <ID>: change|drop <Story>#AC<n> — <reason>`. In a contract, a decision counts only bound to its round (`owner <round>/<ID>`).
+  - An accepted entry with GO whose round has an uncovered visible item is an error that names each item.
+  - Coverage lost against the fork point is an error for an item that exists and is visible at both ends. Deleted stories and retired items do not count.
+  - `check_design_contracts.py --coverage <surface>` prints the table, and the review bundle shows it.
+- **Decision lines.** An unfilled choice (`GO | GO with conditions | NO GO`, `GO / NO GO`, `GO or NO GO`) is no decision. A table after the line does not hide it. Decisions in HTML comments and reasons left as placeholders (`<reason>`, `TODO`, `…`) decide nothing.
+
+**Effect.**
+- A reference to an acceptance item keeps meaning the same item across releases, and a renumbering shows up in the gate.
+- A design GO states, in a computed table, which items it covers and why.
+
+**Changed sections.**
+- `feature-registry.md` (Acceptance items; Writing rule and split rule; Stable ids (new); Configuration; Migration; Hard vs. best-effort (no false-green))
+- `design-contracts.md` (The registry entry; Hard vs. best-effort (no false-green); The round's state list and element map (new); Coverage — computed, and a GO only with all of it (new); Seed)
+- `round-README.md` (Contents; states.json — state list and element map (new); Workflow of a round)
+- `surface-contract.md` (9. Decisions)
+- `independent-review.md`
+
+**Update.**
+- Projects that delete acceptance items list them in `retired`, or set `"stable_ids": false` in `feature-registry.json`. The setting takes effect once the update is merged, because it is read at the base.
+- A design round that a push touches needs `states.json` in its folder; `templates/states.example.json` shows the form. Owner decisions on items carry an ID, and items carry `design` anchors.
+
+Details: [Plan](docs/analysis/2026-11-09-v2.93.md) #404
+
 ## v2.92.0 — One registry checker for template and project; tokens from Claude Code transcripts · 2026-11-09
 
 **Why.**

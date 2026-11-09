@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.93.0 — Stable acceptance ids; a design GO only with full coverage
+
+Every acceptance criterion now keeps its identifier for good: a deleted one is marked as retired instead of disappearing, and the check compares against where the branch started, so a criterion can no longer be renumbered by accident. A plan that cites a criterion of the product's list is no longer misread as having a criterion of its own. A design round now lists its screens, states, screen sizes and themes in one file, and a GO needs every criterion it shows to be covered by a design state or an owner decision with an ID. The check computes that table itself.
+
 ## v2.92.0 — One registry checker for template and project; tokens from Claude Code transcripts
 
 A project's list of what the product can do (the feature registry) can now take its own shape: one folder per capability, tests per platform, a story status. The template checks it, so a project needs no checker of its own. Every acceptance criterion gets a stable identifier and can say whether it already works or is still a target, and on which platform. One command assigns the identifiers to an existing registry. The process can also now count how many tokens the Claude Code sessions of an issue used, across all of its phases.
