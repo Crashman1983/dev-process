@@ -19,9 +19,11 @@ Product frame). What this gate checks:
     holding placeholders claims direction it does not have.
   - HARD: an `ADR-NNNN` reference that resolves to no decision record
     (docs/process/adr/ is core).
-  - HARD when docs/process/feature-registry/ exists: a `STORY-NNNN` reference
-    that resolves to no story file. SOFT note when the registry is absent —
-    not checkable, honest degradation.
+  - HARD when the feature registry exists: a story reference that resolves to
+    no story — `STORY-NNNN` in the template's flat layout, the loose form of the
+    project's `id_pattern` otherwise (`registry_config`), where a ref in that
+    form the strict pattern refuses is a SOFT note. SOFT note when the registry
+    is absent — not checkable, honest degradation.
 
 Fenced code blocks are quotations, not claims — ignored for refs and
 placeholders. Pure stdlib.
@@ -116,34 +118,60 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             hard.append(f"{FRAME}: ADR-{ref.group(1)} referenced but no "
                         f"{ADR_DIR}/adr-{ref.group(1)}-*.md exists")
 
-    stories = sorted({s.group(1) for s in STORY_REF.finditer(text)})
-    if stories:
-        registry, why = _registry(root)
-        if registry is None:
-            soft.append(f"STORY reference(s) in {FRAME} not checkable — {why}")
+    sh, ss = _story_findings(root, text)
+    return hard + sh, soft + ss
+
+
+def _story_findings(root: Path, text: str) -> tuple[list[str], list[str]]:
+    """Story references against the registry. The flat template layout reads
+    `STORY-N`, width-normalized like ADR refs; a project layout reads the loose
+    form of its `id_pattern` — a ref in that form the strict pattern refuses is
+    a note, never silence."""
+    registry, cfg, why = _registry(root)
+    if cfg is None or cfg.get("layout") != "capabilities":
+        refs = sorted({s.group(1) for s in STORY_REF.finditer(text)})
+        if refs and registry is None:
+            return [], [f"STORY reference(s) in {FRAME} not checkable — {why}"]
+        if not refs:
+            return [], []
+        ids = _story_ids(registry.stories)
+        where = registry.path.relative_to(root).as_posix()
+        # width-normalized like ADR refs: STORY-7 resolves to STORY-0007
+        return [f"{FRAME}: STORY-{num} referenced but no such story is registered in {where}/"
+                for num in refs if f"STORY-{num.zfill(4)}" not in ids and f"STORY-{num}" not in ids], []
+    refs = sorted({m.group(0) for m in registry_config.story_ref_pattern(cfg).finditer(text)})
+    if refs and registry is None:
+        return [], [f"story reference(s) in {FRAME} not checkable — {why}"]
+    hard: list[str] = []
+    soft: list[str] = []
+    ids = _story_ids(registry.stories) if refs else set()
+    strict = registry_config.strict_id_pattern(cfg)
+    for ref in refs:
+        if ref in ids:
+            continue
+        if not strict.match(ref):
+            soft.append(f"{FRAME}: {ref} looks like a story ref but does not match "
+                        f"{cfg['id_pattern']} — not checked")
         else:
-            ids = _story_ids(registry.stories)
-            where = registry.path.relative_to(root).as_posix()
-            for num in stories:
-                # width-normalized like ADR refs: STORY-7 resolves to STORY-0007
-                if f"STORY-{num.zfill(4)}" not in ids and f"STORY-{num}" not in ids:
-                    hard.append(f"{FRAME}: STORY-{num} referenced but no such "
-                                f"story is registered in {where}/")
+            hard.append(f"{FRAME}: {ref} referenced but no such story is registered in "
+                        f"{registry.path.relative_to(root).as_posix()}/")
     return hard, soft
 
 
-def _registry(root: Path) -> tuple[registry_config.Registry | None, str]:
-    """(the registry, or None and why its references cannot be checked)."""
+def _registry(root: Path) -> tuple[registry_config.Registry | None, dict | None, str]:
+    """(the registry or None, the configuration or None, why the refs cannot be checked)."""
     if not registry_config.module_active(root):
-        return None, "no feature registry (feature-registry off)"
+        return None, None, "no feature registry (feature-registry off)"
     try:
         cfg = registry_config.config(root)
         registry = registry_config.load_registry(root, cfg)
-    except (registry_config.ConfigError, KeyError) as exc:
-        return None, f"the registry configuration is unusable ({exc}; the feature-registry gate says why)"
+        registry_config.story_ref_pattern(cfg)
+    except (registry_config.ConfigError, KeyError, TypeError, AttributeError, re.error) as exc:
+        return None, None, (f"the registry configuration is unusable ({exc}; "
+                            f"the feature-registry gate says why)")
     if not registry.present:
-        return None, f"no {cfg['root']}/"
-    return registry, ""
+        return None, cfg, f"no {cfg['root']}/"
+    return registry, cfg, ""
 
 
 def main() -> int:

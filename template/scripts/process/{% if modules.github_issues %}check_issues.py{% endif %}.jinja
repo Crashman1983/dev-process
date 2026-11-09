@@ -3,10 +3,12 @@
 # requires-python = ">=3.11"
 # dependencies = ["pyyaml>=6,<7"]
 # ///
-"""github-issues gate: validate the `issue` field on feature-registry stories.
+"""github-issues gate: validate the issue field on feature-registry stories
+(`issue`, or the field `registry_config` names — one ref or a list of refs).
 
 Issue-ref FORMAT is hard-guaranteed (CI exit 1). Issue EXISTENCE on GitHub is
-best-effort and entirely advisory (never exit 1): a definitive 404 stays a
+best-effort and entirely advisory (never exit 1), asked in batched GraphQL
+queries (up to 100 refs, per repository): a definitive 404 stays a
 note, because this cannot distinguish a deleted issue from one an
 unauthenticated or cross-repo token cannot see. Review reports are checked
 offline: publication, tracked follow-ups, and `class=` on every blocker and
@@ -16,6 +18,7 @@ integration ref at all, or HEAD on one, is a note. Stdlib + PyYAML (a gate
 dep, used to read the copier answers)."""
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -25,8 +28,8 @@ from pathlib import Path
 import yaml
 
 ANSWERS_FILE = ".copier-answers.yml"
-GH_TIMEOUT_S = 10  # cap a hung `gh` so it cannot wedge CI
-TRACKED = ("in-progress", "done")  # statuses that ought to carry an issue link
+GH_TIMEOUT_S = 20  # cap a hung `gh` (one batched query) so it cannot wedge CI
+GH_BATCH = 100  # issue aliases per GraphQL query
 
 PLANS_DIR = ".process-work/plans"  # active plans only; archive/ is finished work
 REVIEWS_DIR = ".process-work/reviews"  # review/audit reports
@@ -64,17 +67,56 @@ def _default_repo(root: Path) -> str | None:
     return repo or None
 
 
-def _issue_exists(gh: str, repo: str, number: int) -> bool:
-    """Best-effort. False also means 'could not determine' — the caller treats
-    any False as an advisory note, never a hard failure."""
+def _existing(gh: str, repo: str, numbers: list[int]) -> tuple[set[int], str]:
+    """(the numbers GitHub confirms as issues of `repo`, why the batch went unchecked).
+
+    One GraphQL query, an alias per number (`repository.issue`, which takes issues
+    only, like `gh issue view` did). A missing issue answers as a `null` alias plus
+    `errors`, and `gh` then exits 1 — so the body is read whatever the exit code.
+    Only a transport or parse error, or no repository, leaves the whole batch
+    unchecked. Best-effort: the caller turns everything into advisory notes."""
+    owner, name = repo.split("/", 1)
+    aliases = " ".join("i%d: issue(number: %d) { number }" % (k, n) for k, n in enumerate(numbers))
+    query = ("query($owner: String!, $name: String!) "
+             "{ repository(owner: $owner, name: $name) { " + aliases + " } }")
     try:
-        r = subprocess.run(
-            [gh, "issue", "view", str(number), "--repo", repo, "--json", "number"],
-            capture_output=True, text=True, timeout=GH_TIMEOUT_S,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-    return r.returncode == 0
+        r = subprocess.run([gh, "api", "graphql", "-f", f"query={query}",
+                            "-f", f"owner={owner}", "-f", f"name={name}"],
+                           capture_output=True, text=True, timeout=GH_TIMEOUT_S)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return set(), f"gh did not answer: {exc}"
+    try:
+        body = json.loads(r.stdout)
+    except ValueError:
+        detail = (r.stderr.strip() or r.stdout.strip())[:120]
+        return set(), f"gh exit {r.returncode}, no readable answer: {detail}"
+    data = body.get("data") if isinstance(body, dict) else None
+    found = data.get("repository") if isinstance(data, dict) else None
+    if not isinstance(found, dict):
+        errors = body.get("errors") if isinstance(body, dict) else None
+        detail = errors[0].get("message") if isinstance(errors, list) and errors \
+            and isinstance(errors[0], dict) else f"gh exit {r.returncode}"
+        return set(), f"repository not readable: {detail}"
+    return {n for k, n in enumerate(numbers) if isinstance(found.get(f"i{k}"), dict)}, ""
+
+
+def _unconfirmed(gh: str, wanted: dict[tuple[str, int], list[str]]) -> list[str]:
+    """Advisory notes for every issue ref GitHub did not confirm — batched per
+    repository, at most GH_BATCH numbers per query."""
+    notes: list[str] = []
+    by_repo: dict[str, list[int]] = {}
+    for repo, number in sorted(wanted):
+        by_repo.setdefault(repo, []).append(number)
+    for repo, numbers in by_repo.items():
+        for start in range(0, len(numbers), GH_BATCH):
+            batch = numbers[start:start + GH_BATCH]
+            found, why = _existing(gh, repo, batch)
+            if why:
+                notes.append(f"{len(batch)} issue ref(s) in {repo} not checked ({why})")
+                continue
+            notes += [f"{rel}: could not confirm {repo}#{n} exists"
+                      for n in batch if n not in found for rel in wanted[(repo, n)]]
+    return notes
 
 
 def _check_plans(root: Path) -> tuple[list[str], list[str]]:
@@ -587,62 +629,44 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     hard += rh
     soft += rs
     try:
-        stories = registry_config.load_stories(root)
-    except registry_config.ConfigError:
+        cfg = registry_config.config(root) if registry_config.module_active(root) else None
+        stories = registry_config.load_stories(root, cfg) if cfg else None
+        field = cfg["issues"]["field"] if cfg else "issue"
+    except (registry_config.ConfigError, KeyError, TypeError):
         stories = None  # the feature-registry gate reports an unusable configuration
     if not stories:
         soft.append("no stories to check (feature-registry empty or absent)")
         return hard, soft
-    gh = shutil.which("gh")
-    gh_absent_noted = False
+    wanted: dict[tuple[str, int], list[str]] = {}  # (repo, number) -> the stories naming it
     for story in stories:
-        rel = story.path.relative_to(root)
+        rel = story.path.relative_to(root).as_posix()
         data = story.data
-        if not isinstance(data, dict):
-            continue  # the feature-registry gate owns JSON validity
-        issue = data.get("issue")
-        status = data.get("status")
-        if not issue:
-            # a finished story must be traceable — hard; an in-progress one may
-            # still be filing its issue (issue-before-code is enforced on the
-            # plan, not here), so it stays a soft note
-            if status == "done" and isinstance(data.get("issue_waived"), str) \
-                    and data["issue_waived"].strip():
-                # tracker-less escape: a done story may carry an
-                # `issue_waived: <reason>` string instead of an issue link, so a
-                # project with no reachable tracker is not permanently stuck
-                # below `done` (audit: this was unsatisfiable before)
-                soft.append(f"{rel}: status 'done', issue waived "
-                            f"({data['issue_waived'].strip()})")
-            elif status == "done":
-                hard.append(f"{rel}: status 'done' but no issue link — a finished "
-                            f"story must trace to an issue (or set "
-                            f"'issue_waived: <reason>' if there is no tracker)")
-            elif status in TRACKED:
-                soft.append(f"{rel}: status {status!r} but no issue link — unverified")
+        if not isinstance(data, dict) or not data.get(field):
+            continue  # the feature-registry gate owns JSON validity and required fields
+        value = data[field]
+        refs = [value] if isinstance(value, str) else value if isinstance(value, list) else None
+        if refs is None:
+            hard.append(f"{rel}: '{field}' must be a string or a list of strings, "
+                        f"got {type(value).__name__}")
             continue
-        if not isinstance(issue, str):
-            hard.append(f"{rel}: 'issue' must be a string, got {type(issue).__name__}")
-            continue
-        parsed = parse_issue_ref(issue.strip())
-        if parsed is None:
-            hard.append(
-                f"{rel}: malformed issue ref {issue!r} "
-                "(want '#N', 'owner/repo#N', or a github issue URL)"
-            )
-            continue
-        repo, number = parsed
-        target = repo or default_repo
-        if not gh:
-            if not gh_absent_noted:
-                soft.append("gh not on PATH — skipping issue-existence checks")
-                gh_absent_noted = True
-            continue
-        if not target:
-            soft.append(f"{rel}: {issue} — no github_repo configured, cannot check existence")
-            continue
-        if not _issue_exists(gh, target, number):
-            soft.append(f"{rel}: could not confirm {target}#{number} exists")
+        for issue in refs:
+            parsed = parse_issue_ref(issue.strip()) if isinstance(issue, str) else None
+            if parsed is None:
+                hard.append(f"{rel}: malformed issue ref {issue!r} "
+                            "(want '#N', 'owner/repo#N', or a github issue URL)")
+                continue
+            repo, number = parsed
+            target = repo or default_repo
+            if not target:
+                soft.append(f"{rel}: {issue} — no github_repo configured, cannot check existence")
+                continue
+            wanted.setdefault((target, number), []).append(rel)
+    if wanted:
+        gh = shutil.which("gh")
+        if gh:
+            soft += _unconfirmed(gh, wanted)
+        else:
+            soft.append("gh not on PATH — skipping issue-existence checks")
     return hard, soft
 
 
