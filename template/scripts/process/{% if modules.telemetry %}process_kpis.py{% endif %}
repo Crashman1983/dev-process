@@ -1259,16 +1259,10 @@ def why_missing(root: Path, lo: datetime, hi: datetime, ref: str | None) -> dict
     """Why a token or escape column is empty (#360 K4): a project's missing configuration or
     data must not read as the template's gap, and no escape without any trailer to count
     one is unmeasured, not zero."""
-    import dispatch as _dispatch  # noqa: PLC0415 — the one reader of the policy's transcripts glob
+    import dispatch as _dispatch  # noqa: PLC0415 — the one owner of the token reasons
     reasons: dict[str, str] = {}
-    common = _common_dir(root)
-    logs = list((common / "process-dispatch").glob("*.log")) if common else []
-    if not _dispatch.transcripts_pattern(root):
-        reasons["tokens"] = "transcripts not configured (policy `transcripts`)"
-    elif not logs:
-        reasons["tokens"] = "no dispatch log on this checkout"
-    else:
-        reasons["tokens"] = "no transcript matched a dispatched session"
+    # every issue's view; measured in full, the window's works were not dispatched
+    reasons["tokens"] = _dispatch.token_reason(root, None) or "no dispatched session among the window's works"
     # from the window's start with no end: a fix after the window, inside the follow-up
     # horizon, is a measured escape of the window's works (v2.81 code review)
     body = _git_out(root, "log", ref, f"--since={lo.isoformat()}" if lo.year > 1 else "--since=1970-01-02",

@@ -280,7 +280,7 @@ def test_a_branch_executed_here_and_reviewed_remotely_keeps_its_local_transcript
     _drop_record(out, "7-widget")
     assert _history(out, 7)["branches"]["7-widget"] == {"windows": [[int(t0), None]], "worktrees": [str(wt)],
                                                         "remote": True}
-    assert _finish(out).usage(out, "7-widget")[1].startswith("tokens: 10 output over 1 sessions")
+    assert _finish(out).usage(out, "7-widget") == (7, "tokens: 10 output over 1 sessions (partial: remote)")
 
 
 def test_a_merge_by_finish_closes_the_window_and_a_later_issue_on_the_name_is_not_counted(render, tmp_path):
@@ -354,6 +354,7 @@ def test_a_message_without_timestamp_counts_and_marks_the_sum_partial(render, tm
     _write(wt / "t" / "a.jsonl", _msg("m1", 10, ts=t0 + 10), _msg("m2", 3))
     totals, sessions, _covered, _events, unknown = d.issue_token_coverage(out, 9)
     assert totals["output_tokens"] == 13 and sessions == 1 and unknown == 1
+    assert d.tokens_line(out, 9) == "tokens: 13 output over 1 sessions (partial: unknown)"
 
 
 def test_an_unreadable_history_still_refuses_start_and_keeps_the_brainstorm_gate(render, tmp_path):
@@ -393,3 +394,59 @@ def test_a_history_unreadable_after_starts_check_is_rewritten_and_start_succeeds
         assert got["phase"] == "execute" and list(got["branches"]) == ["work"]
     finally:
         d.stop(out, "work", force=True)
+
+
+# --- T3: ein Besitzer der Gründe ----------------------------------------------------------
+
+def test_tokens_line_names_each_reason_it_did_not_measure(render, tmp_path):
+    """AC-5: nie ein nacktes `not measured` — der Grund steht in Klammern dahinter, eine
+    Teilsumme nennt, was fehlt."""
+    import time
+    out, records = _setup(render, tmp_path, None)
+    d = _load_dispatch(out)
+    assert d.token_reason(out, 7) == "not-configured"
+    assert d.tokens_line(out, 7) == "tokens: not measured (not-configured)"
+    pattern = "{worktree}/t/*.jsonl"
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": pattern}))
+    assert d.tokens_line(out, 7) == "tokens: not measured (no-record)"
+    _record(records, "7-x", issue=7, worktree=str(tmp_path / "wt7"), phase="plan")
+    assert d.token_reason(out, 7) == f"no-files:{pattern}"
+    assert d.tokens_line(out, 7) == f"tokens: not measured (no-files:{pattern})"
+    _record(records, "8-x", issue=8, remote=True, phase="review")
+    assert d.tokens_line(out, 8) == "tokens: not measured (remote)"
+    wt = tmp_path / "wt9"
+    t0 = time.time() - 1000
+    _phase(d, out, "9-x", 9, t0, wt=wt)
+    _write(wt / "t" / "s.jsonl", _msg("m1", 10, ts=t0 + 10))
+    assert d.token_reason(out, 9) is None
+    assert d.tokens_line(out, 9) == "tokens: 10 output over 1 sessions"
+    _phase(d, out, "9-x", 9, t0 + 100, remote=True, phase="review")
+    assert d.token_reason(out, 9) == "partial: remote"
+    assert d.tokens_line(out, 9) == "tokens: 10 output over 1 sessions (partial: remote)"
+    _phase(d, out, "9-y", 9, t0 + 200, wt=tmp_path / "empty")
+    assert d.tokens_line(out, 9) == f"tokens: 10 output over 1 sessions (partial: remote, no-files:{pattern})"
+
+
+def test_why_missing_takes_the_overall_reason_from_dispatch(render, tmp_path):
+    """Die Gesamtsicht (`token_reason(root, None)`) ist der Grund des Cockpits, kein zweiter Wortlaut."""
+    import time
+    from datetime import datetime
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {"telemetry": True}})
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    import sys
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("kpis_transcripts", out / "scripts/process/process_kpis.py")
+    kpis = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kpis)
+    d = _load_dispatch(out)
+    lo, hi = datetime(2026, 1, 1), datetime(2026, 12, 1)
+    assert kpis.why_missing(out, lo, hi, None)["tokens"] == "not-configured"
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
+    assert kpis.why_missing(out, lo, hi, None)["tokens"] == "no-record"
+    wt = tmp_path / "wt"
+    t0 = time.time() - 1000
+    _phase(d, out, "1-a", 1, t0, wt=wt)
+    _write(wt / "t" / "s.jsonl", _msg("m1", 10, ts=t0 + 10))
+    _phase(d, out, "2-b", 2, t0, remote=True, phase="review")
+    assert d.token_reason(out, None) == "partial: remote"
+    assert kpis.why_missing(out, lo, hi, None)["tokens"] == "partial: remote"

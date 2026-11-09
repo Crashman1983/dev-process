@@ -1470,15 +1470,56 @@ def _issue_transcripts(root: Path, issue: int | None) -> dict[str, Windows] | No
     pattern = transcripts_pattern(root)
     if pattern is None:
         return None
+    return _source_files(pattern, _token_sources(root, issue))[0]
+
+
+def _source_files(pattern: str, sources: list[dict]) -> tuple[dict[str, Windows], bool]:
+    """({transcript file: its windows}, a local source found no file) — a file
+    two sources name takes both windows."""
     files: dict[str, Windows] = {}
-    for src in _token_sources(root, issue):
+    missing = False
+    for src in sources:
+        if not src["worktrees"] and not src["remote"]:
+            missing = True
         for wt in src["worktrees"]:
-            for f in _worktree_files(pattern, wt):
+            found = _worktree_files(pattern, wt)
+            missing = missing or not found
+            for f in found:
                 if f in files and files[f] is None or src["windows"] is None:
                     files[f] = None
                 else:
                     files[f] = [*(files.get(f) or []), *src["windows"]]
-    return files
+    return files, missing
+
+
+def token_reason(root: Path, issue: int | None) -> str | None:
+    """Why the issue's tokens (every issue's with `issue` None) are not, or
+    only partly, measured — the one owner of that wording: `not-configured`
+    (no `transcripts` glob), `no-record` (no phase history and no record),
+    `no-files:<glob>` (the glob as written, placeholders kept), `remote` (only
+    sessions on another host), `partial: <what is missing>` (a part measured,
+    besides `remote`, `no-files:<glob>` or `unknown` sources — also within one
+    branch of local and remote phases). None when fully measured."""
+    return _token_state(root, issue, every=True)[0]
+
+
+def _token_state(root: Path, issue: int | None, *, every: bool) -> tuple[str | None, tuple | None]:
+    """(reason, `issue_token_coverage` tuple or None). `every`: `issue` None
+    means every issue; else it means no issue, so no record."""
+    pattern = transcripts_pattern(root)
+    if pattern is None:
+        return "not-configured", None
+    sources = _token_sources(root, issue) if issue is not None or every else []
+    if not sources:
+        return "no-record", None
+    files, missing = _source_files(pattern, sources)
+    remote = any(src["remote"] for src in sources)
+    if not files:
+        return (f"no-files:{pattern}" if missing or not remote else "remote"), None
+    coverage = _coverage(files)
+    gaps = [*(["remote"] if remote else []), *([f"no-files:{pattern}"] if missing else []),
+            *(["unknown"] if coverage[4] else [])]
+    return (f"partial: {', '.join(gaps)}" if gaps else None), coverage
 
 
 UNKNOWN_MODEL = "model not recorded"
@@ -1636,8 +1677,10 @@ def issue_token_coverage(root: Path, issue: int) -> tuple[dict[str, int], int, d
     unknown sources: a total beside one is partial, whatever the field
     coverage says (refutation, round 3, executed)."""
     files = _issue_transcripts(root, issue)
-    if not files:
-        return None
+    return _coverage(files) if files else None
+
+
+def _coverage(files: dict[str, Windows]) -> tuple[dict[str, int], int, dict[str, int], int, int]:
     kept: set[str] = set()
     events, unknown = _transcript_usage(files, kept)
     totals: dict[str, int] = {}
@@ -1829,8 +1872,13 @@ def model_drift(root: Path, rec: dict, pattern: str | None = None) -> list[str]:
 
 
 def tokens_line(root: Path, issue: int | None) -> str:
-    got = issue_tokens(root, issue) if issue is not None else None
-    return f"tokens: {got[0]} output over {got[1]} sessions" if got else "tokens: not measured"
+    """`tokens: N output over M sessions`, with `(partial: …)` when a part is
+    missing; `tokens: not measured (<reason>)` when nothing is (`token_reason`)."""
+    reason, coverage = _token_state(root, issue, every=False)
+    if coverage is None:
+        return f"tokens: not measured ({reason})"
+    line = f"tokens: {coverage[0].get('output_tokens', 0)} output over {coverage[1]} sessions"
+    return f"{line} ({reason})" if reason else line
 
 
 def _proc_start(pid: int) -> str:
