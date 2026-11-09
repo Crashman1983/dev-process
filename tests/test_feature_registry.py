@@ -1333,3 +1333,111 @@ def test_doc_and_config_state_stable_ids(render, tmp_path):
     assert "a changed comma escapes it" in doc and "`git fetch --unshallow`" in doc
     cfg = json.loads((out / "docs/process/feature-registry.json").read_text(encoding="utf-8"))
     assert cfg["stable_ids"] is True and "retired" in cfg["_comment"]["stable_ids"]
+
+
+# --- v2.93 B3: an item's `design` anchor `<round>/<view>#<state>` (#404 AC-4) ---
+
+DC = "docs/process/design-contracts"
+ROUND1 = "docs/design/concepts/web-round-1"
+
+
+def _with_rounds(render, tmp_path):
+    """Both modules; a `web` entry referencing the round `web-round-1`, whose states.json
+    has the view `shell-open` with the state `default`."""
+    out = render(tmp_path, {"project_name": "d",
+                            "modules": {"feature_registry": True, "design_contracts": True}})
+    _round_states(out, ROUND1)
+    _contract_entry(out, "web", ROUND1)
+    return out
+
+
+def _round_states(out, folder, view="shell-open", state="default"):
+    (out / folder).mkdir(parents=True, exist_ok=True)
+    (out / folder / "states.json").write_text(json.dumps(
+        {"schema_version": 1, "views": [{"id": view, "states": [{"id": state}]}]}), encoding="utf-8")
+
+
+def _contract_entry(out, surface, reference):
+    (out / DC).mkdir(parents=True, exist_ok=True)
+    (out / DC / f"{surface}.json").write_text(json.dumps(
+        {"surface": surface, "contract": f"docs/design/{surface}-contract.md", "status": "draft",
+         "pin": "opaque", "id_prefixes": ["S"], "reference": reference}), encoding="utf-8")
+
+
+def _anchored(out, design):
+    _entry(out, acceptance=[{"id": "AC1", "text": "Saved widgets survive a restart.", "design": design}])
+
+
+def test_an_anchor_into_a_referenced_round_is_green(render, tmp_path):
+    out = _with_rounds(render, tmp_path)
+    _anchored(out, "web-round-1/shell-open#default")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "anchor" not in r.stdout, r.stdout
+    _anchored(out, ["web-round-1/shell-open#default"])
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+@pytest.mark.parametrize("design, want", [
+    ("web-round-1/shell-closed#default", "names view 'shell-closed', which web-round-1 does not list"),
+    ("web-round-1/shell-open#offline",
+     "names state 'offline', which view 'shell-open' of web-round-1 does not render"),
+    ("web-round-9/shell-open#default", "names round 'web-round-9', which no design-contract entry"),
+    ("shell-open#default", "is no anchor `<round>/<view>#<state>`"),
+    (["web-round-1/shell-open#default", 3], "'design' must be an anchor"),
+    (7, "'design' must be an anchor"),
+])
+def test_an_anchor_that_resolves_to_nothing_is_hard(render, tmp_path, design, want):
+    out = _with_rounds(render, tmp_path)
+    _anchored(out, design)
+    r = _gate(out)
+    assert r.returncode == 1 and "STORY-0002#AC1" in r.stdout and want in r.stdout, r.stdout
+
+
+def test_two_reference_folders_of_one_name_are_hard(render, tmp_path):
+    out = _with_rounds(render, tmp_path)
+    _round_states(out, "docs/design/ios/web-round-1")
+    _contract_entry(out, "ios", "docs/design/ios/web-round-1")
+    _anchored(out, "web-round-1/shell-open#default")
+    r = _gate(out)
+    assert r.returncode == 1 and "round name 'web-round-1' names 2 reference folders" in r.stdout, r.stdout
+
+
+def test_two_entries_on_one_reference_are_one_round(render, tmp_path):
+    """Wächter: the same folder in two entries, written `x` and `x/`, is the shared round."""
+    out = _with_rounds(render, tmp_path)
+    _contract_entry(out, "ios", f"{ROUND1}/")
+    _anchored(out, "web-round-1/shell-open#default")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_an_anchor_into_an_older_round_is_a_note(render, tmp_path):
+    out = _with_rounds(render, tmp_path)
+    _round_states(out, "docs/design/concepts/web-round-0")
+    _anchored(out, "web-round-0/shell-open#default")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert ("STORY-0002#AC1: anchor 'web-round-0/shell-open#default': round 'web-round-0' is no "
+            "entry's reference") in r.stdout, r.stdout
+    _anchored(out, "web-round-0/shell-open#loading")
+    r = _gate(out)
+    assert r.returncode == 1 and "names state 'loading'" in r.stdout, r.stdout
+
+
+def test_without_the_design_contracts_module_design_stays_unchecked(render, tmp_path):
+    """Wächter: without the design-contracts module `design` is not read."""
+    out = _render(render, tmp_path)
+    _anchored(out, "nowhere/at#all")
+    r = _gate(out)
+    assert r.returncode == 0 and "anchor" not in r.stdout, r.stdout
+    _anchored(out, 7)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_the_doc_states_the_anchor_form(render, tmp_path):
+    out = _render(render, tmp_path)
+    doc = (out / "docs/process/modules/feature-registry.md").read_text(encoding="utf-8")
+    assert "`<round>/<view>#<state>`" in doc and "Accepted, not yet checked" not in doc
