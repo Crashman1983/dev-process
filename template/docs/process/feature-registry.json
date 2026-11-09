@@ -17,7 +17,8 @@
     "node_check": "How a dead `path::node` selector counts: \"note\" or \"hard\". Each `::` segment is checked — in a .py file against the names it defines (AST), in any other file as a substring. An unparsable .py file counts the same way.",
     "retired_fields": "Story fields that fail as retired. A project list replaces this one whole. With story_status set, `status` is no longer retired.",
     "extra_fields": "Further story fields the project knows (e.g. [\"notes\"]); other unknown fields are a note.",
-    "strict_item_tests": "true: an acceptance item without an existing test fails. false: such items are counted in one note per capability (or inventory)."
+    "strict_item_tests": "true: an acceptance item without an existing test fails. false: such items are counted in one note per capability (or inventory).",
+    "stable_ids": "true: item ids are compared with the branch's fork point — a removed id stands in the story's `retired` list ([{\"id\": \"AC9\"}, {\"id\": \"AC12\", \"split_into\": [\"AC31\", \"AC32\"]}]), a retired entry stays, a new id is higher than every id the base holds, and an item's text moved to another id is refused as a renumbering; every `<story id>#AC<n>` ref in the registry must name an item (one to a retired id with `split_into` is a note). false switches both off — only where the base AND the branch say false, so a branch cannot lift the duty for itself. The form of `retired` and --assign-ids hold either way."
   },
   "layout": "flat",
   "root": "docs/process/feature-registry",
@@ -35,5 +36,6 @@
   "node_check": "note",
   "retired_fields": ["status", "blocked_by", "parent"],
   "extra_fields": [],
-  "strict_item_tests": false
+  "strict_item_tests": false,
+  "stable_ids": true
 }
