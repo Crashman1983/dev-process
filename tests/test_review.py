@@ -1250,6 +1250,27 @@ def test_a_criss_cross_head_names_the_ambiguous_fork_point(tmp_path):
     assert "one fork point" in why and "merge bases" in why, why
 
 
+def test_blob_texts_strict_refuses_a_blob_that_is_no_utf8(tmp_path):
+    """v2.93 (r4, m-2): `_blob_texts` decodes with `errors="replace"`, so a broken blob at
+    a base read as text. `strict=True` raises GitReadError, with its own cache key — a
+    lenient read first must not answer the strict one."""
+    cr, root = _cr(), tmp_path / "p"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    (root / "bad.json").write_bytes(b'{"id": "\xff\xfe"}\n')
+    (root / "good.json").write_text('{"id": "Größe"}\n', encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "blobs")
+    bad = _git(root, "rev-parse", "HEAD:bad.json").stdout.strip()
+    good = _git(root, "rev-parse", "HEAD:good.json").stdout.strip()
+    assert "�" in cr._blob_texts(root, [bad])[bad]  # Wächter: lenient stays lenient
+    with pytest.raises(cr.GitReadError, match="no UTF-8"):
+        cr._blob_texts(root, [good, bad], strict=True)
+    assert cr._blob_texts(root, [good], strict=True) == {good: '{"id": "Größe"}\n'}
+
+
 @pytest.mark.parametrize("shape", ["ff-main", "forged-master"])
 def test_a_local_ref_at_the_tip_does_not_hide_the_pushed_range(tmp_path, monkeypatch, shape):
     """finish.py fast-forwards local main to the branch before the push; a
