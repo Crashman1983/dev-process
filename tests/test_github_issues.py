@@ -106,29 +106,14 @@ def test_no_issue_ok(render, tmp_path):
     assert r.returncode == 0, r.stdout
 
 
-def test_tracked_without_issue_notes(render, tmp_path):
-    out = _render(render, tmp_path)
-    _story(out, status="in-progress")  # no issue field
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "no issue link" in r.stdout
-
-
-def test_done_without_issue_is_hard(render, tmp_path):
-    # C: a finished story must trace to an issue (was soft, now hard)
+def test_the_dead_done_needs_an_issue_rule_is_gone(render, tmp_path):
+    # v2.92 K3: `status` is retired in the template and Kenni knows no `done` — the
+    # rule fired in no configuration; `issues.required_for` (registry gate) owns it now
     out = _render(render, tmp_path)
     _story(out, status="done")  # no issue field
     r = _run(out)
-    assert r.returncode == 1
-    assert "status 'done' but no issue link" in r.stdout
-
-
-def test_in_progress_without_issue_still_soft(render, tmp_path):
-    # C: in-progress stays soft — its issue may still be forthcoming
-    out = _render(render, tmp_path)
-    _story(out, status="in-progress")
-    r = _run(out)
     assert r.returncode == 0, r.stdout
+    assert "status 'done'" not in r.stdout and "no issue link" not in r.stdout
 
 
 def test_bad_json_skipped(render, tmp_path):
@@ -283,18 +268,60 @@ def test_module_doc_names_issue_before_code(render, tmp_path):
     assert "not gated" in t  # the claim workflow is convention, honestly labeled
 
 
-def _stub_gh(bindir: Path, code: int, stdout: str = ""):
-    bindir.mkdir(parents=True, exist_ok=True)
-    p = bindir / "gh"
-    p.write_text(f'#!/bin/sh\nprintf "%s" "{stdout}"\nexit {code}\n')
-    p.chmod(0o755)
+# a fake `gh api graphql` that answers in gh's real wire form (v2.92 K3): the response
+# body on stdout; a missing issue is a `null` alias plus `errors`, and gh then exits 1.
+# It logs each argv to gh.log and reads its mode and missing numbers from gh.json.
+_FAKE_GH = r'''
+import json, pathlib, re, sys
+here = pathlib.Path(sys.argv[0]).resolve().parent
+conf = json.loads((here / "gh.json").read_text())
+with open(here / "gh.log", "a") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\n")
+mode = conf["mode"]
+if mode == "fail":
+    print("error connecting to api.github.com", file=sys.stderr)
+    sys.exit(1)
+if mode == "garbage":
+    print("<html>proxy</html>")
+    sys.exit(0)
+if mode == "no-repo":
+    print(json.dumps({"data": {"repository": None},
+                      "errors": [{"type": "NOT_FOUND", "message": "Could not resolve to a Repository"}]}))
+    sys.exit(1)
+query = next(a[len("query="):] for a in sys.argv[1:] if a.startswith("query="))
+repo, errors = {}, []
+for alias, number in re.findall(r"(i\d+): issue\(number: (\d+)\)", query):
+    if int(number) in conf["missing"]:
+        repo[alias] = None
+        errors.append({"type": "NOT_FOUND", "path": ["repository", alias],
+                       "message": f"Could not resolve to an Issue with the number of {number}."})
+    else:
+        repo[alias] = {"number": int(number)}
+body = {"data": {"repository": repo}}
+if errors:
+    body["errors"] = errors
+    print("gh: " + errors[0]["message"], file=sys.stderr)
+print(json.dumps(body))
+sys.exit(1 if errors else 0)
+'''
 
 
-def _stub_gh_capture(bindir: Path, argfile: Path, code: int = 0):
+def _fake_gh(bindir: Path, *, missing=(), mode="answer") -> Path:
+    """The fake on PATH; returns its call log."""
     bindir.mkdir(parents=True, exist_ok=True)
+    (bindir / "gh.json").write_text(json.dumps({"mode": mode, "missing": sorted(missing)}))
     p = bindir / "gh"
-    p.write_text(f'#!/bin/sh\nprintf "%s" "$*" > "{argfile}"\nexit {code}\n')
+    p.write_text(f"#!{sys.executable}\n{_FAKE_GH}")
     p.chmod(0o755)
+    return bindir / "gh.log"
+
+
+def _gh_calls(log: Path) -> list[list[str]]:
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
+def _arg(call: list[str], key: str) -> str:
+    return next(a[len(key) + 1:] for a in call if a.startswith(f"{key}="))
 
 
 def test_existence_gh_absent_is_soft(render, tmp_path):
@@ -312,55 +339,105 @@ def test_existence_ok_no_note(render, tmp_path):
     out = _render(render, tmp_path, repo="octo/api")
     _story(out, issue="#412")
     bindir = tmp_path / "bin"
-    _stub_gh(bindir, 0)
+    log = _fake_gh(bindir)
     r = _run(out, prepend=str(bindir))
     assert r.returncode == 0, r.stdout
-    assert "could not confirm" not in r.stdout
+    assert "could not confirm" not in r.stdout and "not checked" not in r.stdout, r.stdout
+    assert len(_gh_calls(log)) == 1
 
 
-def test_existence_404_is_soft(render, tmp_path):
-    # must-not-hard-fail guard: a non-zero gh (404 / not visible) -> note, exit 0
+def test_existence_partial_error_names_only_the_missing_ref(render, tmp_path):
+    # gh's real answer for a missing issue: a null alias plus `errors`, exit 1 — the
+    # body still confirms every other ref of the batch
+    out = _render(render, tmp_path, repo="octo/api")
+    _story(out, issue="#412", sid="STORY-0001")
+    _story(out, issue="#413", sid="STORY-0002")
+    bindir = tmp_path / "bin"
+    _fake_gh(bindir, missing={413})
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 0, r.stdout
+    assert "STORY-0002.json: could not confirm octo/api#413 exists" in r.stdout, r.stdout
+    assert "#412" not in r.stdout and "not checked" not in r.stdout, r.stdout
+
+
+def test_existence_failed_request_is_a_note(render, tmp_path):
+    # must-not-hard-fail guard (Wächter): a transport or parse error, or no repository,
+    # leaves the whole batch unchecked — a note, never a failure
     out = _render(render, tmp_path, repo="octo/api")
     _story(out, issue="#412")
+    for mode in ("fail", "garbage", "no-repo"):
+        bindir = tmp_path / f"bin-{mode}"
+        _fake_gh(bindir, mode=mode)
+        r = _run(out, prepend=str(bindir))
+        assert r.returncode == 0, r.stdout
+        assert "1 issue ref(s) in octo/api not checked" in r.stdout, (mode, r.stdout)
+        assert "could not confirm" not in r.stdout, (mode, r.stdout)
+
+
+def test_existence_batches_a_hundred_refs_per_query(render, tmp_path):
+    # Kenni has over 2,900 issues: neither a call per ref nor `gh issue list` (30 by
+    # default) scales — aliases, at most 100 per query, per repository
+    out = _render(render, tmp_path, repo="octo/api")
+    for n in range(1, 151):
+        _story(out, issue=f"#{n}", sid=f"STORY-{n:04d}")
     bindir = tmp_path / "bin"
-    _stub_gh(bindir, 1)
+    log = _fake_gh(bindir)
     r = _run(out, prepend=str(bindir))
     assert r.returncode == 0, r.stdout
-    assert "could not confirm" in r.stdout
+    calls = _gh_calls(log)
+    assert [c[:2] for c in calls] == [["api", "graphql"]] * 2, calls
+    assert sorted(_arg(c, "query").count("issue(number:") for c in calls) == [50, 100]
 
 
 def test_existence_forwards_configured_repo(render, tmp_path):
     out = _render(render, tmp_path, repo="octo/api")
     _story(out, issue="#412")
     bindir = tmp_path / "bin"
-    argfile = out / "gh-args.txt"
-    _stub_gh_capture(bindir, argfile, code=0)
+    log = _fake_gh(bindir)
     r = _run(out, prepend=str(bindir))
     assert r.returncode == 0, r.stdout
-    args = argfile.read_text()
-    assert "--repo octo/api" in args
-    assert "412" in args
+    (call,) = _gh_calls(log)
+    assert (_arg(call, "owner"), _arg(call, "name")) == ("octo", "api")
+    assert "issue(number: 412)" in _arg(call, "query")
 
 
 def test_existence_bare_without_repo_notes(render, tmp_path):
     out = _render(render, tmp_path)  # no github_repo configured
     _story(out, issue="#412")
     bindir = tmp_path / "bin"
-    _stub_gh(bindir, 0)
+    _fake_gh(bindir)
     r = _run(out, prepend=str(bindir))
     assert r.returncode == 0, r.stdout
     assert "no github_repo configured" in r.stdout
 
 
-def test_existence_crossrepo_uses_own_repo(render, tmp_path):
-    out = _render(render, tmp_path)  # no default repo, ref carries its own
-    _story(out, issue="octo/billing#77")
+def test_existence_crossrepo_queries_its_own_repo(render, tmp_path):
+    # a ref `owner/repo#N` is asked of that repository, in a query of its own
+    out = _render(render, tmp_path, repo="octo/api")
+    _story(out, issue="octo/billing#77", sid="STORY-0001")
+    _story(out, issue="#5", sid="STORY-0002")
     bindir = tmp_path / "bin"
-    argfile = out / "gh-args.txt"
-    _stub_gh_capture(bindir, argfile, code=0)
+    log = _fake_gh(bindir)
     r = _run(out, prepend=str(bindir))
     assert r.returncode == 0, r.stdout
-    assert "--repo octo/billing" in argfile.read_text()
+    repos = sorted((_arg(c, "owner"), _arg(c, "name")) for c in _gh_calls(log))
+    assert repos == [("octo", "api"), ("octo", "billing")], repos
+
+
+def test_issues_list_field_is_read(render, tmp_path):
+    # a project with `issues.field: "issues"` keeps a list per story (Kenni)
+    out = _render(render, tmp_path, repo="octo/api")
+    (out / "docs/process/feature-registry.local.json").write_text(
+        json.dumps({"issues": {"field": "issues", "required": False, "required_for": None}}))
+    reg = out / "docs/process/feature-registry"
+    (reg / "STORY-0001.json").write_text(json.dumps(
+        {"id": "STORY-0001", "title": "t", "story": "s", "acceptance": [{"id": "AC1", "text": "a"}],
+         "tests": [], "issues": ["#7", "#8", "nope"]}))
+    bindir = tmp_path / "bin"
+    _fake_gh(bindir, missing={8})
+    r = _run(out, prepend=str(bindir))
+    assert r.returncode == 1 and "malformed issue ref 'nope'" in r.stdout, r.stdout
+    assert "could not confirm octo/api#8 exists" in r.stdout and "#7 exists" not in r.stdout, r.stdout
 
 
 def _runner_list(out: Path):
@@ -869,34 +946,6 @@ def test_no_space_heading_header_bypass_closed(render, tmp_path):
 
 
 # --- SP34 flow closure (#16) ---
-
-def test_done_story_issue_waived_is_soft(render, tmp_path):
-    # tracker-less escape: a done story with issue_waived: <reason> is soft, so
-    # a project without a tracker is not permanently stuck below done
-    out = _render(render, tmp_path)
-    reg = out / "docs/process/feature-registry"
-    reg.mkdir(parents=True, exist_ok=True)
-    d = {"id": "STORY-0001", "title": "t", "story": "s", "status": "done",
-         "acceptance": [{"text": "a"}], "tests": [],
-         "issue_waived": "solo project, no issue tracker"}
-    (reg / "STORY-0001.json").write_text(json.dumps(d))
-    r = _run(out)
-    assert r.returncode == 0, r.stdout
-    assert "issue waived" in r.stdout
-
-
-def test_done_story_empty_waiver_still_hard(render, tmp_path):
-    # an empty reason does not waive
-    out = _render(render, tmp_path)
-    reg = out / "docs/process/feature-registry"
-    reg.mkdir(parents=True, exist_ok=True)
-    d = {"id": "STORY-0001", "title": "t", "story": "s", "status": "done",
-         "acceptance": [{"text": "a"}], "tests": [], "issue_waived": "  "}
-    (reg / "STORY-0001.json").write_text(json.dumps(d))
-    r = _run(out)
-    assert r.returncode == 1
-    assert "status 'done' but no issue link" in r.stdout
-
 
 def test_followup_finding_in_publish_waived_report_ok(render, tmp_path):
     # off-tracker: a publish-waived report's follow-up findings can't carry an

@@ -18,7 +18,11 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
     so plan and report cannot drift apart;
   - a section the project requires (`sections`) missing;
   - a story id the plan names that the registry does not hold (`story_id`
-    and `registry`, both set);
+    and `registry`, both set; without them, the feature registry's own
+    pattern and loader from `registry_config` — but only when
+    `docs/process/feature-registry.local.json` stands at the integration ref,
+    read there; a ref in the loose form its strict `id_pattern` refuses fails
+    too);
   - at the merge push, an open `- [ ]` task without `struck: <reason>` or
     `moved: #<issue>`;
   - a `## Transitions` section (`check_review.TRANSITIONS_HEADING`: an ATX heading
@@ -81,6 +85,7 @@ from check_review import (  # noqa: E402  (one owner for plan grammar and fences
     uncommented,
 )
 from process_git import git_environment  # noqa: E402  (one owner for how git is read)
+import registry_config  # noqa: E402  (one owner of the feature registry's layout and ids)
 
 PLANS_ACTIVE = ".process-work/plans"
 DATA = "docs/process/plan-structure.local.json"
@@ -476,6 +481,52 @@ def _registry_ids(root: Path, pattern: str, glob: str) -> set[str]:
     return ids
 
 
+class _ProjectRegistry:
+    """Story ids from the feature registry's own configuration (`registry_config`), for
+    a project that names no `story_id`/`registry` here. Bound only when the project's
+    `feature-registry.local.json` stands at the integration ref, and that configuration
+    is read there too — a branch cannot set the pattern its own plan is checked against.
+    The stories themselves are the working tree's, like `_registry_ids`."""
+
+    def __init__(self, cfg: dict, ids: set[str]) -> None:
+        self.cfg = cfg
+        self.ids = ids
+        self.loose = registry_config.story_ref_pattern(cfg)
+        self.strict = registry_config.strict_id_pattern(cfg)
+
+    @classmethod
+    def at(cls, root: Path, ref: str) -> tuple[_ProjectRegistry | None, str]:
+        """(the rule or None, a note when it cannot be read)."""
+        if not registry_config.module_active(root):
+            return None, ""
+
+        def read(rel: str) -> str | None:
+            return _at_ref(root, ref, rel)
+
+        try:
+            if read(registry_config.LOCAL) is None:
+                return None, ""  # a template project: story ids stay unchecked, as before
+            cfg = registry_config.config(root, read)
+            stories = registry_config.load_stories(root, cfg) or []
+            return cls(cfg, registry_config.story_ids(stories)), ""
+        except _Unreadable as exc:
+            return None, (f"{registry_config.LOCAL} at the integration ref cannot be read ({exc}) "
+                          f"— story ids are not checked")
+        except (registry_config.ConfigError, KeyError, TypeError, AttributeError, re.error) as exc:
+            return None, (f"the feature-registry configuration at the integration ref is unusable "
+                          f"({exc}) — story ids are not checked")
+
+    def findings(self, rel: str, text: str) -> list[str]:
+        out = []
+        for sid in sorted({m.group(0) for m in self.loose.finditer(text)} - self.ids):
+            if not self.strict.match(sid):
+                out.append(f"{rel}: story {sid} does not match the registry's id pattern "
+                           f"{self.cfg['id_pattern']}")
+            else:
+                out.append(f"{rel}: story {sid} is not in the registry ({self.cfg['root']})")
+        return out
+
+
 def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
@@ -507,6 +558,10 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     shall_words = ["shall", *data.get("shall_words", [])]  # a project's words add to `shall`
     sections = data.get("sections", [])
     registry: set[str] | None = None
+    project_registry = None
+    if not (data.get("story_id") and data.get("registry")):  # the project's own keys win
+        project_registry, note = _ProjectRegistry.at(root, ref)
+        soft += [note] if note else []
     hard += _spec_plan_findings(root, ref, spec_plans)
     # an archived plan the branch adds is its plan too: /finish archives before the merge push
     archive = pdir / "archive"
@@ -537,6 +592,8 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
                 registry = _registry_ids(root, data["story_id"], data["registry"])
             for sid in sorted(set(re.findall(data["story_id"], text)) - registry):
                 hard.append(f"{rel}: story {sid} is not in the registry ({data['registry']})")
+        elif project_registry is not None:
+            hard += project_registry.findings(rel, text)
         if merge:
             for m in OPEN_TASK.finditer(text):
                 if not _SETTLED.search(m.group("task")):

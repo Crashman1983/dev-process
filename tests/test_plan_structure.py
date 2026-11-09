@@ -193,6 +193,83 @@ def test_a_story_must_be_in_the_registry(render, tmp_path):
         and "ED-US-1 is not" not in r.stdout, r.stdout
 
 
+REGISTRY_LOCAL = "docs/process/feature-registry.local.json"
+
+
+def _project_registry(out, *, local=True):
+    """A capabilities registry (Kenni's keys) holding DOC-US-001; the module is on."""
+    if local:
+        (out / REGISTRY_LOCAL).write_text(json.dumps(
+            {"layout": "capabilities", "root": "docs/feature-registry",
+             "id_pattern": "^{prefix}-US-\\d{3}$"}))
+    cap = out / "docs/feature-registry/documents"
+    cap.mkdir(parents=True)
+    (cap / "_capability.json").write_text(json.dumps(
+        {"schema_version": 1, "capability": "documents", "prefix": "DOC",
+         "notes": "ENG-US-002 is named here, but only stories count"}))
+    (cap / "DOC-US-001.json").write_text(json.dumps({"id": "DOC-US-001"}))
+    return out
+
+
+def _with_registry_module(render, tmp_path):
+    return render(tmp_path, {"project_name": "demo", "modules": {"feature_registry": True}})
+
+
+def test_without_own_keys_the_project_registry_binds_story_ids(render, tmp_path):
+    # v2.92 K3: no story_id/registry of its own, a registry config at the integration
+    # ref — pattern and loader come from registry_config
+    out = _repo(_project_registry(_with_registry_module(render, tmp_path)))
+    _plan(out, GOOD + "\nStories: DOC-US-001\n")
+    assert _run(out).returncode == 0
+    _plan(out, GOOD + "\nStories: DOC-US-001, DOC-US-002, ENG-US-002\n")
+    r = _run(out)
+    assert r.returncode == 1 and "story DOC-US-002 is not in the registry" in r.stdout \
+        and "story ENG-US-002 is not in the registry" in r.stdout \
+        and "DOC-US-001 is not" not in r.stdout, r.stdout
+
+
+def test_a_ref_off_the_strict_id_pattern_fails(render, tmp_path):
+    # DOC-US-12 is a loose ref the strict pattern refuses; DOC-US-0012 is one ref,
+    # never the registered DOC-US-001
+    out = _repo(_project_registry(_with_registry_module(render, tmp_path)))
+    for ref in ("DOC-US-12", "DOC-US-0012"):
+        _plan(out, GOOD + f"\nStories: {ref}\n")
+        r = _run(out)
+        assert r.returncode == 1 and f"story {ref} does not match the registry's id pattern" in r.stdout, r.stdout
+
+
+def test_a_registry_config_only_on_the_branch_binds_nothing(render, tmp_path):
+    # a branch cannot set the pattern its own plan is checked against (MINOR-6)
+    out = _repo(_project_registry(_with_registry_module(render, tmp_path), local=False))
+    (out / REGISTRY_LOCAL).write_text(json.dumps(
+        {"layout": "capabilities", "root": "docs/feature-registry",
+         "id_pattern": "^{prefix}-US-\\d{3}$"}))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-qm", "registry config")
+    _plan(out, GOOD + "\nStories: DOC-US-002\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_registry_config_git_cannot_read_is_a_note(render, tmp_path):
+    out = _repo(_project_registry(_with_registry_module(render, tmp_path)))
+    blob = subprocess.run(["git", "-C", str(out), "rev-parse", f"main:{REGISTRY_LOCAL}"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    (out / ".git/objects" / blob[:2] / blob[2:]).unlink()
+    _plan(out, GOOD + "\nStories: DOC-US-002\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert f"{REGISTRY_LOCAL} at the integration ref cannot be read" in r.stdout, r.stdout
+
+
+def test_a_template_project_names_stories_as_before(render, tmp_path):
+    # Wächter: no project registry file — STORY-0042 in a new plan is not checked
+    out = _repo(_with_registry_module(render, tmp_path))
+    _plan(out, GOOD + "\nStories: STORY-0042\n")
+    r = _run(out)
+    assert r.returncode == 0 and "STORY-0042" not in r.stdout, r.stdout
+
+
 def test_fenced_criteria_are_quotation(render, tmp_path):
     out = _repo(render(tmp_path, {"project_name": "demo"}))
     _plan(out, GOOD + "\n```\n- AC-2: When x, y shall a and shall b.\n```\n")

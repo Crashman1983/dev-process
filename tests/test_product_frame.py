@@ -273,6 +273,48 @@ def test_bulleted_status_line_is_read(render, tmp_path):
     assert "no 'status:' line" not in r.stdout
 
 
+def _capabilities_registry(out: Path):
+    """A project registry in the capabilities layout (Kenni's keys) holding DOC-US-001."""
+    import json
+    (out / "docs/process/feature-registry.local.json").write_text(json.dumps(
+        {"layout": "capabilities", "root": "docs/feature-registry",
+         "id_pattern": "^{prefix}-US-\\d{3}$"}), encoding="utf-8")
+    cap = out / "docs/feature-registry/documents"
+    cap.mkdir(parents=True)
+    (cap / "_capability.json").write_text(json.dumps(
+        {"schema_version": 1, "capability": "documents", "prefix": "DOC"}), encoding="utf-8")
+    (cap / "DOC-US-001.json").write_text(json.dumps({"id": "DOC-US-001"}), encoding="utf-8")
+
+
+def test_project_id_pattern_refs_resolve(render, tmp_path):
+    # v2.92 K3: the ref pattern comes from id_pattern, {prefix} reading [A-Z]+
+    out = render(tmp_path, {"project_name": "demo", "modules": {"feature_registry": True}})
+    _capabilities_registry(out)
+    _onboarded(out, "\nScope now includes DOC-US-001.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "DOC-US" not in r.stdout
+
+
+def test_project_id_pattern_dead_ref_hard(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo", "modules": {"feature_registry": True}})
+    _capabilities_registry(out)
+    _onboarded(out, "\nScope now includes DOC-US-099.\n")
+    r = _run(out)
+    assert r.returncode == 1
+    assert "DOC-US-099 referenced but no such story is registered in docs/feature-registry/" in r.stdout
+
+
+def test_loose_ref_off_the_strict_pattern_is_a_note(render, tmp_path):
+    # DOC-US-1 follows the loose form but not ^{prefix}-US-\d{3}$: a note, not silence
+    out = render(tmp_path, {"project_name": "demo", "modules": {"feature_registry": True}})
+    _capabilities_registry(out)
+    _onboarded(out, "\nScope now includes DOC-US-1.\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "DOC-US-1 looks like a story ref but does not match" in r.stdout, r.stdout
+
+
 def test_module_off_reads_no_registry_through_the_core_loader(render, tmp_path):
     # Wächter (v2.92 K0): with the module off the frame imports registry_config and
     # behaves as without a registry — no import error, an honest note
