@@ -16,8 +16,11 @@ required, so keep one review file per round.
 
 The gate computes which acceptance items the round covers (the round's
 `states.json`, the items' design anchors, the owner decisions); this review
-does not copy that table. An owner decision taken during the review that
-changes or drops an item is written with an ID:
+does not copy that table — `python3 scripts/process/check_design_contracts.py
+. --coverage <surface>` prints it, the review bundle shows it, and a GO with a
+visible item uncovered is red. Judge the boards against it. An owner
+decision taken during the review that changes or drops an item is written
+with an ID:
 
 ```
 DECISION <date> owner <ID>: change|drop <Story>#AC<n>[, …] — <reason>

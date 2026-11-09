@@ -1707,3 +1707,9 @@ def test_coverage_prints_the_table_and_the_bundle_shows_it(render, tmp_path):
     assert r.returncode == 0, r.stderr
     assert "  | STORY-0001#AC2 | **uncovered** | — | — | — |" in r.stdout, r.stdout
 
+def test_the_docs_state_the_coverage(render, tmp_path):
+    out = _render(render, tmp_path)
+    doc = (out / "docs/process/modules/design-contracts.md").read_text(encoding="utf-8")
+    assert "--coverage <surface>" in doc and "lost its coverage" in doc and "owner <round>/<ID>" in doc
+    review = (out / f"{REG}/templates/independent-review.md").read_text(encoding="utf-8")
+    assert "--coverage <surface>" in review

@@ -65,16 +65,21 @@ different seal than the reference carries; a reference whose seal no longer
 verifies (a board edited or added after the GO); an **active plan citing an
 ID the contract does not define** — plausible-looking IDs are the failure
 this module exists for (an ID that only a `DECISION` line quotes is not
-defined); a malformed `state_catalogue` or `states.json`; and, for a round
-the push touches, a missing `states.json` and the checks against the world
-around the round (below).
+defined); a malformed `state_catalogue` or `states.json`; an owner decision
+ID a round holds twice with different text; an acceptance item that lost its
+coverage against the fork point; and, for a round the push touches, a
+missing `states.json` and the checks against the world around the round —
+the catalogue, the registry's stories, a GO that leaves a visible item
+uncovered (below).
 
 **Best-effort (note, never fails CI):** an opaque pin; a `draft` contract; a `legacy` norm (one note);
 reference boards rendered from an older contract (external drift: re-seal or
 start a new round); a push touching the surface's `paths` while no active
 plan cites an ID (DoR R5); an accepted contract without a sealed reference;
 an unknown key in a registry entry; the same round checks for a round no
-push touches; no fork point to tell whether a push touches a round.
+push touches; no fork point to tell whether a push touches a round; a story
+of the round with no visible item; an owner decision on a retired item or a
+deleted story; an unbound decision in the coverage form in a contract.
 
 ## The round's state list and element map
 
@@ -100,8 +105,13 @@ round is not judged). For a touched round:
 - every state of the catalogue — the union of every entry on the round, as
   it stands now and at the fork point, so a push cannot drop a state for its
   own GO — is in each view's `states` or `not_applicable`;
-- with the feature registry, `stories` is required; without it a list is
-  red (no coverage could be judged) and `n/a: <reason>` is the form.
+- with the feature registry, `stories` is required: each a story of the
+  registry, at least one acceptance item visible to the round among them,
+  the round's `surfaces` within the registry's `surfaces`; without the
+  registry a list is red (no coverage could be judged) and `n/a: <reason>`
+  is the form;
+- an accepted entry whose review says GO needs every visible item covered
+  (below), and an owner decision may not name an item that never was one.
 
 A round no push touches gets the same findings as notes: a story deleted, a
 state added to the catalogue elsewhere must not red every push until the
@@ -125,9 +135,66 @@ since the contract is a `--dep` of the seal, the reference notes drift too.
 
 **Owner decisions with an ID.** An owner decision that changes or drops
 acceptance items carries an ID: `DECISION <date> owner <ID>: change|drop
-<Story>#AC<n> — <reason>` in the round folder or the review; in the
+<Story>#AC<n>[, …] — <reason>` in the round folder or the review; in the
 contract (§9) it names its round, `owner <round>/<ID>`, and counts for that
 round only.
+
+- `<ID>` is like `D7`, `D-7` or `F1` (`[A-Z][A-Z0-9]*-?\d+`); zero-padding is
+  no new ID (`D07` is `D7`), a dash is (`D-7` is not `D7`).
+- `<round>` is the round's folder name, the token split at its last `/`
+  (`owner a/web-round-2/D7` is round `web-round-2`'s).
+- Read unfenced from the round folder's `*.md`, the review and the contract
+  of every entry on the round. In the folder and the review an unbound
+  decision is the round's; a bound one counts only for the round it names,
+  wherever it stands. In a contract only the bound form counts — an unbound
+  one in the coverage form covers nothing and gets a note to bind it; other
+  owner questions in §9 are left alone. So a decision of an older round
+  neither covers the new one nor collides with its IDs.
+- One ID, one decision per round: the same ID again is a quote and must say
+  the same (whitespace, emphasis and list markers aside); with other text it
+  is red. A decision without an ID, not the owner's, inside a fence or
+  without ` — <reason>` covers nothing.
+- An item the decision names must have existed: one that never was in the
+  story's `acceptance` or `retired` is red where the push touches the round.
+  A retired id or a deleted story is a note — a sealed round stays green after
+  "drop, then retire"; an item gone without `retired` gets a note that says so.
+
+## Coverage — computed, and a GO only with all of it
+
+Which acceptance items a round covers is computed, not copied into the
+review. An item of a story in the round's `stories` is **visible** to the
+round when it is not `owned_by` a shared proof layer and its surfaces (the
+item's, else the story's, else the project's) meet the round's `surfaces` —
+without `surfaces` every item counts, the implicit surface always does. It is
+**covered** by a feature-registry `design` anchor into the round
+(`<round>/<view>#<state>`, a view and a state its `states.json` renders —
+the registry gate checks the anchor) or by an owner decision with an ID that
+changes or drops it. An anchor counts for the round it names, so a new round
+does not red the anchors of the old one.
+
+```
+python3 scripts/process/check_design_contracts.py . --coverage <surface>
+```
+
+prints the table of the surface's reference round — each visible item, the
+anchor or decision that covers it (or **uncovered**), and the viewports,
+themes and variants of the anchored state. The review bundle shows the same
+table; the review file does not copy it.
+
+- **The gate:** an `accepted` entry whose review says GO, on a round with a
+  visible item uncovered, is red naming every such item where the push
+  touches the round — a newly accepted round always is — and a note
+  otherwise.
+- **Lost coverage** is a delta rule, not a touch: an item that stands and is
+  visible to the round at the fork point and now, was covered there (an
+  anchor, or a decision of an entry that referenced the round there) and is
+  not now, is red — the message names the item: it lost its coverage. A
+  removed anchor, a dropped bound decision, a changed `contract` path or a
+  `reference` moved out of a shared round all show. Deleted stories and
+  items and retired ids do not count, and the rule leaves every other note a
+  note. A contract the fork point's entry names that cannot be read there
+  counts as changed (fail-closed). Without a registry at the fork point the
+  anchors are not compared (a note); the decisions still are.
 
 ## Binding a plan to its contract
 
