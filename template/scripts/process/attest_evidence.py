@@ -1224,10 +1224,20 @@ def _cited_elsewhere(plan: str, declared_in: str | None = None) -> tuple[str, se
 # any bare mention of an id, hyphen compounds included (`AC-4-Messung`): it keeps a cited id
 # the plan's own (#287, fail closed)
 _BARE_MENTION = re.compile(r"\b" + _AC + r"(?!\w)")
+# a feature-registry item ref, `NAV-US-003#AC19` (v2.93 I4.7): the item of a story, not a
+# criterion of the work. The story id is read loosely — the registry's `id_pattern` is the
+# project's, and a plan is read without it; a URL anchor (`spec#AC4`) has no story id
+_REGISTRY_REF = re.compile(r"(?<![\w-])[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+#AC[1-9]\d*(?![\w-])")
+
+
+def _registry_refs_blanked(text: str) -> str:
+    return _REGISTRY_REF.sub(lambda m: " " * len(m.group(0)), text)
 
 
 def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
     plan, spec = _EXAMPLE_SPAN.sub(" ", plan), _EXAMPLE_SPAN.sub(" ", spec)
+    # a registry item ref is neither required nor reported as foreign: blanked first
+    plan, spec = _registry_refs_blanked(plan), _registry_refs_blanked(spec)
     # the spec cites another issue's criterion the same way the plan does
     spec, cited_in_spec = _cited_elsewhere(spec, declared_in=plan)
     in_spec = {ac_key(m) for m in AC_ID.finditer(spec)}
