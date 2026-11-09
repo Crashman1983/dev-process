@@ -227,6 +227,8 @@ KENNI = {
     "story_status": {"values": ["covered", "partial", "gap", "planned", "deferred"],
                      "deferred": "deferred", "deferred_allows_empty_tests": True},
     "retired_fields": ["blocked_by", "parent", "backlog"], "extra_fields": ["notes"],
+    "test_ref_roots": ["backend/", "frontend-react/", "ios/"], "planned_refs": True,
+    "node_check": "hard",
 }
 
 
@@ -284,6 +286,17 @@ def test_kenni_layout_is_green(render, tmp_path):
     out = _green_kenni(render, tmp_path)
     r = _gate(out)
     assert r.returncode == 0, r.stdout
+
+
+def test_kenni_planned_placeholder_and_nodes_are_green(render, tmp_path):
+    # K4 on Kenni's own refs: stack roots, `::node` per segment (hard), planned:#n:<text>
+    out = _kenni(render, tmp_path)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    ref = "backend/tests/api/v1/test_clients.py::test_gone"
+    _edit(out, "clients/CLI-US-002.json", test_mapping={"backend": [ref]})
+    r = _gate(out)
+    assert r.returncode == 1 and "node 'test_gone' not defined" in r.stdout, r.stdout
 
 
 def test_without_project_file_the_template_keys_hold(render, tmp_path):
@@ -451,3 +464,84 @@ def test_covered_without_issue_is_hard(render, tmp_path):
     _edit(out, "clients/CLI-US-001.json", issues=[])
     r = _gate(out)
     assert r.returncode == 1 and "status 'covered' needs at least one ref in 'issues'" in r.stdout, r.stdout
+
+
+# --- v2.92 K4: test refs ---
+
+def test_dead_node_is_a_note_by_default(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, tests=["tests/test_widget.py::test_gone"])
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "node 'test_gone' not defined in tests/test_widget.py" in r.stdout, r.stdout
+
+
+def test_dead_node_is_hard_with_node_check_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _local(out, {"node_check": "hard"})
+    _entry(out, tests=["tests/test_widget.py::test_gone"])
+    r = _gate(out)
+    assert r.returncode == 1 and "node 'test_gone' not defined" in r.stdout, r.stdout
+    _entry(out, tests=["tests/test_widget.py::test_widget"])
+    assert _gate(out).returncode == 0
+
+
+def test_every_node_segment_is_checked(render, tmp_path):
+    out = _render(render, tmp_path)
+    _local(out, {"node_check": "hard"})
+    _entry(out, tests=["tests/test_widget.py::TestBox::test_widget::test_lid"])
+    (out / "tests/test_widget.py").write_text("class TestBox:\n    def test_widget(self): pass\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "node 'test_lid'" in r.stdout and "'TestBox'" not in r.stdout, r.stdout
+
+
+def test_node_in_a_non_python_file_is_a_substring(render, tmp_path):
+    out = _render(render, tmp_path)
+    _local(out, {"node_check": "hard"})
+    (out / "web").mkdir()
+    (out / "web/box.spec.ts").write_text("test('opens the box', () => {});\n")
+    _entry(out, tests=["web/box.spec.ts::opens the box"])
+    assert _gate(out).returncode == 0
+    _entry(out, tests=["web/box.spec.ts::closes the box"])
+    r = _gate(out)
+    assert r.returncode == 1 and "node 'closes the box' not found in web/box.spec.ts" in r.stdout, r.stdout
+
+
+def test_unparsable_python_follows_node_check(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, tests=["tests/test_widget.py::test_widget"])
+    (out / "tests/test_widget.py").write_text("def test_widget(:\n")
+    r = _gate(out)
+    assert r.returncode == 0 and "cannot parse tests/test_widget.py" in r.stdout, r.stdout
+    _local(out, {"node_check": "hard"})
+    r = _gate(out)
+    assert r.returncode == 1 and "cannot parse tests/test_widget.py" in r.stdout, r.stdout
+
+
+def test_ref_outside_the_test_ref_roots_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _local(out, {"test_ref_roots": ["backend/"]})
+    _entry(out)
+    r = _gate(out)
+    assert r.returncode == 1 and "must start with one of ['backend/']" in r.stdout, r.stdout
+
+
+def test_planned_ref_only_with_planned_refs(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, tests=["tests/test_widget.py", "planned:#12:x"])
+    r = _gate(out)
+    assert r.returncode == 1 and "planned:#12:x" in r.stdout and "planned_refs" in r.stdout, r.stdout
+    _local(out, {"planned_refs": True})
+    assert _gate(out).returncode == 0
+    _entry(out, tests=["tests/test_widget.py", "planned:12:x"])
+    r = _gate(out)
+    assert r.returncode == 1 and "malformed placeholder" in r.stdout, r.stdout
+
+
+def test_a_planned_ref_is_never_proof(render, tmp_path):
+    # an entry whose only test is a placeholder proves nothing
+    out = _render(render, tmp_path)
+    _local(out, {"planned_refs": True})
+    _entry(out, tests=["planned:#12:the widget test"])
+    r = _gate(out)
+    assert r.returncode == 1 and "no existing test" in r.stdout, r.stdout

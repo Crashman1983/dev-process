@@ -22,6 +22,7 @@ test *semantically* proves its criterion is not mechanically decidable and is
 review judgment. Language-agnostic; stdlib only (plus the shared adr glob)."""
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from dataclasses import dataclass, field
@@ -36,6 +37,7 @@ from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
 from check_review import parse_issue_ref  # noqa: E402
 
 PREFIX = re.compile(r"^[A-Z]+$")
+PLANNED_REF = re.compile(r"^planned:#\d+:\S.*$")
 
 # Advisory only: an entry with many mapped tests but very few acceptance
 # criteria likely under-describes its tested behaviour. Warns, never blocks.
@@ -52,6 +54,8 @@ class Run:
     soft: list[str] = field(default_factory=list)
     seen_ids: dict = field(default_factory=dict)
     stats: list[dict] = field(default_factory=list)
+    names: dict = field(default_factory=dict)   # .py file -> its def/class names (None: unparsable)
+    texts: dict = field(default_factory=dict)   # other file -> its text (None: unreadable)
 
     def rel(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()
@@ -72,15 +76,72 @@ def _retired_fields(cfg: dict) -> set[str]:
     return set(cfg["retired_fields"]) - ({"status"} if cfg["story_status"] else set())
 
 
+def _python_names(run: Run, path: Path) -> set[str] | None:
+    """Every def/class name of a Python file, read by AST without importing it; None
+    when it cannot be parsed. A flat set: `a::B::c` checks each segment by itself."""
+    if path not in run.names:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
+            run.names[path] = None
+        else:
+            run.names[path] = {node.name for node in ast.walk(tree)
+                               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    return run.names[path]
+
+
+def _file_text(run: Run, path: Path) -> str | None:
+    if path not in run.texts:
+        try:
+            run.texts[path] = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            run.texts[path] = None
+    return run.texts[path]
+
+
+def _node_problems(run: Run, base: str, node: str) -> list[str]:
+    """Why the `::node` selector of an existing file names nothing there — per segment."""
+    path = run.root / base
+    segments = node.split("::")
+    if base.endswith(".py"):
+        names = _python_names(run, path)
+        if names is None:
+            return [f"cannot parse {base} to verify the node"]
+        return [f"node {s!r} not defined in {base}" for s in segments if s not in names]
+    text = _file_text(run, path)
+    if text is None:
+        return [f"cannot read {base} to verify the node"]
+    return [f"node {s!r} not found in {base}" for s in segments if s not in text]
+
+
 def _test_ref(run: Run, rel: str, where: str, ref: object) -> bool:
-    """One test ref; True when it names an existing test (proof)."""
+    """One test ref: an existing file under `test_ref_roots`, its `::node` segments
+    checked as `node_check` says, or — with `planned_refs` — a placeholder
+    `planned:#<issue>:<text>`. True when it names an existing test: a placeholder
+    is never proof."""
+    cfg = run.cfg
     if not isinstance(ref, str) or not ref.strip():
         run.hard.append(f"{rel}: {where}: a test ref must be a non-empty string, got {ref!r}")
         return False
-    file_part = ref.split("::", 1)[0]  # strip a ::node selector
-    if not (run.root / file_part).is_file():
+    if ref.startswith("planned:"):
+        if not cfg["planned_refs"]:
+            run.hard.append(f"{rel}: {where}: {ref!r}: placeholders need `planned_refs` in the "
+                            f"registry configuration")
+        elif not PLANNED_REF.match(ref):
+            run.hard.append(f"{rel}: {where}: {ref!r}: malformed placeholder; "
+                            f"expected planned:#<issue>:<description>")
+        return False
+    roots = cfg["test_ref_roots"]
+    if roots and not ref.startswith(tuple(roots)):
+        run.hard.append(f"{rel}: {where}: {ref!r} must start with one of {roots}")
+        return False
+    base, _, node = ref.partition("::")
+    if not (run.root / base).is_file():
         run.hard.append(f"{rel}: {where}: test path does not exist: {ref}")
         return False
+    if node:
+        sink = run.hard if cfg["node_check"] == "hard" else run.soft
+        sink += [f"{rel}: {where}: {ref!r}: {why}" for why in _node_problems(run, base, node)]
     return True
 
 
@@ -167,6 +228,9 @@ def _check_story_tests(run: Run, data: dict, rel: str, stats: dict) -> None:
                             f"entry without a proving test is a claim, not an inventory")
             return
         stats["n_tests"] += sum(_test_ref(run, rel, "tests", t) for t in tests)
+        if all(isinstance(t, str) and t.startswith("planned:") for t in tests):
+            run.hard.append(f"{rel}: 'tests' names no existing test — a planned: placeholder "
+                            f"is never proof")
         return
     mapping = data.get("test_mapping")
     if not isinstance(mapping, dict) or not mapping:
