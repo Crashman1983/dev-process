@@ -85,8 +85,17 @@ checked once it is there:
   behaviour. Whether a behaviour really belongs to the shared layer stays review
   judgment; the gate's report states the share of `owned_by` items per
   capability, so client items drifting into a shared layer show in the number.
-- **design** — the item's anchor in a design round. Accepted, not yet checked:
-  a later template release fixes the anchor format and checks it.
+- **design** — where the item is drawn: an anchor `<round>/<view>#<state>`
+  (`web-round-2/shell-open#default`), or a list of them. `<round>` is the
+  folder name of the round the anchor names — the `reference` of a
+  design-contract entry, or an older round `docs/design/concepts/<round>` with a
+  `states.json` (a note: re-anchor where the item is drawn now); `<view>` and
+  `<state>` are a view and a rendered state of its `states.json`. Checked only
+  with the design-contracts module, which owns the anchor; without it the field
+  is not read. Red: no anchor form, an unknown round, view or state, and a round
+  name two different reference folders share. An anchor counts for the round it
+  names, so a new round leaves the anchors of the older one standing; the
+  design-contracts gate computes from them which items a round covers.
 
 `strict_item_tests` decides what an item without an existing test is: a failure
 when on, otherwise one note per capability (or for the inventory) that counts

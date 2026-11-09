@@ -661,6 +661,123 @@ def catalogue_gaps(states: dict, catalogue: list[str]) -> list[str]:
     return out
 
 
+# --- an acceptance item's anchor in a round (#404 B3) ---------------------------------
+# A feature-registry item's `design` names where its behaviour is drawn: `<round>/<view>#
+# <state>`, the round by its folder name. The round is the `reference` of an entry, or —
+# an older round, a note — `docs/design/concepts/<round>` with a states.json. This gate
+# owns the anchor; the registry gate reports its findings under the item.
+CONCEPTS = "docs/design/concepts"
+_ANCHOR = re.compile(r"^(?P<round>[^\s/:#]+)/(?P<view>[^\s/#]+)#(?P<state>[^\s#]+)$")
+_ANCHOR_FORM = "`<round>/<view>#<state>`"
+
+
+def parse_anchor(text: object) -> tuple[str, str, str] | None:
+    """(round, view, state) of an anchor `<round>/<view>#<state>`; None for anything else."""
+    m = _ANCHOR.match(text.strip()) if isinstance(text, str) else None
+    return (m.group("round"), m.group("view"), m.group("state")) if m else None
+
+
+def anchor_texts(value: object) -> list[str] | None:
+    """The anchors an item's `design` holds — a string or a list of strings; None: neither."""
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    if isinstance(value, list) and value and all(isinstance(x, str) and x.strip() for x in value):
+        return [x.strip() for x in value]
+    return None
+
+
+def round_views(states: object) -> dict[str, dict[str, dict]]:
+    """{view: {state: its object}} of a states.json, read leniently: what does not parse
+    names nothing. A state in `not_applicable` is not rendered, so no anchor names it."""
+    out: dict[str, dict[str, dict]] = {}
+    views = states.get("views") if isinstance(states, dict) else None
+    for view in views if isinstance(views, list) else []:
+        if not (isinstance(view, dict) and isinstance(view.get("id"), str)):
+            continue
+        rendered = view.get("states") if isinstance(view.get("states"), list) else []
+        out.setdefault(view["id"], {}).update(
+            {s["id"]: s for s in rendered if isinstance(s, dict) and isinstance(s.get("id"), str)})
+    return out
+
+
+def _states_at(path: Path) -> dict | None:
+    try:
+        data = json.loads((path / STATES).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+class AnchorIndex:
+    """The rounds an anchor can name, read once per run: the folder name of every entry's
+    `reference` (any status), then `docs/design/concepts/<name>` with a states.json."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.referenced: dict[str, set[str]] = {}
+        for path in _registry_files(root):
+            data, _errs = load(root, path)
+            if data is None or not _norm(data.get("reference")):
+                continue
+            rdir = _inside(root, data["reference"].strip())
+            if rdir is not None and rdir.is_dir():
+                key = _rel(root, rdir)
+                self.referenced.setdefault(Path(key).name, set()).add(key)
+        self._views: dict[str, dict[str, dict[str, dict]] | None] = {}
+
+    def views(self, key: str) -> dict[str, dict[str, dict]] | None:
+        """The views of the round folder `key`; None when it has no readable states.json."""
+        if key not in self._views:
+            states = _states_at(self.root / key)
+            self._views[key] = None if states is None else round_views(states)
+        return self._views[key]
+
+    def problems(self, value: object) -> list:
+        """What is wrong with an item's `design` (`registry_config.Problem`s): an anchor that
+        resolves to no round, view or state fails; one into an older round is a note."""
+        from registry_config import Problem  # noqa: PLC0415  (core, a leaf)
+        anchors = anchor_texts(value)
+        if anchors is None:
+            return [Problem(True, f"'design' must be an anchor {_ANCHOR_FORM} or a non-empty list "
+                                  f"of them, got {value!r}")]
+        out: list = []
+        for text in anchors:
+            parsed = parse_anchor(text)
+            if parsed is None:
+                out.append(Problem(True, f"design {text!r} is no anchor {_ANCHOR_FORM}"))
+                continue
+            name, view, state = parsed
+            keys = sorted(self.referenced.get(name, ()))
+            if len(keys) > 1:
+                out.append(Problem(True, f"anchor {text!r}: round name {name!r} names {len(keys)} "
+                                         f"reference folders ({', '.join(keys)}) — an anchor cannot "
+                                         "tell them apart; rename one round"))
+                continue
+            if keys:
+                key = keys[0]
+            elif (self.root / CONCEPTS / name / STATES).is_file():
+                key = f"{CONCEPTS}/{name}"
+                out.append(Problem(False, f"anchor {text!r}: round {name!r} is no entry's reference "
+                                          "(an older round?) — anchor the item in the round that "
+                                          "draws it now"))
+            else:
+                out.append(Problem(True, f"anchor {text!r} names round {name!r}, which no "
+                                         f"design-contract entry references and {CONCEPTS}/{name} "
+                                         f"does not hold with a {STATES}"))
+                continue
+            views = self.views(key)
+            if views is None:
+                out.append(Problem(True, f"anchor {text!r}: round {name!r} has no readable {STATES} "
+                                         "— the anchor names no view of it"))
+            elif view not in views:
+                out.append(Problem(True, f"anchor {text!r} names view {view!r}, which {name} does "
+                                         "not list"))
+            elif state not in views[view]:
+                out.append(Problem(True, f"anchor {text!r} names state {state!r}, which view "
+                                         f"{view!r} of {name} does not render"))
+        return out
+
+
 # --- when the round is judged hard: the push touches it ------------------------------
 
 def fork_point(root: Path) -> tuple[str | None, str | None]:

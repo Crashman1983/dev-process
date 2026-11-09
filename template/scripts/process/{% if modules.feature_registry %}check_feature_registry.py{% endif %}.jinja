@@ -23,6 +23,9 @@ removed id stands in `retired`, a new id is higher than the base's, a renumberin
 refused — and every `<story id>#AC<n>` ref inside the registry must name an item.
 Without a readable base the comparison is a note, never an error or a silent pass.
 
+An item's `design` anchor `<round>/<view>#<state>` (v2.93, #404 B3) is checked only
+with the design-contracts module, whose gate owns the anchor and is imported for it.
+
 Structure and reference existence are hard-guaranteed (CI exit 1). Whether a
 test *semantically* proves its criterion is not mechanically decidable and is
 review judgment. Language-agnostic; stdlib only (plus the shared adr glob)."""
@@ -71,6 +74,7 @@ class Run:
     texts: dict = field(default_factory=dict)   # other file -> its text (None: unreadable)
     untested: dict = field(default_factory=dict)  # capability or inventory -> items without a test
     owned: dict = field(default_factory=dict)  # capability or inventory -> [items, items owned_by]
+    anchors: object = None  # the design gate's AnchorIndex, read on the first `design` (B3)
 
     def rel(self, path: Path) -> str:
         return path.relative_to(self.root).as_posix()
@@ -311,6 +315,21 @@ def _check_item_tests(run: Run, item: dict, label: str, surfaces: list[str], own
     return proof
 
 
+DESIGN_GATE = "scripts/process/check_design_contracts.py"
+
+
+def _anchor_index(run: Run) -> object | None:
+    """The design-contracts gate's reading of the rounds an item's `design` anchor may name
+    (v2.93 B3) — None without that module: there `design` stays unchecked. Imported here
+    only, so a project without the module never loads it."""
+    if not (run.root / DESIGN_GATE).is_file():
+        return None
+    if run.anchors is None:
+        import check_design_contracts  # noqa: PLC0415  (sibling; the owner of the anchor)
+        run.anchors = check_design_contracts.AnchorIndex(run.root)
+    return run.anchors
+
+
 def _check_item(run: Run, item: dict, label: str, story_surfaces: list[str], group: str) -> None:
     unknown = sorted(set(item) - ITEM_FIELDS)
     if unknown:
@@ -325,7 +344,10 @@ def _check_item(run: Run, item: dict, label: str, story_surfaces: list[str], gro
     counts[0] += 1
     counts[1] += "owned_by" in item
     _check_state(run, item, label, surfaces)
-    # `design` is accepted unvalidated until #404 B fixes the anchor format
+    if "design" in item:
+        index = _anchor_index(run)
+        if index is not None:
+            _report(run, label, index.problems(item["design"]))
     if "tests" in item and _check_item_tests(run, item, label, surfaces, owned_by):
         return
     if run.cfg["strict_item_tests"]:
