@@ -1324,3 +1324,12 @@ def test_stable_ids_no_boolean_on_the_branch_is_hard(render, tmp_path):
     _story(out, 1)
     r = _gate(out)
     assert r.returncode == 1 and "`stable_ids` must be true or false" in r.stdout, r.stdout
+
+
+def test_doc_and_config_state_stable_ids(render, tmp_path):
+    out = _render(render, tmp_path)
+    doc = (out / "docs/process/modules/feature-registry.md").read_text(encoding="utf-8")
+    assert "## Stable ids" in doc and '"split_into"' in doc and "| `stable_ids` | `true` |" in doc
+    assert "a changed comma escapes it" in doc and "`git fetch --unshallow`" in doc
+    cfg = json.loads((out / "docs/process/feature-registry.json").read_text(encoding="utf-8"))
+    assert cfg["stable_ids"] is True and "retired" in cfg["_comment"]["stable_ids"]

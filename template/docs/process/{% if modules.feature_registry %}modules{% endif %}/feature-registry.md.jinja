@@ -61,7 +61,8 @@ checked once it is there:
 
 - **id** (required) — `AC<n>` (`^AC[1-9]\d*$`), unique within the story. It is
   assigned once and never renumbered: references (`STORY-0007#AC3`), plans,
-  test names and review findings carry it. A removed item's id is not reused.
+  test names and review findings carry it. A removed item's id is not reused:
+  it moves to the story's `retired` list (Stable ids, below).
 - **text** (required) — the behaviour, by the writing rule below.
 - **surfaces** — the surfaces (platforms) the item applies to: a subset of the
   story's surfaces, or of the project's declared `surfaces` where the story has
@@ -102,7 +103,8 @@ test tests the item — that stays review judgment.
   in its `issue` field, the story's issues in the story's field.
 - **No surface prefix in `text`.** "Web: …" becomes `"surfaces": ["web"]`.
 - **Removing a behaviour removes its item and its tests in the same change**,
-  and retires its id: the id is never given to another item.
+  and retires its id: the id goes into the story's `retired` list and is never
+  given to another item.
 - **Split rule.** A behaviour with a part a shared layer owns and a part each
   client shows is split: one item `owned_by` the shared layer (its proof under
   that layer's key), and one client item for each display, each proven on its
@@ -110,7 +112,71 @@ test tests the item — that stays review judgment.
   client's behaviour.
 - **Splitting a long item.** The part that keeps the original main behaviour
   keeps the old id; the parts split off get new ids, so existing references
-  stay valid.
+  stay valid. Where no part keeps the main behaviour, the old id is retired with
+  `split_into` naming the new ones.
+
+## Stable ids
+
+An item id is an address: plans, tests, design rounds and review findings cite
+`STORY-0007#AC3`, so the id must keep naming the same behaviour. The gate holds
+it so with `stable_ids` (on in the template).
+
+**Retired ids.** A story lists the ids it removed:
+
+```json
+"retired": [{"id": "AC9"}, {"id": "AC12", "split_into": ["AC31", "AC32"]}]
+```
+
+Each `id` is an item id, stands once and is no longer an acceptance item.
+`split_into` (optional) names the items of the same story that took the
+behaviour over; none of them is retired. The form is always checked.
+
+**Compared with the fork point.** The gate reads the registry as it stood at the
+branch's fork point from the integration branch — the tip of `origin/main` for
+the pre-push, the train and `finish`; PR CI through its merge commit — and
+compares each story that exists there and today. Each of these fails, ids
+compared by number (`AC10` > `AC9`):
+
+- an id of the base is gone and not in `retired`;
+- a `retired` entry of the base is gone;
+- a new id is not higher than every id the base holds in `acceptance` and
+  `retired`;
+- **renumbered:** an item's text (whitespace aside) now stands under another id
+  that did not carry it at the base, and that id is not in the old item's
+  `split_into`. Moving AC4…AC10 down to AC3…AC9 is caught this way, even with
+  `retired: AC10`. Two base items with one text, a copied item and a split
+  target keeping the old wording are no renumbering. The rule sees wording that
+  stayed literally the same: a changed comma escapes it. Wording handed to
+  another id on purpose is retired with `split_into`.
+
+A story is found by its `id`; one whose id the base does not hold is looked up
+by its path, so a story renamed in the flat layout stays compared. In the
+capabilities layout the file name is the id: a renamed story there is a deleted
+one plus a new one. A new story is checked for the form only; deleting a whole
+story is allowed (history is the archive) — refs to it are caught below.
+
+Only `root`, `layout`, `id_pattern` and `stable_ids` of the base's configuration
+count. Where there is no base to compare with, the gate says why in a note and
+checks this tree alone: no fork point (on the integration branch; a shallow
+clone, with `git fetch --unshallow` as the remedy; a remote without the fork),
+an ambiguous one (a criss-cross merge), or no base registry (no configuration at
+the base, as for a project adopting the registry; one that cannot be read or is
+invalid; no registry directory there; a symlink, a submodule or a file that is
+no UTF-8 in it).
+
+**Refs inside the registry.** Every `<story id>#AC<n>` in a text value of a story
+or capability head — test refs included — must name an item of today's
+registry. A ref to a retired id with `split_into` is a note naming the
+successors; one to a retired id without it, to an unknown story or to an unknown
+id fails. A URL anchor (`…/spec#AC4`) without a story id in front is no ref.
+Refs outside the registry are not checked here.
+
+**Switching it off.** `"stable_ids": false` in `feature-registry.local.json`
+switches the comparison and the ref check off — only where the base **and** the
+branch say false, so a branch cannot lift the duty for itself. A base value that
+is no boolean counts as true, with a note. The form of `retired` and
+`--assign-ids` hold either way. Set on a branch, the switch takes effect once
+that branch is merged.
 
 ## Test refs
 
@@ -154,6 +220,7 @@ rule silently; `_comment` is allowed at any level.
 | `retired_fields` | `status`, `blocked_by`, `parent` | fields that fail as retired (`status` drops out with `story_status`) |
 | `extra_fields` | `[]` | further story fields the project knows; other unknown fields are a note |
 | `strict_item_tests` | `false` | an item without an existing test fails |
+| `stable_ids` | `true` | item ids are compared with the fork point and registry refs must resolve (Stable ids); off only where base and branch say `false` |
 
 **The capabilities layout.** Each capability is a directory under `root` with a
 head `_capability.json`: `schema_version` 1, `capability` equal to the
@@ -214,11 +281,15 @@ python scripts/process/check_feature_registry.py --assign-ids          # preview
 python scripts/process/check_feature_registry.py --assign-ids --write
 ```
 
-- A string item and an object without `id` become `{"id": "AC<n>", "text": …}`,
-  `n` being its position from 1 — an old positional reference "item 9 of
-  STORY-0007" becomes `STORY-0007#AC9` without lookup.
-- Where the story already holds `AC<n>` — from before or assigned in the same
-  run — the item gets the highest id plus one.
+- In a story without any id or `retired` entry, a string item and an object
+  without `id` become `{"id": "AC<n>", "text": …}`, `n` being its position from
+  1 — an old positional reference "item 9 of STORY-0007" becomes
+  `STORY-0007#AC9` without lookup.
+- In a story that holds an id or a `retired` entry, every new item gets the
+  highest id plus one — over today's ids and retired ids and, where the fork
+  point's registry can be read, over the base's too, so an id removed on the
+  branch is not given again. Where the fork point cannot be told, a note says so
+  and the run numbers from this tree.
 - An existing id that does not match `^AC[1-9]\d*$` is reported, never
   rewritten (references may name it), and the run exits 1.
 - A second run changes nothing. The file keeps its indentation, non-ASCII text
@@ -237,12 +308,16 @@ one implicit surface and stay green.
 missing/duplicate/misshaped story `id`; a missing text field; empty
 `acceptance`; an item without `id`, with a misshaped or duplicate id, or
 without text; an item field outside its rules (surfaces, state, a target
-without an issue, tests, `owned_by`); story tests that are empty, all
+without an issue, tests, `owned_by`); a malformed `retired` list; with
+`stable_ids`, an id changed against the fork point and a registry ref that
+names no item, or a retired one without `split_into` (Stable ids); story tests that are empty, all
 placeholders or name a path that does not exist; a retired field; a dangling
 `adr` link; a malformed issue ref; with a project configuration, its rules
 (layout, heads, prefixes, surfaces, status, test mapping, required issues).
 
 **Best-effort (note, never fails):** an empty inventory ("no entries yet");
+no base to compare item ids with, and why; a ref to a retired id with
+`split_into`;
 unknown story or item fields; a dead `::node` (unless `node_check` is `hard`);
 items without an existing test (unless `strict_item_tests`); item surfaces
 without declared project surfaces; the under-granularity advisory (an entry
