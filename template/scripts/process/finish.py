@@ -48,7 +48,9 @@ Checks, in order:
   5. the gate suite is green (gate_runner, launched via gate_invoke); "not
      runnable" is reported distinctly from "red"
 Then it prints the tail: archive plan(s) -> merge -> delete branch ->
-remove worktree -> publish/prune where those modules are installed.
+remove worktree -> publish/prune where those modules are installed, for the
+finished spec dirs this branch's range touches (every one, marked, when the
+range is unknown).
 
 Exit 0 = ready (tail printed); exit 1 = blocked (blockers printed).
 Pure stdlib + sibling imports.
@@ -300,12 +302,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             blockers.append(no_clearing_review(f"{SPECS_DIR}/{name}", tier, ids)
                             + " — its tasks are all ticked; run /review before /finish")
         for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
+            if not _own_spec(d.name, in_flight):
+                continue  # somebody else's finished spec: not this branch's tail
             tasks = d / "tasks.md"
             if tasks.is_file():
                 ttext = tasks.read_text(encoding="utf-8", errors="replace")
                 if not re.search(r"^\s*- \[ \] ", ttext, re.MULTILINE) \
                         and re.search(r"^\s*- \[[xX]\] ", ttext, re.MULTILINE):
                     done_spec_dirs.append(d.name)
+    spec_steps = _publish_steps(root, done_spec_dirs, range_known=in_flight is not None)
 
     # --- hook wiring: a registered check that cannot run is a missing check,
     # and a missing check is a blocker, never a skip
@@ -361,11 +366,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     tail.append("git worktree remove <path> && git worktree prune  # if this "
                 "branch rode a worktree")
     if (root / "scripts/process/publish_and_prune.py").is_file():
-        if done_spec_dirs:
-            for name in done_spec_dirs:
-                tail.append(f"python3 scripts/process/publish_and_prune.py "
-                            f"{SPECS_DIR}/{name}  # publish the outcome, "
-                            f"prune the finished working set")
+        if spec_steps:
+            tail.extend(spec_steps)
         else:
             tail.append("only if this change ran through a spec (not spec-waived): "
                         "python3 scripts/process/publish_and_prune.py "
@@ -373,6 +375,24 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         "working set")
     tail.append("close the tracking issue with the merge commit ref (DoD)")
     return [], tail
+
+
+def _own_spec(name: str, in_flight: set[str] | None) -> bool:
+    """A spec dir is this branch's when the branch's range touches it — the rule of
+    `check_review.spec_plan_findings` (`p == rel or p.startswith(spec_dir)`, the plan
+    lies in the dir). An unknown range (None) hides nothing: every spec dir counts."""
+    spec_dir = f"{SPECS_DIR}/{name}/"
+    return in_flight is None or any(p.startswith(spec_dir) for p in in_flight)
+
+
+def _publish_steps(root: Path, names: list[str], *, range_known: bool) -> list[str]:
+    """The `publish_and_prune.py` command per finished spec dir of this branch; without
+    the module, none. Without a range every finished spec dir is named, marked."""
+    if not (root / "scripts/process/publish_and_prune.py").is_file():
+        return []
+    caution = "" if range_known else " (range unknown — run only your own)"
+    return [f"python3 scripts/process/publish_and_prune.py {SPECS_DIR}/{name}  # publish the "
+            f"outcome, prune the finished working set{caution}" for name in names]
 
 
 # The route marker the pre-push guard reads to tell finish's push to main
