@@ -230,7 +230,7 @@ def test_the_issue_sum_survives_the_chains_stop_between_phases(render, tmp_path,
         rec = json.loads((out / ".git/process-dispatch/b7.json").read_text())
         wt, since = Path(rec["worktree"]), rec["started"]
         assert _history(out, 7)["branches"]["b7"] == {"windows": [[since, None]], "worktrees": [str(wt)],
-                                                      "remote": False}
+                                                      "remote": False, "starts": [["plan", since]]}
         _write(wt / "t" / "plan.jsonl", _msg("p1", 10, ts=time.time()), _msg("old", 1000, ts=since - 3600))
         assert d.stop(out, "b7", force=True, keep_report=True) == 0
         time.sleep(1.1)  # the next phase starts on a later second
@@ -288,8 +288,9 @@ def test_a_branch_executed_here_and_reviewed_remotely_keeps_its_local_transcript
     _phase(d, out, "7-widget", 7, t0 + 200, wt=wt, phase="execute")
     _write(wt / "t" / "s.jsonl", _msg("m1", 10, ts=t0 + 10))
     _drop_record(out, "7-widget")
-    assert _history(out, 7)["branches"]["7-widget"] == {"windows": [[int(t0), None]], "worktrees": [str(wt)],
-                                                        "remote": True}
+    assert _history(out, 7)["branches"]["7-widget"] == {
+        "windows": [[int(t0), None]], "worktrees": [str(wt)], "remote": True,
+        "starts": [["execute", int(t0)], ["review", int(t0 + 100)], ["execute", int(t0 + 200)]]}
     assert _finish(out).usage(out, "7-widget") == (7, "tokens: 10 output over 1 sessions (partial: remote)")
 
 
@@ -500,3 +501,79 @@ def test_a_damaged_branch_index_never_makes_a_write_raise(render, tmp_path):
     (phases / d.BRANCH_INDEX).write_text(json.dumps({"1-a": 5}))
     _phase(d, out, "1-a", 1, time.time(), wt=tmp_path / "wt")
     d.close_windows(out, "1-a")
+
+
+# --- v2.94 E2: cost per phase ------------------------------------------------------------
+
+def test_note_phase_records_each_start_and_the_branch_entry_keeps_them(render, tmp_path):
+    """Each phase start joins `starts` once — a record rewritten with the same start (a
+    status write) adds none — and `_branch_entry` keeps the key, dropping damaged items."""
+    out, records = _setup(render, tmp_path, "{worktree}/t/*.jsonl")
+    d = _load_dispatch(out)
+    wt, t0 = tmp_path / "wt", 1_800_000_000
+    _phase(d, out, "7-w", 7, t0, wt=wt, phase="plan")
+    _phase(d, out, "7-w", 7, t0, wt=wt, phase="plan")  # the same record written again
+    _phase(d, out, "7-w", 7, t0 + 100, wt=wt, phase="execute")
+    _phase(d, out, "7-w", 7, t0 + 250, wt=wt, phase="review")
+    entry = _history(out, 7)["branches"]["7-w"]
+    assert entry["starts"] == [["plan", t0], ["execute", t0 + 100], ["review", t0 + 250]]
+    assert entry["windows"] == [[t0, None]]
+    history = {"branches": {"7-w": {**entry, "starts": [*entry["starts"], ["x", "bad"], 5]}}}
+    assert d._branch_entry(history, "7-w")["starts"] == entry["starts"]
+    assert d._branch_entry({}, "new")["starts"] == []
+
+
+def test_phase_costs_cut_one_window_into_its_three_phases(render, tmp_path):
+    """Wall time from each start to the next (waits included), tokens of each phase's
+    stretch of the window — through `_coverage` and the reason `token_reason` words."""
+    out, records = _setup(render, tmp_path, "{worktree}/t/*.jsonl")
+    d = _load_dispatch(out)
+    wt, t0 = tmp_path / "wt", 1_800_000_000
+    _phase(d, out, "7-w", 7, t0, wt=wt, phase="plan")
+    _phase(d, out, "7-w", 7, t0 + 100, wt=wt, phase="execute")
+    _phase(d, out, "7-w", 7, t0 + 250, wt=wt, phase="review")
+    d._close_window(records / "phases", 7, "7-w", t0 + 400)
+    _write(wt / "t" / "s.jsonl", _msg("p", 10, ts=t0 + 10), _msg("e1", 20, ts=t0 + 150),
+           _msg("e2", 5, ts=t0 + 249), _msg("r", 7, ts=t0 + 300), _msg("late", 900, ts=t0 + 500))
+    got = d.phase_costs(out, 7, "7-w")
+    assert [tuple(c) for c in got] == [("plan", 100, 10, None), ("execute", 150, 25, None),
+                                       ("review", 150, 7, None)], got
+    # a phase dispatched again later (a fix after the review) is one row, its stretches summed
+    _phase(d, out, "7-w", 7, t0 + 600, wt=wt, phase="execute")
+    d._close_window(records / "phases", 7, "7-w", t0 + 700)
+    _write(wt / "t" / "s2.jsonl", _msg("e3", 1, ts=t0 + 650))
+    got = d.phase_costs(out, 7, "7-w")
+    assert [tuple(c) for c in got] == [("plan", 100, 10, None), ("execute", 250, 26, None),
+                                       ("review", 150, 7, None)], got
+
+
+def test_phase_costs_without_the_windows_first_start_give_one_row_for_all(render, tmp_path):
+    """A history an older version wrote carries windows but no `starts`, or a first start
+    later than the window's: one `phase=all` row over the whole window, never a wrong split."""
+    out, records = _setup(render, tmp_path, "{worktree}/t/*.jsonl")
+    d = _load_dispatch(out)
+    wt, t0 = tmp_path / "wt", 1_800_000_000
+    (records / "phases").mkdir()
+    (records / "phases" / "7.json").write_text(json.dumps({"phase": "review", "branch": "7-w", "branches": {
+        "7-w": {"windows": [[t0, t0 + 300]], "worktrees": [str(wt)], "remote": False}}}))
+    _write(wt / "t" / "s.jsonl", _msg("a", 10, ts=t0 + 10), _msg("b", 4, ts=t0 + 200))
+    assert [tuple(c) for c in d.phase_costs(out, 7, "7-w")] == [("all", 300, 14, None)]
+    _phase(d, out, "7-w", 7, t0 + 400, wt=wt, phase="execute")  # the window's first start is unknown
+    d._close_window(records / "phases", 7, "7-w", t0 + 500)
+    assert [tuple(c) for c in d.phase_costs(out, 7, "7-w")] == [("all", 400, 14, None)]
+
+
+def test_phase_costs_name_why_tokens_are_not_measured_and_none_without_a_record(render, tmp_path):
+    """No transcripts: `tokens` None with `token_reason`'s wording, never 0; no phase record
+    for the branch: no costs at all."""
+    out, records = _setup(render, tmp_path, None)
+    d = _load_dispatch(out)
+    t0 = 1_800_000_000
+    assert d.phase_costs(out, 7, "7-w") is None
+    _phase(d, out, "7-w", 7, t0, wt=tmp_path / "wt", phase="execute")
+    d._close_window(records / "phases", 7, "7-w", t0 + 60)
+    assert [tuple(c) for c in d.phase_costs(out, 7, "7-w")] == [("execute", 60, None, "not-configured")]
+    assert d.phase_costs(out, 7, "other") is None
+    (out / "docs/process/model-policy.local.json").write_text(json.dumps({"transcripts": "{worktree}/t/*.jsonl"}))
+    (cost,) = d.phase_costs(out, 7, "7-w")
+    assert cost.tokens is None and cost.reason == "no-files:{worktree}/t/*.jsonl"
