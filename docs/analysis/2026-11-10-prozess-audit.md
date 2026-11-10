@@ -12,6 +12,8 @@ Ein Tier-2-Paket, das ohne Beanstandung durchgeht, läuft achtmal lokal durch de
 
 Rund die Hälfte der lokalen Gate-Läufe kann entfallen, ohne dass eine Prüfung wegfällt: Derselbe Runner hat denselben Stand bereits grün gesehen.
 
+Tier 0 und 1 zahlen zwei bis vier Läufe und, ohne Projektkonfiguration, die volle Merge-Suite auch für eine einzelne Doku-Datei. Tier 3 liegt bei den Gates kaum über Tier 2; dort kosten die fünf Prüfläufe durch ein Modell (Abschnitt 7).
+
 ## 2. Gate-Läufe eines Tier-2-Pakets
 
 Jeder Lauf startet alle aktiven Gates nacheinander, je Gate einen eigenen Interpreter: acht Kern-Gates und bis zu sieben Modul-Gates (`gate_runner.py.jinja:549,618`).
@@ -98,6 +100,48 @@ Zahlen, die im Projekt vor Maßnahme 1 und 4 zu ziehen sind: `process_kpis.py no
 - Runde 2 und später prüfen nur das Delta.
 - Bei Tier 2 ist das Refute in das Review gefaltet.
 - Das Pre-Commit-Framework wiederholt die Gates beim Push nicht (`--unless-frame-ran`).
+
+## 7. Tier 0, Tier 1 und Tier 3
+
+Gezählt sind wieder volle Läufe des Gate-Runners für ein Paket ohne Beanstandung.
+
+| Tier | Weg | Lokale Gate-Läufe | Davon auf unverändertem Stand | Tests | LLM-Prüfläufe |
+|---|---|---:|---|---|---:|
+| 0 | `finish.py` | 2 bis 4 | `finish`-Prüfung und Merge-Hook sehen denselben Commit | volle Merge-Suite, außer das Projekt hat den Pfad als `inert` eingetragen | 0 |
+| 1 | `finish.py` | 2 bis 4 | wie Tier 0 | Auswahl beim Push, danach volle Merge-Suite | 0 |
+| 0/1 | Dispatch und Train | 4 | Bundle und Push; Train und Hook | Auswahl beim Push, Suite einmal je Train | 0, aber Bundle und `REVIEW`-Zeile mit `reviewer self` |
+| 2 | Dispatch und Train | 8 | siehe Abschnitt 2 | wie oben | 2 |
+| 3 | Dispatch und Train | 8 bis 10 | wie Tier 2 | wie oben | 5 |
+
+**Tier 0 und 1 über `finish.py`.** Die Läufe: optional der Push des Branches, die Prüfung in `finish` (`finish.py:318`), nach einem Rebase noch einmal (`finish.py:510`), dann der Hook beim Push nach main. Ohne Rebase sehen `finish` und der Hook denselben Commit; der Stempel des Hooks gilt aber nur je Push-Klasse (`pre_push.py:220`), deshalb läuft alles erneut. Eine einzelne Doku-Datei zahlt außerdem die volle Merge-Suite: „wirkungslos“ ist ein Pfad nur, wenn das Projekt ihn im Bereich `inert` in `testing.local.json` nennt (`quiet.py:9-21`). Das Template bringt keine Voreinstellung mit.
+
+**Tier 0 und 1 über den Train.** Der Train nimmt einen Branch nur mit archiviertem Plan oder mit einem `review-pass`-Report samt `REVIEW`-Zeile, die den Kopf deckt (`train.py:575-602`). Ein Tier-0-Branch ohne Plan wird abgewiesen mit „no archived plan on the branch and no review-pass report“. Der Dispatch-Auftrag für Tier 0/1 verlangt deshalb Bundle, `attest.py … --reviewer self` und Report (`dispatch.py:1249-1251`). Die Regeln sagen dagegen, Tier 0/1 brauche kein Review (`verification-independence.md:34-38`). Ein kleines Paket zahlt so die Attest-Zeremonie von Tier 2 und vier Gate-Läufe.
+
+**Tier 3.** Die Gate-Läufe entsprechen Tier 2. Dazu kommen bis zu zwei Pushes für Buchhaltung, die je einen Lauf auslösen: die Attest-Zeile der eigens gestarteten Plan-Review-Sitzung und die `REFUTE`-Zeile im Plan. Annahme: Ob diese Zeilen getrennt gepusht werden, hängt von der Sitzung ab; im Code erzwingt es nichts. Jede Fix-Runde an Gate-Code wird neu refutet (`refute.md`, Tabelle „When“) und kostet damit eine Sitzung und einen Push mehr als bei Tier 2.
+
+Teurer als die Gates sind bei Tier 3 die fünf Prüfläufe durch ein Modell: `/speckit-analyze`, Plan-Review auf einer zweiten Modellfamilie, Refute, Review, `/speckit-converge` (`speckit.md:85-100`). Das Review mit `cross-model` ist ein Lauf auf der zweiten Familie, kein zweites Review (`model-policy.json:49`).
+
+Maßnahmen dazu, alle ohne schwächere Prüfung:
+
+| # | Maßnahme | Wirkung |
+|---|---|---|
+| 11 | Der Train nimmt Tier 0/1 ohne Plan und ohne `REVIEW`-Zeile mit, wenn der Gate-Runner das Tier aus den Pfaden bestätigt (kein Gate-Code, keine geschützten Pfade). | Bundle, Attest und zwei Gate-Läufe je kleinem Paket entfallen; die Suite wird im Train geteilt. |
+| 12 | Der Gate-Merker (Maßnahme 1) gilt auch zwischen `finish`-Prüfung und Merge-Hook. | Ein Lauf je Tier-0/1-Paket. |
+| 13 | Eine Voreinstellung für `inert` im Template, zum Beispiel `docs/**` außerhalb von `docs/process/`. | Keine Merge-Suite für reine Doku. Die vier Bedingungen in `quiet.py` bleiben. |
+| 14 | Buchhaltungszeilen (Plan-Review-Attest, `REFUTE`) fahren mit dem nächsten Push mit; ein Push, der nur `.process-work/` ändert, lässt nur die Gates laufen, die Journal und Plan lesen. | Ein bis zwei Läufe je Tier-3-Paket, einer je Review-Runde auf allen Tiers. |
+
+## 8. Beobachtungen aus dem Kenni-Gesamtaudit vom 2026-11-10
+
+Eine zweite Sitzung hat vier Beobachtungen aus dem Versuch gemeldet, eine einzelne Tier-0-Doku-Datei nach main zu bringen. Geprüft habe ich sie gegen den Template-Code, nicht in Kenni.
+
+| Beobachtung | Im Template bestätigt? |
+|---|---|
+| `finish.py` listet 167 `publish_and_prune.py`-Schritte für fremde, längst gemergte Specs | Ja. Der Tail nennt jedes Spec-Verzeichnis im Baum, dessen Aufgaben alle abgehakt sind, unabhängig vom Branch (`finish.py:302-308`). Er sollte nur Specs des eigenen Bereichs nennen. |
+| `train.py plan` nimmt einen Tier-0-Branch nicht mit | Ja, siehe oben (`train.py:602`). |
+| Eine neue Markdown-Datei unter `docs/audit/` gilt nicht als ruhiger Bereich | Ja, sobald das Projekt den Pfad nicht als `inert` führt (`quiet.py:9-21`). |
+| `core.hooksPath` der Worktrees zeigt auf einen veralteten Haupt-Checkout, dessen `pre-push` ein gelöschtes Skript aufruft; jeder Push scheitert | Nicht geprüft; das ist der Zustand eines Rechners. Offen ist, ob `install_hooks.py` den Pfad so setzt, dass alle Worktrees die Hooks eines Checkouts teilen. |
+
+Die gemeldeten Anteile (44,5 % der Commits nur auf Prozesspfaden, 10,7 % `docs: attest …`) stammen aus Kenni und sind hier nicht nachgezählt. Die Attest-Commits passen zu Lauf 6 in Abschnitt 2: Jeder davon ist ein eigener Push mit vollem Gate-Lauf.
 
 ## Anhang: Befunde außerhalb des Fokus
 
