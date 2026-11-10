@@ -818,6 +818,60 @@ Die Backend-Suite lief ein drittes Mal, jetzt mit Coverage je Test (`--cov-conte
 
 Die Frage „sind alle Tests nötig“ hat zwei Antworten. Streichen lässt sich aus den Daten nicht begründen. Auswählen schon: Bei den meisten Merges läuft die ganze Suite, obwohl nur ein kleiner Teil der Tests den geänderten Code überhaupt ausführt. Kenni wählt beim Push bereits nach Pfaden aus (`testing.local.json`) und führt für die Frontend-Stufe eine Leser-Karte; beim Merge läuft das Backend ganz. Eine Auswahl nach gemessener Abdeckung beim Merge, mit dem vollen Lauf als Rückhalt (nachts auf main und vor jedem Deploy), würde die Merge-Suite für die Mehrzahl der Züge auf Minuten bringen. Sie setzt voraus, dass die Zuordnung regelmäßig neu gemessen wird und dass jede Änderung an den zehn Kern-Dateien, an Konfiguration und an Datendateien den vollen Lauf auslöst.
 
+## 24. Teststruktur für Kenni: Klassen, Regeln, erwartete Wirkung
+
+Entscheidung des Owners vom 2026-11-10: zuerst die Tests strukturieren; ob ein Schattenbetrieb folgt, ist offen. Grundlage ist der Coverage-Lauf aus Abschnitt 23, jetzt auf der Ebene ganzer Testdateien ausgewertet, weil eine Auswahl in der Praxis Dateien startet.
+
+**Die Klassen**
+
+| Klasse | Umfang | Auslöser |
+|---|---|---|
+| Produkt-Tests mit eigener Abdeckung | 1.199 Testdateien, 85 % der Testzeit | eine Quelldatei geändert, die die Datei ausführt (Karte Quelldatei → Testdateien) |
+| Pfadgebundene Tests | 235 Testdateien, 15 % der Testzeit (744 s) | ihr Gegenstand geändert |
+| Kern-Dateien | 11 Quelldateien, die mehr als die Hälfte aller Testdateien beim Start lädt | Änderung erzwingt den vollen Lauf |
+| Voller Lauf | alles | siehe Regeln |
+
+- Pfadgebundene Tests führen außer den Kern-Dateien keinen Produktcode aus. Ihre Gegenstände sind laut Textsuche in den Testdateien vor allem `scripts/process` (110 Nennungen), `docs/process` (74), Pläne unter `.process-work/plans` (54), das `Makefile` (49), `docs/design` (39) und `frontend-react/src` (30).
+- Bei 134 der 235 Dateien nennt die Testdatei ihren Gegenstand als Pfad; 101 brauchen eine Zuordnung von Hand.
+- Die elf Kern-Dateien: `core/db.py`, `core/logging.py`, `api/v1/idempotency.py`, `api/v1/documents/_deps.py`, `services/tools/registry.py`, `services/push/push_service.py`, `services/claude_agent/late_calls.py`, `services/document_index/build_tasks.py`, `services/learning/task_registry.py`, `services/research/task_registry.py`, `services/ws/session_cleanup_tasks.py`.
+
+**Die Regeln, wie durchgespielt**
+
+1. Geänderte Quelldatei: ihre Testdateien aus der Karte.
+2. Geänderte oder neue Testdatei: läuft selbst.
+3. Pfadgebundene Testdatei: läuft, wenn einer ihrer Gegenstände geändert wurde.
+4. Voller Lauf bei: Kern-Datei, Migration, Abhängigkeiten oder Testkonfiguration (`pyproject.toml`, `uv.lock`, `alembic.ini`), Test-Helfer und Fixtures, Nicht-Python-Datei unter `backend/src`, Quelldatei, die die Karte nicht kennt.
+5. Die Auswahl gilt für die Vereinigung aller Änderungen eines Zugs.
+
+**Wirkung an den 314 Train-Merges seit Ende September**
+
+| Ergebnis | Merges | Anteil |
+|---|---:|---:|
+| Auswahl genügt | 220 | 70 % |
+| Voller Lauf erzwungen | 94 | 29 % |
+
+- Bei den 220 Merges mit Auswahl: Median 3 % der Suite-Zeit, drittes Viertel 7 %, neuntes Zehntel 25 %.
+- Gründe für den vollen Lauf: Test-Helfer oder Fixture 36, Nicht-Python-Datei 20, Kern-Datei 12, Migration 10, Abhängigkeiten 8, unbekannte Quelldatei 8.
+- Über alle Merges gemittelt läuft 36 % der Suite-Zeit.
+- Jeder Merge startet einige pfadgebundene Tests, weil jeder Merge Pläne und Journale ändert, die diese Tests nennen.
+
+**Grenzen**
+
+- Die Rechnung ist je Merge gemacht, nicht je Zug; ein Zug mit mehreren Branches wählt mehr aus.
+- Die Karte stammt vom heutigen Stand und ist auf ältere Merges angewandt.
+- Der größte Posten bei den erzwungenen vollen Läufen sind Test-Helfer. Mit einer Zuordnung Helfer → Testdateien, die sie importieren, ließe er sich verkleinern; das ist nicht gerechnet.
+- Was Coverage nicht sieht, deckt Regel 4 nur für Dateien unter `backend/src` und `backend/alembic` ab.
+
+**Womit sich anfangen lässt, ohne die Merge-Grenze zu ändern**
+
+Die Struktur ist schon dort nutzbar, wo das Template eine Auswahl heute erlaubt: beim Push eines Branches und in der inneren Schleife. Kenni wählt dort nach einer Pfadkarte von Hand (`testing.local.json`, `map` und `pins`). Drei Schritte, alle in Kenni:
+
+1. Die Karte Quelldatei → Testdateien regelmäßig aus einem vollen Lauf mit Coverage je Test erzeugen und als Datei ablegen.
+2. Die 235 pfadgebundenen Testdateien ihren Gegenständen zuordnen: 134 aus der Textsuche als Vorschlag, 101 von Hand. Das Template hat dafür `pins`.
+3. Die Auswahl beim Branch-Push auf die gemessene Karte umstellen (`select`-Befehl des Stacks), mit Regel 4 als Rückfall auf den vollen Lauf.
+
+Der Merge fährt dabei unverändert die ganze Suite. Ob und wie die Auswahl später auch dort gilt, ist eine eigene Entscheidung.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
