@@ -776,6 +776,34 @@ Anlass: Der Owner prüft, die Testlast vom Server in die Cloud zu verlegen und d
 - Bei breiter Zeitverteilung bringt es wenig, einzelne langsame Tests zu beschleunigen. Wirksam sind zwei Dinge: steuern, welche Tests bei welcher Änderung laufen, und die Suite auf mehrere Maschinen verteilen. Bei vier Maschinen wären aus 19 Minuten rechnerisch rund 5; gemessen ist das nicht.
 - Ob Tests redundant sind, zeigt erst ein Lauf mit Coverage je Test.
 
+## 23. Welche Tests eine Änderung wirklich berührt
+
+Die Backend-Suite lief ein drittes Mal, jetzt mit Coverage je Test (`--cov-context=test`) und installierter Sandbox: 23,5 Minuten auf vier Prozessen in der Cloud. Die Auswertung verbindet jede Produktdatei mit den Tests, die mindestens eine ihrer Zeilen ausführen.
+
+**Einzigartige Abdeckung**
+
+- 23.001 Tests führen Produktcode aus und decken zusammen 70.178 Zeilen ab.
+- 89 % dieser Tests decken keine Zeile ab, die nicht auch ein anderer Test abdeckt.
+- Das ist kein Maß für Überflüssigkeit. Parametrisierte Fälle teilen sich ihre Zeilen von selbst, und zwei Tests können dieselbe Zeile mit verschiedenen Erwartungen prüfen. Für eine Streichliste taugt die Zahl nicht.
+- 964 Tests führen gar keinen Produktcode aus (108 s); sie prüfen Skripte, Texte oder Konfiguration.
+
+**Betroffene Tests je Änderung**
+
+- Eine Produktdatei wird im Median von 0,5 % der Tests berührt, 454 von 519 Dateien von weniger als 5 %. Zehn Dateien berührt mehr als die Hälfte aller Tests, weil sie beim Start jedes Tests geladen werden (`core/db.py`, Registries).
+- Durchgespielt an den 314 Train-Merges seit Ende September: 72 änderten weder Backend-Code noch Backend-Tests. Bei den übrigen 242 machen die Tests, die eine der geänderten Dateien ausführen, im Median 2 % der Suite-Zeit aus, im Mittel 17 %.
+- 73 % dieser Merges brauchten weniger als ein Viertel der Suite-Zeit, 88 % weniger als die Hälfte, 4 % fast alles.
+
+**Grenzen der Rechnung**
+
+- Die Zuordnung stammt vom heutigen Stand. 113 geänderte Dateien gibt es heute nicht mehr oder gab es damals noch nicht; für sie fehlt die Zuordnung, das unterschätzt den Anteil.
+- 72 Merges änderten auch Backend-Konfiguration oder Lockfiles und bräuchten den vollen Lauf.
+- Coverage sieht nur ausgeführte Python-Zeilen. Abhängigkeiten über Datendateien, Prompts, Vorlagen oder das Datenbankschema erfasst sie nicht.
+- Eine Zeile, die beim Import läuft, zählt als berührt, auch wenn der Test sie nicht prüft.
+
+**Folgerung**
+
+Die Frage „sind alle Tests nötig“ hat zwei Antworten. Streichen lässt sich aus den Daten nicht begründen. Auswählen schon: Bei den meisten Merges läuft die ganze Suite, obwohl nur ein kleiner Teil der Tests den geänderten Code überhaupt ausführt. Kenni wählt beim Push bereits nach Pfaden aus (`testing.local.json`) und führt für die Frontend-Stufe eine Leser-Karte; beim Merge läuft das Backend ganz. Eine Auswahl nach gemessener Abdeckung beim Merge, mit dem vollen Lauf als Rückhalt (nachts auf main und vor jedem Deploy), würde die Merge-Suite für die Mehrzahl der Züge auf Minuten bringen. Sie setzt voraus, dass die Zuordnung regelmäßig neu gemessen wird und dass jede Änderung an den zehn Kern-Dateien, an Konfiguration und an Datendateien den vollen Lauf auslöst.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
