@@ -520,7 +520,7 @@ Gezählt aus den `REVIEW`-Zeilen (250 Issues mit Code-Reviews) und den `FINDING`
 
 ## 17. Vorschlag: drei Maßnahmen gegen die entgleisenden Arbeiten
 
-Der Owner ist mit den Maßnahmen 2 und 3 einverstanden; zu 1 war die Grenze offen. Grundlage sind die Zählungen aus den Abschnitten 14 bis 16 und die folgende Verfeinerung.
+Der Owner ist mit allen drei Maßnahmen einverstanden, für Maßnahme 1 mit den Startwerten zehn Aufgaben sowie 300 und 500 Produktzeilen (Entscheidung vom 2026-11-10). Die Gegenprüfung durch die Optimierungs-Sitzung steht aus; umgesetzt ist nichts. Grundlage sind die Zählungen aus den Abschnitten 14 bis 16 und die folgende Verfeinerung.
 
 **Wo die Grenze liegt**
 
