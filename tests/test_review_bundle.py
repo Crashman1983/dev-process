@@ -2212,6 +2212,21 @@ def test_a_plan_review_bundle_runs_no_preflight(render, tmp_path):
     assert "--plan-review" in _run(out, "--help").stdout
 
 
+def test_the_bundle_header_names_the_size_attest_records(render, tmp_path):
+    # v2.94 E3: the number of the round's SIZE line, tests and bookkeeping left out
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests/test_widget.py").write_text("def test_widget():\n    assert True\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "test: widget")
+    r = _run(out, "--base", "main", "--skip-preflight")
+    assert r.returncode == 0, r.stderr
+    assert "Review size: 2 changed lines in 1 file(s)" in r.stdout, r.stdout[:2000]
+    r = _run(out, "--plan-review", "--base", "main")
+    assert r.returncode == 0 and "Review size:" not in r.stdout, r.stderr
+
+
 def test_an_unanswered_merge_check_is_named_with_its_base_never_clean(render, tmp_path):
     import os
     import shutil

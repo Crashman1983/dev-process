@@ -2000,6 +2000,69 @@ def standing_block_findings(root: Path, tip: str = "HEAD", *, remote_sha: str | 
 BOOKKEEPING = ".process-work/"
 
 
+# --- the size of a review (v2.94 E3) ------------------------------------------------
+# One owner for what a size leaves out: the bundle's SIZE WARNING leaves out bookkeeping
+# and lock files (SIZE_IGNORED); a fix pass and the journal's SIZE line leave out tests
+# and changelogs too (`_fix_pass_counted`). Not the telemetry's `product_lines`, which
+# counts a merge event's tests (process_kpis `_event`): a different measure.
+SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|poetry\.lock|yarn\.lock|"
+                          r"pnpm-lock\.yaml|Cargo\.lock|go\.sum)$")
+_CHANGELOG_FRAGMENTS = re.compile(r"(^|/)changelog\.d/", re.IGNORECASE)
+_TEST_DIRS = frozenset({"test", "tests", "spec", "specs", "__tests__"})
+_TEST_NAME = re.compile(r"^(?:test_.+\..+|.+_test\..+|.+\.spec\..+|.+\.(?:vi)?test\..+|conftest\.py)$")
+
+
+def _is_test_path(rel: str) -> bool:
+    """A test file by path: a test directory segment or a test file name."""
+    *dirs, name = rel.split("/")
+    return any(d in _TEST_DIRS for d in dirs) or bool(_TEST_NAME.match(name))
+
+
+def _fix_pass_counted(rel: str) -> bool:
+    """A line a fix pass writes into the product: not a test, not what the SIZE WARNING
+    leaves out (bookkeeping, lock files), no changelog or changelog fragment."""
+    return not (_is_test_path(rel) or rel.startswith(BOOKKEEPING)
+                or SIZE_IGNORED.search(rel) or _CHANGELOG_FRAGMENTS.search(rel)
+                or rel.rsplit("/", 1)[-1].upper().startswith("CHANGELOG"))
+
+
+def _numstat(out: bytes) -> list[tuple[str, int]]:
+    """(path, changed lines) of `git diff --numstat -z` output; a binary counts 0.
+    -z: a quoted non-ASCII name escaped a path filter. Each entry is
+    "added\\tdeleted\\tpath"; a rename leaves the path empty and names the old
+    and the new path in the next two fields."""
+    entries = []
+    fields = iter(out.decode(errors="surrogateescape").split("\0"))
+    for field in fields:
+        parts = field.lstrip("\n").split("\t", 2)
+        if len(parts) < 3:
+            continue
+        path = parts[2]
+        if not path:
+            next(fields, None)
+            path = next(fields, "")
+        changed = int(parts[0]) + int(parts[1]) if parts[0].isdigit() and parts[1].isdigit() else 0
+        entries.append((path, changed))
+    return entries
+
+
+class ReviewSize(NamedTuple):
+    lines: int  # changed lines (added + deleted) outside `_fix_pass_counted`'s exclusions
+    files: int  # the files they lie in, a binary or a pure move included
+
+
+def review_lines(root: Path, base: str, head: str) -> ReviewSize | None:
+    """The size of the reviewed change `base...head` (the REVIEW line's range: the whole
+    branch at that round, not the round's delta) — `git diff --numstat -M`, without
+    tests, bookkeeping, lock files and changelogs (`_fix_pass_counted`). A rename counts
+    its edits, not twice its size. None when git cannot tell: no number is guessed."""
+    out = _git_bytes(root, "diff", "--numstat", "-z", "-M", f"{base}...{head}")
+    if out is None:
+        return None
+    kept = [changed for path, changed in _numstat(out) if _fix_pass_counted(path)]
+    return ReviewSize(sum(kept), len(kept))
+
+
 REMOTE_INTEGRATION_REFS = tuple(ref for ref in INTEGRATION_REFS if "/" in ref)
 
 
