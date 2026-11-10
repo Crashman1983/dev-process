@@ -710,6 +710,69 @@ def _blockers_by_work(root: Path, key: str = "origin",
     return out
 
 
+def _review_line_models(root: Path) -> dict[tuple[bool, object, int], list[tuple[str | None, str]]]:
+    """(plan review, work key, round) → (reviewed head or None, `model=`) of every journal REVIEW
+    line; a plan review's `<work>-plan` under its work's key (`check_review.work_key`)."""
+    import check_review as _review  # noqa: PLC0415
+    out: dict[tuple[bool, object, int], list[tuple[str | None, str]]] = {}
+    jdir = root / _review.JOURNAL_DIR
+    if not jdir.is_dir():
+        return out
+    for f in sorted(jdir.glob("**/*.md")):
+        recs, _e = _review.parse_review_lines(f.read_text(encoding="utf-8", errors="replace"))
+        for _ln, r in recs:
+            work = r["work"]
+            plan = work.endswith("-plan")
+            key = _review.work_key(work[:-len("-plan")] if plan else work)
+            out.setdefault((plan, key, int(r["round"])), []).append((r.get("head"), r["model"]))
+    return out
+
+
+def _family_of(model: str, ranks: dict, families) -> str | None:
+    """The family of a REVIEW line's `model=` by the model policy (`model_class` over `ranks` and
+    `families`): its class prefix's first word (`gpt-` → `gpt`); None for `model=same` and a
+    model the policy cannot place. The `reviewer=` value is a process id, never a family."""
+    from attest_evidence import model_class  # noqa: PLC0415 — the one model classifier
+    cls = None if model == "same" else model_class(model, ranks, families)
+    return None if cls is None else cls[0].split("-", 1)[0] or cls[0]
+
+
+def _attributed_findings(root: Path, phase: str | None = None
+                         ) -> list[tuple[str, dict, int | None, str | None]] | str:
+    """`_report_findings` with a fourth field (v2.94 E4): for a finding without `by=`, the family
+    (`_family_of`) of the one journal REVIEW line of its report's work and round — the work
+    through its ids (`check_review.expand_work`: a plan's slug and its issue are one work), a
+    plan review (`phase: plan`) against `<work>-plan` lines only, a report that names its
+    reviewed head against lines at that head or without one. None without such a line, with
+    several, or for a finding that carries `by=` — the report's own wins. Nothing is written."""
+    import check_review as _review  # noqa: PLC0415
+    from attest_evidence import review_policy  # noqa: PLC0415 — `ranks` and `families`
+    out: list[tuple[str, dict, int | None, str | None]] = []
+    lines: dict | None = None
+    rules: dict = {}
+    keys_of: dict[str, set] = {}
+    for ph in (phase,) if phase else ("plan", "code"):
+        reports = _review_reports(root, ph)
+        if isinstance(reports, str):
+            return reports
+        for r in reports:
+            fam = None
+            if r.round is not None and any(not f.get("by") for f in r.findings):
+                if lines is None:
+                    lines, (rules, _problem) = _review_line_models(root), review_policy(root, "HEAD")
+                keys: set = set()
+                for w in r.works:
+                    if w not in keys_of:
+                        keys_of[w] = {_review.work_key(i) for i in _review.expand_work(root, {w})[0]}
+                    keys |= keys_of[w]
+                found = [model for k in keys for head, model in lines.get((ph == "plan", k, r.round), ())
+                         if not r.head or head is None or head == r.head]
+                if len(found) == 1:
+                    fam = _family_of(found[0], rules.get("ranks") or {}, rules.get("families") or [])
+            out += [(w, f, r.round, None if f.get("by") else fam) for f in r.findings for w in r.works]
+    return out
+
+
 # --- baseline: the numbers a verification change must move (#277) --------------
 def _release(text: str) -> str:
     """`vX.Y.Z`: a release tag the version split can compare against."""
@@ -1702,7 +1765,9 @@ def compliance_table(root: Path) -> dict:
             after_rebuild["rounds"] += max(0, r["max_round"] - min(rebuilt))
     kind = bucket()
     coverage: dict[str, dict[str, list[int]]] = {}
-    found = _report_findings(root)  # coverage: every report, plan reviews included
+    # coverage: every report, plan reviews included; a finding without by= under its round's
+    # REVIEW line family, apart from the report's own by= (v2.94 E4)
+    found = _attributed_findings(root)
     code = _report_findings(root, "code")  # the duty: a plan review has no code round's head
     if not isinstance(code, str):
         for work, f, rnd in code:
@@ -1717,9 +1782,10 @@ def compliance_table(root: Path) -> dict:
                     kind["owed"] += 1
                     kind["written"] += bool(f.get("kind"))
     if not isinstance(found, str):
-        for _work, f, _rnd in found:
+        for _work, f, _rnd, line_family in found:
             if f["sev"] in ("blocker", "major"):
-                who = "codex" if f.get("by") == "codex" else "others"
+                who = ("codex" if f.get("by") == "codex" else
+                       f"{line_family} (review line)" if line_family else "others")
                 for field in ("origin", "at", "class") + (("kind",) if f["sev"] == "major" else ()):
                     cell = coverage.setdefault(field, {}).setdefault(who, [0, 0])
                     cell[0] += f.get(field) not in (None, "", "-")  # `at=-` names no place
@@ -1801,6 +1867,14 @@ def rounds(root: Path | None = None) -> int:
             for k, n in cell.items():
                 by_reviewer[k] = by_reviewer.get(k, 0) + n
         print(f"  blockers by reviewer: {_kind_text(by_reviewer)}")
+        # v2.94 E4: the "-" above by the family of their round's one REVIEW line — computed, kept
+        # apart from the report's own by=, never written; "-" here: no single line, or no family
+        by_line: dict[str, int] = {}
+        attributed = _attributed_findings(root)
+        for w, f, _rnd, line_family in [] if isinstance(attributed, str) else attributed:
+            if f["sev"] == "blocker" and not f.get("by") and w in listed:
+                by_line[line_family or "-"] = by_line.get(line_family or "-", 0) + 1
+        print(f"  blockers without by=, by (review line): {_kind_text(by_line)}")
     # #311: blocking findings of round >= 2 on lines unchanged since round 1 (`at=`)
     old = _blocks_since_round1(root)
     print(f"  old-code blocks (rounds >= 2): {_old_line(old)}")
