@@ -303,7 +303,7 @@ def test_the_memo_names_the_scope_that_ran(process, repo, monkeypatch, tmp_path)
     train = mod("train")
     remembered = []
     monkeypatch.setattr(train, "_remember_green_suite", lambda _root, key: remembered.append(key))
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
     monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw:
