@@ -332,6 +332,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             blockers.append("gate suite red: " + " | ".join(last))
 
     check.last_archive = list(to_archive)  # apply() reuses the same verdict
+    check.last_spec_steps = list(spec_steps)  # … and prints these after the merge
     if blockers:
         return blockers, []
 
@@ -587,6 +588,8 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                  "suite here; without a remote a claim has no pre-push to check it)"
                  if local_only else "run the FULL test suite now, then re-run with "
                  "`--apply --tests-passed` (or pass `--tests CMD` to run it here)"))
+        for step in getattr(check, "last_spec_steps", []):
+            print(f"finish: after the merge $ {step}")
         return 0
     # 4. A worktree must not check out main while another checkout owns it.
     route = {MERGE_ROUTE_ENV: MERGE_ROUTE}
@@ -632,13 +635,24 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
             return 1
     else:
         print(f"finish: remote branch {branch} absent or unreadable — no remote delete")
-    print(f"finish: merged {branch} into {default} and pushed. {_BY_HAND}")
+    print(f"finish: merged {branch} into {default} and pushed. {_by_hand()}")
     return 0
 
 
 _BY_HAND = ("Remaining by hand: remove the worktree if one carried the branch "
             "(`git worktree remove <path> && git worktree prune`), publish/prune finished "
             "spec dirs, close the tracking issue with the merge commit ref (DoD)")
+
+
+def _by_hand() -> str:
+    """The by-hand remainder, with the `publish_and_prune.py` command of each finished
+    spec dir of this branch (the tail's own lines) in place of the general words."""
+    steps = list(getattr(check, "last_spec_steps", []))
+    if not steps:
+        return _BY_HAND
+    return (_BY_HAND.replace("publish/prune finished spec dirs", "publish/prune each finished "
+                             "spec dir of this branch (below)")
+            + "".join(f"\nfinish: then $ {step}" for step in steps))
 
 
 def _merge_locally(root: Path, branch: str, default: str, other: Path | None) -> int:
@@ -674,7 +688,7 @@ def _merge_locally(root: Path, branch: str, default: str, other: Path | None) ->
         kept = "" if _sh(root, ["git", "branch", "-d", branch]) else (
             f" `git branch -d {branch}` failed — it is checked out in another worktree; "
             f"delete it there.")
-    print(f"finish: merged {branch} into {default} locally (the repository has no remote).{kept} {_BY_HAND}")
+    print(f"finish: merged {branch} into {default} locally (the repository has no remote).{kept} {_by_hand()}")
     return 0
 
 

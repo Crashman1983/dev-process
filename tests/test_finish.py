@@ -222,6 +222,40 @@ def test_without_a_fork_point_every_finished_spec_is_named_with_a_caution(render
     assert line.endswith("(range unknown — run only your own)"), line
 
 
+def test_the_finish_command_starts_with_apply(render, tmp_path):
+    """v2.94 B2: the separate preview run paid a full gate run of its own; `--apply` runs the
+    same check, prints the same blockers and applies nothing when one blocks."""
+    out = render(tmp_path, {"project_name": "demo"})
+    doc = (out / ".claude/commands/finish.md").read_text()
+    runs = [ln.strip() for ln in doc.splitlines() if ln.strip().startswith("uv run scripts/process/finish.py")]
+    assert runs and all(" --apply" in ln for ln in runs), runs
+    assert runs[0].startswith("uv run scripts/process/finish.py --apply --tests"), runs  # no train: straight on
+    flat = " ".join(doc.split())
+    assert "without `--apply` stays a read-only preview" in flat
+    assert "stop after the archive step (`finish.py --apply` without `--tests`)" in flat  # the train route
+
+
+def test_apply_prints_the_publish_line_of_each_own_finished_spec(render, tmp_path):
+    """v2.94 B2: `--apply` names the publish_and_prune command per finished spec dir of the
+    branch itself, not only the general by-hand text."""
+    out = _speckit_main(render, tmp_path)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    _spec_dir(out, "009-widget", tier=1, ticked=True, issue="#9")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget")
+    r = _run_args(out, "--apply")  # the train route stops before the merge and names it too
+    assert r.returncode == 0 and "stopped before the merge" in r.stdout, r.stdout + r.stderr
+    assert ("finish: after the merge $ python3 scripts/process/publish_and_prune.py "
+            "specs/009-widget") in r.stdout, r.stdout
+    r = _run_args(out, "--apply", "--tests", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "merged feature into main locally" in r.stdout, r.stdout
+    after = r.stdout.split("merged feature into main locally", 1)[1]
+    assert "python3 scripts/process/publish_and_prune.py specs/009-widget" in after, r.stdout
+
+
 def test_a_foreign_finished_spec_without_review_still_blocks(render, tmp_path):
     """Guard (v2.94, M4): `speckit_unreviewed` stays unfiltered — the only hard stop for a
     ticked Tier 2 spec without review that already sits on main."""
