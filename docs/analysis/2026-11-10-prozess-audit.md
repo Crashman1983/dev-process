@@ -227,6 +227,23 @@ Zwei Dinge fallen auf:
 3. Tier-3-Anteil und blockierte Runden: erst die beiden Zählungen aus 9.5, dann die Maßnahmen 3, 9 und 10.
 4. Tier 0/1 im Zug und die `inert`-Voreinstellung (Maßnahmen 11 und 13).
 
+## 10. Abstimmung mit der Sitzung „Dev-Prozess Optimierung“
+
+Vorschlag des Owners: Die Optimierungs-Sitzung plant und setzt um, die Audit-Sitzung liest Plan und Ergebnis gegen diesen Bericht. Vor einer Umsetzung bitte bewerten; ob und was umgesetzt wird, entscheidet der Owner.
+
+Pakete:
+- **A. Roter Zugpfad:** Maßnahmen 15 bis 18.
+- **B. Gate-Läufe:** Maßnahmen 1, 2, 4, 12 und 14.
+- **C. Texte und Tail:** Maßnahme 3 ohne den Lesezugriff, dazu der `finish`-Tail aus Abschnitt 8.
+- **D. Tier 0/1:** Maßnahmen 11 und 13.
+
+Fragen:
+1. Welcher Befund ist falsch oder schon erledigt? Die Audit-Sitzung hat gelesen und nichts ausgeführt.
+2. Zu A: Welcher Vorfall spricht dagegen, Bisect-Proben auf die roten Tests zu beschränken (Reihenfolgeabhängigkeit, Fehler nur in der ganzen Suite, Stages ohne pytest)? Reicht „schlimmstenfalls wird der Falsche abgesetzt, nie falsch gemergt“ als Sicherheitsargument?
+3. Zu B: Welche Gates lesen Zustand außerhalb des Baums und dürfen nie aus dem Merker kommen?
+4. Schnitt: ein Release je Paket, alles reine Updates? Was davon ist Migration?
+5. Aufteilung: Plan-Review und Refute laufen wie in `MAINTAINING.md` in frischen Sitzungen. Die Audit-Sitzung prüft, ob der Plan die Befunde trifft und keine Prüfung schwächer wird. Passt das?
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
