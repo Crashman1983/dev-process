@@ -23,6 +23,7 @@ comparison is meaningless — criterion granularity and domain dominate the
 difference. See "honest ceiling" in the module doc.
 
   process_kpis.py cost          [--transcripts DIR] [--issue N]
+                                                # with the journal's COST lines per work and phase
   process_kpis.py cfr           [--branch B]
   process_kpis.py clusters      [--branch B] [--window D] [--min N]
                                                 # fix clusters (rule 6 across sessions)
@@ -171,7 +172,66 @@ def cost(transcripts: str | None) -> int:
     else:
         print("  tokens: not read (pass --transcripts DIR with harness "
               "transcript JSONL; harness-specific)")
+    _print_recorded_costs(ROOT, None)
     return 0
+
+
+_DATE_IN_NAME = re.compile(r"\d{4}-\d{2}(?:-\d{2})?")
+
+
+def recorded_costs(root: Path) -> dict[int, list[dict]]:
+    """{issue: [{"phase", "wall_seconds", "tokens" (None: not measured), "reason"}]} from the
+    journal's COST lines (`check_review.COST_LINE`; `finish --apply` writes one set per work, in
+    the commit right before its archive commit — v2.94 E2). With several sets for one work (a
+    second branch of the issue) the last counts: journal files by the date in their name, then
+    lines in file order. A set is a run of one work's COST lines naming no phase twice — two
+    shards folded into one archive month stay two sets."""
+    import check_review as _review  # noqa: PLC0415 — the one COST grammar
+    jdir = root / _review.JOURNAL_DIR
+    if not jdir.is_dir():
+        return {}
+
+    def order(p: Path) -> tuple[str, str]:
+        m = _DATE_IN_NAME.search(p.name)
+        return (m.group(0) if m else "", p.relative_to(jdir).as_posix())
+    got: dict[int, list[dict]] = {}
+    for f in sorted(jdir.glob("**/*.md"), key=order):
+        try:
+            lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        run: tuple[int, list[dict]] | None = None  # the set the previous line belongs to
+        for line in lines:
+            m = _review.COST_LINE.match(line.strip())
+            if m is None:
+                run = None
+                continue
+            work, phase = int(m["work"]), m["phase"]
+            row = {"phase": phase, "wall_seconds": int(m["wall"]),
+                   "tokens": None if m["tokens"] == "-" else int(m["tokens"]), "reason": m["reason"]}
+            if run is None or run[0] != work or any(r["phase"] == phase for r in run[1]):
+                run = (work, [])
+                got[work] = run[1]  # a later set replaces an earlier one
+            run[1].append(row)
+    return got
+
+
+def _print_recorded_costs(root: Path, issue: int | None) -> None:
+    """The recorded COST lines — per work and phase, the last set — beside the live count."""
+    costs = recorded_costs(root)
+    if issue is not None:
+        costs = {issue: costs[issue]} if issue in costs else {}
+    print("  recorded per phase (journal COST lines, `finish --apply`; wall time includes waits, "
+          "the last set per work):")
+    if not costs:
+        print(f"    no COST lines{f' for #{issue}' if issue is not None else ''} — none is written "
+              "without a dispatch record or an issue in the branch name")
+        return
+    for work in sorted(costs):
+        for c in costs[work]:
+            tokens = "-" if c["tokens"] is None else c["tokens"]
+            print(f"    #{work} {c['phase']} wall {c['wall_seconds']} s, tokens {tokens}"
+                  + (f" (not-measured: {c['reason']})" if c["reason"] else ""))
 
 
 # --- cfr: DORA change failure rate (proxy) ------------------------------------
@@ -4043,6 +4103,7 @@ def main() -> int:
     if args.cmd == "cost" and args.issue is not None:
         import dispatch  # one reader of dispatch records, policy and transcripts
         print(f"[cost] issue #{args.issue} ~approx — {dispatch.tokens_line(ROOT, args.issue)}")
+        _print_recorded_costs(ROOT, args.issue)
         return 0
     if args.cmd == "cost":
         return cost(args.transcripts)

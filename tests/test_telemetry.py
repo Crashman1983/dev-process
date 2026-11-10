@@ -98,6 +98,44 @@ def test_cost_per_issue_reads_the_policy_transcripts_or_says_not_measured(render
     assert "tokens: 5 output over 1 sessions" in r.stdout, r.stdout + r.stderr
 
 
+def test_cost_reads_the_recorded_cost_lines_and_the_last_set_counts(render, tmp_path):
+    """v2.94 E2: `cost` reads the COST lines `finish --apply` wrote next to its live output; with
+    several sets for one work — a second branch of the issue, two shards folded into one archive
+    month — the last counts (by the date in the file name, then by line)."""
+    out = _render(render, tmp_path)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    for shard in ("archive", "issue-7", "issue-8"):
+        (out / JOURNAL / shard).mkdir(parents=True, exist_ok=True)
+    _journal(out, "# 2026-09\n\n## .process-work/journal/issue-7/2026-09-01.md\n\n"
+                  "COST work=7 phase=plan wall_seconds=10 tokens=1\n"
+                  "COST work=7 phase=execute wall_seconds=20 tokens=2\n"
+                  "COST work=7 phase=plan wall_seconds=11 tokens=3\n"
+                  "COST work=7 phase=execute wall_seconds=21 tokens=4\n", name="archive/2026-09.md")
+    _journal(out, "# 2026-10-02\n\nREVIEW notes\n\n"
+                  "COST work=7 phase=plan wall_seconds=100 tokens=- not-measured: not-configured\n"
+                  "COST work=7 phase=execute wall_seconds=200 tokens=30 not-measured: partial: remote\n"
+                  "COST work=8 phase=all wall_seconds=5 tokens=9\n", name="issue-7/2026-10-02.md")
+    _journal(out, "COST work=8 phase=all wall_seconds=6 tokens=12\n", name="issue-8/2026-10-03.md")
+    got = _flow_module(out).recorded_costs(out)
+    assert got == {
+        7: [{"phase": "plan", "wall_seconds": 100, "tokens": None, "reason": "not-configured"},
+            {"phase": "execute", "wall_seconds": 200, "tokens": 30, "reason": "partial: remote"}],
+        8: [{"phase": "all", "wall_seconds": 6, "tokens": 12, "reason": None}]}, got
+    r = _kpis(out, "cost")
+    assert r.returncode == 0, r.stderr
+    assert "#7 execute wall 200 s, tokens 30 (not-measured: partial: remote)" in r.stdout, r.stdout
+    assert "#8 all wall 6 s, tokens 12" in r.stdout and "wall 5 s" not in r.stdout
+    r = _kpis(out, "cost", "--issue", "7")
+    assert "tokens: not measured (not-configured)" in r.stdout  # the live line stays
+    assert "#7 plan wall 100 s, tokens - (not-measured: not-configured)" in r.stdout and "#8" not in r.stdout
+    r = _kpis(out, "cost", "--issue", "9")
+    assert "no COST lines for #9" in r.stdout, r.stdout
+    # within one file, a phase named twice starts the next set (two folded shards)
+    (out / JOURNAL / "issue-7/2026-10-02.md").unlink()
+    assert [(c["phase"], c["wall_seconds"]) for c in _flow_module(out).recorded_costs(out)[7]] == [
+        ("plan", 11), ("execute", 21)]
+
+
 def test_models_reports_each_models_token_share_subagents_included(render, tmp_path):
     """#125 AC-3: did the mechanical steps move to the smaller model? Read
     from the dispatched sessions' transcripts, a subagent's messages count."""
