@@ -98,6 +98,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     issue_refs_in_range,
     merge_base,
     no_clearing_review,
+    own_spec,
     paths_in_flight,
     review_passes,
     spec_plan_findings,
@@ -305,8 +306,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             blockers.append(no_clearing_review(f"{SPECS_DIR}/{name}", tier, ids)
                             + " — its tasks are all ticked; run /review before /finish")
         for d in sorted(p for p in sdir.iterdir() if p.is_dir()):
-            if not _own_spec(d.name, in_flight):
-                continue  # somebody else's finished spec: not this branch's tail
+            if not own_spec(f"{SPECS_DIR}/{d.name}", in_flight):
+                continue  # somebody else's finished spec: not this branch's tail (the gate's rule)
             tasks = d / "tasks.md"
             if tasks.is_file():
                 ttext = tasks.read_text(encoding="utf-8", errors="replace")
@@ -387,14 +388,6 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         "working set")
     tail.append("close the tracking issue with the merge commit ref (DoD)")
     return [], tail
-
-
-def _own_spec(name: str, in_flight: set[str] | None) -> bool:
-    """A spec dir is this branch's when the branch's range touches it — the rule of
-    `check_review.spec_plan_findings` (`p == rel or p.startswith(spec_dir)`, the plan
-    lies in the dir). An unknown range (None) hides nothing: every spec dir counts."""
-    spec_dir = f"{SPECS_DIR}/{name}/"
-    return in_flight is None or any(p.startswith(spec_dir) for p in in_flight)
 
 
 def _publish_steps(root: Path, names: list[str], *, range_known: bool) -> list[str]:

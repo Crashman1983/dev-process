@@ -3038,6 +3038,15 @@ def waiver_owner_findings(rel: str, text: str, tier: int, rules: dict) -> list[s
             for why in [o.why for o in owed] + undecided]
 
 
+def own_spec(spec_dir: str, in_flight: set[str] | None) -> bool:
+    """Is the spec dir `spec_dir` (repo-relative, `specs/<name>`) this push's: its range
+    carries a path inside it — the plan lies in the dir. An unknown range (None) hides
+    nothing: every spec dir counts (fail closed). One owner for `spec_plan_findings` and
+    finish.py's tail."""
+    prefix = spec_dir.rstrip("/") + "/"
+    return in_flight is None or any(p.startswith(prefix) for p in in_flight)
+
+
 def spec_plan_findings(root: Path, passes: list[dict], in_flight: set[str] | None,
                        ref: str | None = None) -> list[str]:
     """The presence and own-family duty of a Spec Kit plan this push carries —
@@ -3056,8 +3065,7 @@ def spec_plan_findings(root: Path, passes: list[dict], in_flight: set[str] | Non
         tier = plan_tier(text)
         if tier is None or tier < 2:
             continue
-        spec_dir = rel.rsplit("/", 1)[0] + "/"
-        if in_flight is not None and not any(p == rel or p.startswith(spec_dir) for p in in_flight):
+        if not own_spec(rel.rsplit("/", 1)[0], in_flight):
             continue  # somebody else's spec, untouched by this push
         if review_waived(text):
             out += waiver_owner_findings(rel, text, tier, rules)  # the owner's word, as for any plan
