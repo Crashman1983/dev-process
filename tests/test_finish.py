@@ -206,6 +206,28 @@ def test_a_foreign_finished_spec_is_not_in_this_branchs_tail(render, tmp_path):
     assert "range unknown" not in r.stdout
 
 
+def test_the_own_spec_rule_has_one_owner(render, tmp_path):
+    """The tail and the gate's `spec_plan_findings` ask one helper whether a spec dir is
+    this branch's (`check_review.own_spec`); finish keeps no copy of the rule."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"speckit": True}})
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        sys.modules.pop("check_review", None)
+        import check_review
+        assert check_review.own_spec("specs/009-w", {"specs/009-w/plan.md"})
+        assert check_review.own_spec("specs/009-w/", {"specs/009-w/tasks.md"})
+        assert not check_review.own_spec("specs/009-w", {"specs/009-widget/plan.md", "src/a.py"})
+        assert check_review.own_spec("specs/009-w", None)  # an unknown range hides nothing
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("check_review", None)
+    finish = (out / "scripts/process/finish.py").read_text(encoding="utf-8")
+    assert "def _own_spec" not in finish and "own_spec(" in finish
+    review = (out / "scripts/process/check_review.py").read_text(encoding="utf-8")
+    body = review.split("def spec_plan_findings", 1)[1].split("\ndef ", 1)[0]
+    assert "own_spec(" in body and "startswith(spec_dir)" not in body
+
+
 def test_without_a_fork_point_every_finished_spec_is_named_with_a_caution(render, tmp_path):
     """v2.94 B1: no fork point, no range — the own specs are never hidden, so every
     finished spec stays in the tail, marked."""
