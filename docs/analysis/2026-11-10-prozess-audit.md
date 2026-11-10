@@ -12,6 +12,8 @@ Ein Tier-2-Paket, das ohne Beanstandung durchgeht, läuft achtmal lokal durch de
 
 Rund die Hälfte der lokalen Gate-Läufe kann entfallen, ohne dass eine Prüfung wegfällt: Derselbe Runner hat denselben Stand bereits grün gesehen.
 
+Die Messung in Kenni (Abschnitt 9) zeigt einen größeren Posten: Rote Züge verbrauchen 37 % der Zug-Minuten, weil jede Bisect-Probe die ganze Suite fährt. Das steht in der Reihenfolge jetzt vorn.
+
 Tier 0 und 1 zahlen zwei bis vier Läufe und, ohne Projektkonfiguration, die volle Merge-Suite auch für eine einzelne Doku-Datei. Tier 3 liegt bei den Gates kaum über Tier 2; dort kosten die fünf Prüfläufe durch ein Modell (Abschnitt 7).
 
 ## 2. Gate-Läufe eines Tier-2-Pakets
@@ -142,6 +144,88 @@ Eine zweite Sitzung hat vier Beobachtungen aus dem Versuch gemeldet, eine einzel
 | `core.hooksPath` der Worktrees zeigt auf einen veralteten Haupt-Checkout, dessen `pre-push` ein gelöschtes Skript aufruft; jeder Push scheitert | Nicht geprüft; das ist der Zustand eines Rechners. Offen ist, ob `install_hooks.py` den Pfad so setzt, dass alle Worktrees die Hooks eines Checkouts teilen. |
 
 Die gemeldeten Anteile (44,5 % der Commits nur auf Prozesspfaden, 10,7 % `docs: attest …`) stammen aus Kenni und sind hier nicht nachgezählt. Die Attest-Commits passen zu Lauf 6 in Abschnitt 2: Jeder davon ist ein eigener Push mit vollem Gate-Lauf.
+
+## 9. Messung in Kenni und der rote Zugpfad
+
+Die Zahlen dieses Abschnitts hat die Kenni-Sitzung am 2026-11-10 gemessen (`train-phases --runs 50`, `nodes --json` über 30 Tage, Runden aus den `REVIEW`-Zeilen der Journale gezählt). Ich habe sie übernommen, nicht nachgezählt. Den Code des roten Pfads habe ich im Template gelesen.
+
+### 9.1 Wo die Minuten liegen
+
+| Größe | Wert |
+|---|---|
+| Ein grüner Zug, Median | Plan 337 s, Gates 115 s, Suite 1.837 s, Push 152 s, Deploy 45 s: rund 40 Minuten |
+| Rote Züge | 18 von 50 (36 %), in der Gesamthistorie 55 von 167 (33 %) |
+| Anteil roter Läufe an den Zug-Minuten | 1.196 von 3.190 (37 %), davon 971 Minuten Retry und Bisect |
+| Längster Bisect, längster Retry | 107 Minuten, 50 Minuten |
+| Wartezeit des ältesten Kandidaten | 7,9 Stunden bei einer Grenze von 4,0 |
+| Gate-Laufzeit, 30 Tage, 31 Gates | 82.496 s, rund 23 Stunden |
+
+Damit verschiebt sich die Reihenfolge. Die mehrfachen Gate-Läufe aus Abschnitt 2 kosten ein Tier-2-Paket rund 15 Minuten (acht Läufe zu etwa 115 s; Annahme: Ein Lauf im Push dauert so lange wie im Zug). Ein einziger roter Zug kostet alle Passagiere ein bis drei Stunden.
+
+### 9.2 Warum ein roter Zug so lange dauert
+
+Der Ablauf nach einem roten Lauf (`train.py:2172-2330`):
+
+1. Ein Wiederholungslauf auf demselben Baum: nur das Fehlgeschlagene, wenn das Projekt `--retry` gesetzt hat, sonst die ganze Suite (`retry_plan`, `train.py:1690-1702`).
+2. Ist er wieder rot: Prüfung der Basis, dann Bisect über Präfixe der Passagiere.
+3. Jede Bisect-Probe baut den Baum neu und fährt die Gates und die **ganze** Suite (`attempt(aboard[:mid], kind="probe")`, `train.py:2289`). Das sind rund 33 Minuten je Probe und bei acht Passagieren drei Proben.
+4. Der Verursacher wird abgesetzt. Der Rest ist eine neue Kombination: wieder Gates, ganze Suite und ein eigener Wiederholungslauf.
+
+Der Zug kennt die roten Tests bereits. Seit v2.88 liest er sie aus der `lastfailed`-Datei und schreibt sie in die Messung (`red_tests`, `train.py:1571-1614`). Er nutzt sie nicht, um den Verursacher zu finden.
+
+Ein Zeitlimit zählt wie ein roter Test (`_sh`, `train.py:1063-1067`). Ein Last-Timeout, der auch den einen Wiederholungslauf trifft, führt deshalb in den Bisect und setzt einen Passagier ab, der nichts dafür kann.
+
+### 9.3 Maßnahmen für den roten Pfad
+
+| # | Maßnahme | Wirkung | Risiko für die Qualität |
+|---|---|---|---|
+| 15 | Bisect-Proben fahren nur die roten Tests statt der ganzen Suite. Sind die Test-IDs nicht lesbar oder zu viele, bleibt es bei der ganzen Suite. | Eine Probe sinkt von rund 33 Minuten auf wenige Minuten. | Keins für main: Die Kombination, die gemergt wird, fährt weiterhin Gates und ganze Suite. Ein Fehler, der nur in der ganzen Suite auftritt, kann den Falschen absetzen; das kostet eine Verzögerung, keinen falschen Merge. |
+| 16 | Vor dem Bisect: Die roten Tests laufen einzeln auf Basis plus je einem Passagier, wie die Vorab-Prüfung aus v2.89. | Der Verursacher steht nach wenigen kurzen Läufen fest, wenn nur ein Passagier den Fehler bringt. | Wie 15. Ein Fehler, der nur in Kombination auftritt, geht weiter in den Bisect. |
+| 17 | Ein Zeitlimit oder ein Abbruch durch Last ist kein Befund über einen Passagier. Der Zug wiederholt das Fehlgeschlagene dann ein zweites Mal, seriell oder nach gesunkener Last, bevor er sucht. | Der Fall von Zug 0519: Minuten statt knapp drei Stunden. | Gering. Ein echter Fehler bleibt beim zweiten Mal rot und geht in die Suche. Die Zahl der Wiederholungen ist begrenzt. |
+| 18 | Prüfen, ob Kenni `--retry` gesetzt hat. Ein Retry von 50 Minuten spricht dafür, dass die ganze Suite wiederholt wurde. | Der erste Wiederholungslauf sinkt auf Minuten. | Keins; reine Konfiguration. Die Zähler `retry_failed` und `retry_full` in `train-phases` zeigen es. |
+
+Die Wartezeit von 7,9 Stunden folgt zum großen Teil aus dem roten Pfad: Züge fahren nacheinander, und ein roter Zug hält die Strecke bis zu drei Stunden. Die Maßnahmen 15 bis 18 sind deshalb auch die Maßnahmen gegen die Wartezeit. Offen ist ein zweiter Grund: Der Zug fährt nicht ab, solange auf dem Klon ein Gate rot ist oder eine volle Lane belegt ist (`departure`, `train.py:659-682`). Wie oft das die Abfahrt verhindert hat, steht nicht in der Messung.
+
+### 9.4 Gate-Kosten
+
+| Gate | Sekunden, 30 Tage | Blocks |
+|---|---:|---:|
+| `web-lint` | 23.027 | 3 |
+| `review` | 15.431 | nicht genannt |
+| `theme-tokens` | 5.849 | 0 |
+| `backend-lint` | 5.106 | nicht genannt |
+| `plan-structure` | 4.590 | nicht genannt |
+| `inventory` | 3.464 | 0 |
+| `openapi-drift` | 3.459 | 0 |
+
+Fünf dieser Gates sind Prüfungen des Baums, die das Projekt selbst eingetragen hat (`web-lint`, `theme-tokens`, `backend-lint`, `inventory`, `openapi-drift`). Sie machen zusammen 40.905 s aus, die Hälfte der gesamten Gate-Zeit, und haben in 30 Tagen drei oder weniger Blocks gemeldet.
+
+- Projekt-Gates können heute schon auf Pfade begrenzt werden (`paths` und `areas` in `gates.local.json`, `gate_runner.py.jinja:568-591`). Ein `web-lint`, der nur läuft, wenn ein Web-Pfad im Flug ist, braucht keine Änderung am Template. Ob Kenni das gesetzt hat, ist hier nicht sichtbar.
+- Ihr Ergebnis hängt nur vom Baum ab. Sie sind damit die ersten Kandidaten für den Gate-Merker (Maßnahme 1).
+- Das `review`-Gate ist mit 19 % das teuerste Gate des Templates; das stützt Maßnahme 6.
+
+Der Push im Zug dauert 152 s bei 115 s für die Gates. Das passt zu Abschnitt 2: Der Hook wiederholt die Gates, die der Zug gerade gefahren hat.
+
+Auffällig ist auch der Schritt „Plan“ mit 337 s im Median. Der Steward ruft `train.py plan` bei jedem Tick auf (`steward.md:95`). Was darin die Zeit kostet, habe ich nicht untersucht.
+
+### 9.5 Blockierte Review-Runden
+
+| Tier | Arbeiten | Ø blockierte Runden | mit ≥ 1 Block | mit ≥ 2 Blocks | max |
+|---|---:|---:|---:|---:|---:|
+| 1 | 24 | 0,12 | 3 (13 %) | 0 | 1 |
+| 2 | 140 | 0,49 | 39 (28 %) | 10 (7 %) | 9 |
+| 3 | 163 | 1,11 | 87 (53 %) | 43 (26 %) | 9 |
+
+Zwei Dinge fallen auf:
+- Die Hälfte aller Arbeiten ist Tier 3 (163 von 327). `risk-tiers.md` sieht Tier 3 für Zugriffsschutz, Datenhaltung, Sicherheitsgrenzen und Verträge über mehrere Repositories vor und nennt ein unnötiges Tier 3 selbst den Engpass. Zu klären ist, aus welchem Grund diese 163 Arbeiten Tier 3 sind; die `tier:`-Zeile jedes Plans nennt ihn.
+- Bei Tier 3 wird jede zweite Arbeit mindestens einmal blockiert. Jede blockierte Runde kostet zwei Sitzungen und drei Gate-Läufe. Welcher Anteil dieser Blocks hält, zeigt `process_kpis.py rounds`, sobald es durchgelaufen ist; dort steht auch der Anteil der Blocks auf Zeilen, die seit Runde 1 unverändert sind.
+
+### 9.6 Reihenfolge nach der Messung
+
+1. Roter Zugpfad: Maßnahmen 15 bis 18.
+2. Gate-Zeit: Projekt-Gates auf Pfade begrenzen (Konfiguration in Kenni), dann der Gate-Merker (Maßnahmen 1, 2, 12, 14).
+3. Tier-3-Anteil und blockierte Runden: erst die beiden Zählungen aus 9.5, dann die Maßnahmen 3, 9 und 10.
+4. Tier 0/1 im Zug und die `inert`-Voreinstellung (Maßnahmen 11 und 13).
 
 ## Anhang: Befunde außerhalb des Fokus
 
