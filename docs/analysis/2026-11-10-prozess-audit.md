@@ -756,6 +756,20 @@ Anlass: Der Owner prüft, die Testlast vom Server in die Cloud zu verlegen und d
 - 58 % der Testfunktionen liegen in Dateien, die die Feature-Registry als Beleg nennt.
 - Außerhalb davon: rund 890 Tests für Prozess-Skripte, rund 610 Text-Pins auf Doku und Pläne, rund 2.580 Tests in Dateien, die Quelltext durchsuchen statt ihn auszuführen. Die Gruppen überschneiden sich.
 
+**Frontend-Stufe und Browser-Tests (Nachtrag)**
+
+| Lauf | Ergebnis | Dauer |
+|---|---|---|
+| `npm ci` | 837 Pakete | 15 s |
+| Frontend-Unit, Client (`vitest run`) | 7.556 Tests in 489 Dateien, alle grün | 268 s |
+| Frontend-Unit, Server | 34 Tests, alle grün | 1 s |
+| E2E-Backend starten (`make e2e-backend E2E_LANE=a`) | erreichbar | 15 s |
+| Zwei Playwright-Specs, Projekt `desktop-1440` | 10 von 10 grün | 18 s |
+
+- Die Frontend-Stufe der Merge-Suite läuft in der Cloud ohne jede Anpassung.
+- Für Playwright sind zwei Dinge nötig. `E2E_LANE=a` muss in der Umgebung stehen; ohne die Variable bricht `make e2e-backend` an `scripts/e2e_lane.sh` ab. Und das Projekt nutzt Playwright 1.61, der vorinstallierte Chromium gehört zu einer anderen Version; der Probelauf lief über eine temporäre Konfiguration mit dem vorinstallierten Browser als `executablePath`. Für einen Dauerbetrieb gehört der passende Browser ins Setup-Skript.
+- Gelaufen sind zwei von 166 Specs in einem von drei Projekten. Die ganze E2E-Suite ist nicht gemessen.
+
 **Folgerungen**
 
 - Die Backend-Suite lässt sich in der Cloud fahren. Im Setup-Skript fehlen `bubblewrap` und das Dokument-Toolset; ein kleiner, benennbarer Rest braucht den Server.
