@@ -2319,7 +2319,7 @@ def test_coverage_never_counts_a_dash_and_unread_reports_are_not_a_duty_count(re
                    "FINDING sev=major action=fix kind=implementation issue=- by=codex at=- no place\n")
     cov = m.compliance_table(out)["coverage"]
     assert cov["at"]["codex"] == [0, 1], cov
-    monkeypatch.setattr(m, "_report_findings", lambda root, phase=None: "reports not read")
+    monkeypatch.setattr(m, "_review_reports", lambda root, phase=None: "reports not read")
     c = m.compliance_table(out)
     assert c["kind_on_blockers"] == "reports not read" and c["coverage"] == "reports not read"
 
@@ -2804,6 +2804,99 @@ def test_a_fix_that_renames_the_file_is_blamed_through_the_old_path(render, tmp_
                                                           "src/b.py": _edit(_lines(10, "a"), 6)}, _at(5))],
                  "train: merge 10-mv\n\nCloses #10", _at(6, 12))
     assert _shape(_suspicion(out)) == (1, [7], [], 0, 0)
+
+
+# --- v2.94 E4: a finding's reviewer from its round's REVIEW line, at read time ----------------
+
+def _families_repo(render, tmp_path) -> Path:
+    """The policy's own family `alpha-` (ranked) and another, `beta-`; the plan `widget` of #9."""
+    out = _merges_repo(render, tmp_path, github_issues=True)
+    _put(out, "chore: model families", {"docs/process/model-policy.local.json": json.dumps(
+        {"review_evidence": {"ranks": {"alpha-": 1}, "families": ["beta-"]}})}, _at(1, 1))
+    plans = out / ".process-work/plans"
+    plans.mkdir(parents=True, exist_ok=True)
+    (plans / "2026-07-01-widget.md").write_text(_plan_text(9), encoding="utf-8")
+    return out
+
+
+def _review_line(work, rnd: int, model: str, head: str | None = None) -> str:
+    art = f" base={'0' * 40} head={head}" if head else ""
+    return (f"REVIEW work={work} tier=2 reviewer=r model={model} independence=bundle,non-implementing "
+            f"verdict=block round={rnd}{art}\n")
+
+
+def _rated(out: Path, name: str, work: str, rnd: int, findings: str, *, phase: str | None = None,
+           head: str | None = None) -> None:
+    reviews = out / ".process-work/reviews"
+    reviews.mkdir(parents=True, exist_ok=True)
+    (reviews / f"{name}.md").write_text(
+        f"review: {name}\nwork: {work}\nround: {rnd}\npublish-waived: test\n"
+        + (f"phase: {phase}\n" if phase else "") + (f"artifact: base={'0' * 40} head={head}\n" if head else "")
+        + "\n## Findings\n" + findings, encoding="utf-8")
+
+
+_BLOCKER = "FINDING sev=blocker action=fix issue=- origin=draft a gap\n"
+
+
+def _line_families(out: Path) -> list:
+    return sorted((fam or "-") for _w, _f, _r, fam in _flow_module(out)._attributed_findings(out))
+
+
+def test_a_finding_without_by_takes_the_family_of_its_rounds_one_review_line(render, tmp_path):
+    """E4: the REVIEW line names the model, the policy (`ranks`, `families`) its family — joined
+    through the work's ids, so `work=widget` and `work: #9` are one work; never written."""
+    out = _families_repo(render, tmp_path)
+    _journal(out, _review_line("widget", 1, "beta-1") + _review_line(9, 2, "alpha-1"))
+    _rated(out, "r1", "#9", 1, _BLOCKER)
+    _rated(out, "r2", "widget", 2, _BLOCKER)
+    before = {p: p.read_text() for p in (out / ".process-work").rglob("*.md")}
+    assert _line_families(out) == ["alpha", "beta"]
+    assert {p: p.read_text() for p in (out / ".process-work").rglob("*.md")} == before
+
+
+def test_two_review_lines_of_one_round_or_model_same_attribute_nothing(render, tmp_path):
+    out = _families_repo(render, tmp_path)
+    _journal(out, _review_line(9, 1, "alpha-1") + _review_line("widget", 1, "beta-1")
+             + _review_line(9, 2, "same") + _review_line(9, 3, "gamma-1"))
+    for rnd in (1, 2, 3):
+        _rated(out, f"r{rnd}", "#9", rnd, _BLOCKER)
+    assert _line_families(out) == ["-", "-", "-"]
+    # the report's head tells two lines of one round apart (the second lens' head is the first's attest)
+    h1, h2 = "1" * 40, "2" * 40
+    _journal(out, _review_line(9, 4, "alpha-1", h1) + _review_line(9, 4, "beta-1", h2), name="2026-07-03.md")
+    _rated(out, "r4", "#9", 4, _BLOCKER, head=h2)
+    assert _line_families(out) == ["-", "-", "-", "beta"]
+
+
+def test_the_reports_own_by_wins_over_the_review_line(render, tmp_path):
+    out = _families_repo(render, tmp_path)
+    _journal(out, _review_line(9, 1, "alpha-1"))
+    _rated(out, "r1", "#9", 1, "FINDING sev=blocker action=fix issue=- origin=draft by=codex a gap\n")
+    assert _line_families(out) == ["-"]
+    cov = _flow_module(out).compliance_table(out)["coverage"]
+    assert cov["origin"] == {"codex": [1, 1]}, cov
+
+
+def test_plan_reviews_join_only_plan_review_lines(render, tmp_path):
+    out = _families_repo(render, tmp_path)
+    _journal(out, _review_line("9-plan", 1, "beta-1") + _review_line(9, 1, "alpha-1"))
+    _rated(out, "p1", "#9", 1, _BLOCKER, phase="plan")
+    _rated(out, "c1", "#9", 1, _BLOCKER)
+    m = _flow_module(out)
+    assert [fam for *_x, fam in m._attributed_findings(out, "plan")] == ["beta"]
+    assert [fam for *_x, fam in m._attributed_findings(out, "code")] == ["alpha"]
+
+
+def test_rounds_and_coverage_keep_the_two_sources_apart(render, tmp_path):
+    out = _families_repo(render, tmp_path)
+    _journal(out, _review_line(9, 1, "alpha-1"))
+    _rated(out, "r1", "#9", 1, _BLOCKER + "FINDING sev=blocker action=fix issue=- by=codex origin=fix another\n")
+    text = _rounds(out)
+    assert "blockers by reviewer: codex 1, - 1" in text, text
+    assert "blockers without by=, by (review line): alpha 1" in text, text
+    cov = _flow_module(out).compliance_table(out)["coverage"]
+    assert cov["origin"] == {"codex": [1, 1], "alpha (review line)": [1, 1]}, cov
+    assert "origin= alpha (review line) 1/1, codex 1/1" in text, text
 
 
 def test_the_test_path_rule_is_the_bundles(render, tmp_path):
