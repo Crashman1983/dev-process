@@ -1063,3 +1063,194 @@ def test_an_unreadable_tracking_ref_list_without_a_remote_is_a_blocker(render, t
         assert r.returncode == 1, (args, r.stdout + r.stderr)
         assert "could not list remote-tracking refs" in r.stdout, (args, r.stdout)
     assert _git(out, "rev-parse", "main").stdout == main_before
+
+
+# --- v2.94 E2: the cost commit before the archive commit ---------------------------------
+
+COST_SUBJECT = "docs: record cost — #7"
+
+
+def _phase_record(out: Path, issue: int, branch: str, t0: int) -> None:
+    """The phase history dispatch writes: one window, a plan start and an execute start."""
+    import json
+    phases = _common_dir(out) / "process-dispatch/phases"
+    phases.mkdir(parents=True, exist_ok=True)
+    (phases / f"{issue}.json").write_text(json.dumps({"phase": "execute", "branch": branch, "branches": {
+        branch: {"windows": [[t0, None]], "worktrees": [], "remote": False,
+                 "starts": [["plan", t0], ["execute", t0 + 100]]}}}))
+
+
+def _costed_repo(render, tmp_path, *, branch="7-widget", telemetry=True, record=True, plan=True):
+    """A Tier 1 plan and a payload on a numbered branch, its phase history written."""
+    import time
+    out = render(tmp_path, {"project_name": "demo", "modules": {"telemetry": telemetry}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", branch)
+    if plan:
+        _active_plan(out, "2026-09-07-tiny.md", "# Plan\n\ntier: 1\n")
+    (out / "payload.txt").write_text("done\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: tiny")
+    if record:
+        _phase_record(out, 7, branch, int(time.time()) - 1000)
+    return out
+
+
+def _journal_costs(out: Path) -> list[str]:
+    return [ln for f in sorted((out / JOURNAL).rglob("*.md"))
+            for ln in f.read_text(encoding="utf-8").splitlines() if ln.startswith("COST ")]
+
+
+def _subjects(out: Path, rev: str = "HEAD") -> list[str]:
+    return _git(out, "log", "--format=%s", rev).stdout.splitlines()
+
+
+def _modules(out: Path, *names: str):
+    """Import the rendered repo's own modules, freshly; the caller pops them."""
+    import importlib
+    shared = ("attest", "attest_evidence", "check_review", "check_fix_streak", "dispatch", "report",
+              "process_git", "required_records", "process_kpis", "tower")
+    for name in shared:
+        sys.modules.pop(name, None)
+    sys.path.insert(0, str(out / "scripts/process"))
+    return [importlib.import_module(n) for n in names], shared
+
+
+def _drop_modules(out: Path, shared) -> None:
+    sys.path.remove(str(out / "scripts/process"))
+    for name in shared:
+        sys.modules.pop(name, None)
+
+
+def _cost_hook(out: Path, refuse: str) -> Path:
+    """A commit-msg hook that refuses a commit whose message carries `refuse`."""
+    hook = _common_dir(out) / "hooks/commit-msg"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(f'#!/bin/sh\ngrep -q "{refuse}" "$1" && exit 1\nexit 0\n')
+    hook.chmod(0o755)
+    return hook
+
+
+def test_apply_writes_the_cost_commit_right_before_a_pure_archive_commit(render, tmp_path):
+    """One COST line per phase, wall time from the phase history, `not-measured` where no
+    transcripts are configured — never a 0; the archive commit stays the last and pure."""
+    import datetime as dt
+    import re
+    out = _costed_repo(render, tmp_path)
+    r = _run_args(out, "--apply")
+    assert r.returncode == 0 and "stopped before the merge" in r.stdout, r.stdout + r.stderr
+    subjects = _subjects(out)
+    assert subjects[:3] == ["docs: archive plan(s) on merge — 2026-09-07-tiny.md", COST_SUBJECT,
+                            "feat: tiny"], subjects
+    shard = f".process-work/journal/issue-7/{dt.date.today().isoformat()}.md"
+    assert _git(out, "show", "--format=", "--name-only", "HEAD~1").stdout.split() == [shard]
+    lines = (out / shard).read_text(encoding="utf-8").split("\n")
+    costs = [ln for ln in lines if ln.startswith("COST ")]
+    assert costs[0] == "COST work=7 phase=plan wall_seconds=100 tokens=- not-measured: not-configured", costs
+    assert re.fullmatch(r"COST work=7 phase=execute wall_seconds=\d{3,} tokens=- not-measured: "
+                        r"not-configured", costs[1]), costs
+    assert len(costs) == 2 and "tokens=0" not in "\n".join(costs)
+    (attest,), shared = _modules(out, "attest")
+    try:
+        head, cost_commit, payload = (_git(out, "rev-parse", f"HEAD~{n}").stdout.strip() for n in range(3))
+        assert attest._archive_only(out, cost_commit, head)
+        assert attest._cost_only(out, payload, cost_commit)
+    finally:
+        _drop_modules(out, shared)
+
+
+def test_a_second_apply_after_an_abort_writes_no_second_cost_commit(render, tmp_path):
+    """Idempotent by content: an abort between the cost commit and the archive commit leaves
+    the COST lines in the branch's range, and the next `--apply` writes none again."""
+    out = _costed_repo(render, tmp_path)
+    hook = _cost_hook(out, "archive plan")
+    r = _run_args(out, "--apply")
+    assert r.returncode == 1 and "archive commit failed" in r.stderr, r.stdout + r.stderr
+    assert _subjects(out)[:2] == [COST_SUBJECT, "feat: tiny"]
+    hook.unlink()
+    r = _run_args(out, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "already recorded" in r.stdout, r.stdout
+    subjects = _subjects(out)
+    assert subjects[:2] == ["docs: archive plan(s) on merge — 2026-09-07-tiny.md", COST_SUBJECT], subjects
+    assert subjects.count(COST_SUBJECT) == 1
+
+
+@pytest.mark.parametrize("case", ["no-record", "no-issue", "no-telemetry", "no-plan"])
+def test_no_cost_commit_without_a_phase_record_an_issue_the_module_or_an_archive(render, tmp_path, case):
+    """No dispatch chain, no issue in the branch name, no telemetry module, or no plan to
+    archive (the cost commit rides only the run that writes the archive commit): no line."""
+    out = _costed_repo(render, tmp_path, record=case != "no-record",
+                       branch="feature" if case == "no-issue" else "7-widget",
+                       telemetry=case != "no-telemetry", plan=case != "no-plan")
+    r = _run_args(out, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert COST_SUBJECT not in _subjects(out) and "record cost" not in r.stdout
+    assert not _journal_costs(out)
+
+
+def test_a_failing_cost_commit_does_not_stop_the_merge_and_the_archive_stays_pure(render, tmp_path):
+    """The cost commit is refused: the journal shard is restored before `git mv`, nothing of it
+    rides into the archive commit, and the merge goes on."""
+    out = _costed_repo(render, tmp_path)
+    _cost_hook(out, "record cost")
+    r = _run_args(out, "--apply", "--tests", "true")  # no remote: the local merge
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "cost commit failed" in r.stderr, r.stderr
+    assert "merged 7-widget into main locally" in r.stdout, r.stdout
+    assert _subjects(out, "main")[:2] == ["docs: archive plan(s) on merge — 2026-09-07-tiny.md", "feat: tiny"]
+    assert not _journal_costs(out)
+    assert _git(out, "status", "--porcelain").stdout == ""
+    (attest,), shared = _modules(out, "attest")
+    try:
+        assert attest._archive_only(out, "main~1", "main")
+    finally:
+        _drop_modules(out, shared)
+
+
+def test_merge_events_count_the_cost_commit_in_its_own_finish_event(render, tmp_path):
+    """The cost commit lies before the archive commit that ends a `finish` event: it is one of
+    that event's own commits and process lines, and none of the next event's."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"telemetry": True}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "prep")
+    (out / "prep.txt").write_text("prep\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: prep")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "merge", "-q", "--no-ff", "-m", "train: merge prep", "prep")  # an event below: a bound
+    for issue, branch in ((7, "7-widget"), (8, "8-gizmo")):
+        _git(out, "checkout", "-q", "-b", branch)
+        _active_plan(out, f"2026-09-0{issue}-{branch}.md", f"# Plan\n\ntier: 1\nissue: #{issue}\n")
+        (out / f"{branch}.txt").write_text("done\n", encoding="utf-8")
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", f"feat: {branch} (#{issue})")
+        if issue == 7:
+            _phase_record(out, 7, branch, 1_800_000_000)
+        r = _run_args(out, "--apply", "--tests", "true")
+        assert r.returncode == 0, r.stdout + r.stderr
+    cost = next(s for s, subj in (ln.split(" ", 1) for ln in
+                                 _git(out, "log", "--format=%H %s", "main").stdout.splitlines())
+                if subj == COST_SUBJECT)
+    (kpis,), shared = _modules(out, "process_kpis")
+    try:
+        events = kpis.merge_events(out, "main")["events"]
+    finally:
+        _drop_modules(out, shared)
+    assert [e["kind"] for e in events] == ["train", "finish", "finish"], events
+    seven, eight = events[1], events[2]
+    assert seven["issues"] == [7] and eight["issues"] == [8]
+    assert cost in seven["commits"] and cost not in eight["commits"]
+    shard = next(f for f in seven["process_files"] if f.startswith(JOURNAL + "/issue-7/"))
+    # the archived plan's four lines and the two COST lines; the next event carries only its plan
+    assert (seven["process_lines"], eight["process_lines"]) == (4 + 2, 4), (seven, eight)
+    assert shard not in eight["process_files"]
+    assert not seven["mixed"]
