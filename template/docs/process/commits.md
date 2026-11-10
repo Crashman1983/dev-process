@@ -56,7 +56,7 @@ in `journal-state-plans.md` (Parallel efforts).
 Merge only after the tier's review gate has passed (mandatory rule 7). Two
 equivalent routes:
 
-- **Local:** fetch → rebase → gate → **archive the plan** → `merge --ff-only` → push.
+- **Local:** **archive the plan** → fetch → rebase → gate → `merge --ff-only` → push.
   A repository without any remote has nothing to fetch or push: rebase onto the
   local default branch, run the gates with the merge target
   (`PROCESS_PUSH_TARGETS=refs/heads/<default>` — no pre-push runs them), merge
