@@ -139,7 +139,31 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     record_kind,
     record_texts,
     records_only,
+    review_lines,
 )
+
+# the telemetry module, rendered or not ("optional stays optional"): the SIZE line is a
+# measure its readers count, so a project without it gets none (human_digest reads it so)
+TELEMETRY_MODULE = "scripts/process/process_kpis.py"
+
+
+def size_line(root: Path, record: dict, *, plan_review: bool) -> str | None:
+    """`SIZE work=<id> round=<r> lines=<n> files=<n>`, written next to a code review's
+    REVIEW line (v2.94 E3): the size of the whole branch at that round
+    (`check_review.review_lines` over the line's own base...head), not the round's delta,
+    so `--bundle` and `--base/--head` give one value. A line of its own: every reader of
+    the REVIEW line refuses an unknown key. None (nothing written, never a guess) for a
+    plan review, a line without base and head, a project without the telemetry module,
+    or a size git cannot count."""
+    if plan_review or not (record.get("base") and record.get("head")):
+        return None
+    if not (root / TELEMETRY_MODULE).is_file():
+        return None
+    size = review_lines(root, record["base"], record["head"])
+    if size is None:
+        return None
+    return f"SIZE work={record['work']} round={record['round']} lines={size.lines} files={size.files}"
+
 
 # a ROOT-CAUSE line — the review gate owns its shape (`check_review.ROOT_CAUSE_LINE`),
 # read through `readable`: a fenced, commented or placeholder line is no cause
@@ -970,6 +994,9 @@ def main() -> int:
     if args.note:
         appended += args.note.rstrip() + "\n\n"
     appended += line + "\n"
+    size = size_line(root, record, plan_review=args.plan_review)
+    if size:
+        appended += size + "\n"
     target_bytes = (target_old or b"") + appended.encode("utf-8")
     message = f"docs: attest {args.work} round {args.round_}"
     # one write phase (design §8): only the attestation's own paths — anything else staged

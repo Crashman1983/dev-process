@@ -93,6 +93,20 @@ def test_compact_folds_old_shards_keeps_records_and_gates_still_clear(render, tm
     assert "nothing older" in again.stdout
 
 
+def test_compact_keeps_size_lines(render, tmp_path):
+    # v2.94 E3: attest's SIZE line is a machine-read record like REVIEW
+    out = render(tmp_path, {"project_name": "d"})
+    old = (dt.date.today() - dt.timedelta(weeks=20)).isoformat()
+    _shard(out, f"issue-7/{old}.md", "# Day", "reasoning " * 20,
+           "REVIEW work=7 tier=2 reviewer=fresh model=same "
+           "independence=bundle,non-implementing verdict=pass round=1",
+           "SIZE work=7 round=1 lines=120 files=4")
+    r = _py(out, "compact_journal.py", "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    archive = (out / JOURNAL / "archive" / f"{old[:7]}.md").read_text(encoding="utf-8")
+    assert "SIZE work=7 round=1 lines=120 files=4" in archive and "reasoning" not in archive
+
+
 def test_compact_leaves_undated_and_recent_shards(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     _shard(out, "notes.md", "undated")

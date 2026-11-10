@@ -7,12 +7,13 @@ and are read by agents and tools alike — the KPI cockpit, the review
 gate. Reasoning older than a few weeks is history: git has the
 full text, and nobody resumes a session from it. What must survive is the
 machine-read record: `REVIEW` attestations (the review gate clears archived
-plans against them) and `GRADE` lines (retired telemetry records, kept as
-history). Everything else in an old
-shard is prose that costs tokens on every recursive read.
+plans against them), `SIZE` lines (attest writes them next to a code review's
+REVIEW line where the telemetry module is rendered; its readers count them) and
+`GRADE` lines (retired telemetry records, kept as history). Everything else in
+an old shard is prose that costs tokens on every recursive read.
 
 The archive keeps one section per folded shard (its original path as the
-heading) with only its REVIEW/GRADE lines, verbatim and unfenced — so every
+heading) with only its REVIEW/SIZE/GRADE lines, verbatim and unfenced — so every
 gate that globs `.process-work/journal/**/*.md` still finds them. Fenced blocks are quotations and are
 dropped with the prose.
 
@@ -32,9 +33,9 @@ from pathlib import Path
 JOURNAL = ".process-work/journal"
 ARCHIVE = "archive"
 DATE_IN_NAME = re.compile(r"(\d{4}-\d{2}-\d{2})")
-# the two record grammars the gates own; kept verbatim, matched loosely here
+# the record grammars the tools own; kept verbatim, matched loosely here
 # (a malformed record stays a malformed record — this tool never repairs)
-RECORD = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(?:REVIEW|GRADE)\b")
+RECORD = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*(?:REVIEW|GRADE|SIZE)\b")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 
@@ -98,7 +99,7 @@ def compact(root: Path, weeks: int, apply: bool) -> int:
             before += len(text.encode("utf-8"))
             recs = _records(text)
             section = f"## {p.relative_to(root).as_posix()}\n\n" + \
-                ("\n".join(recs) + "\n" if recs else "(no REVIEW/GRADE records)\n")
+                ("\n".join(recs) + "\n" if recs else "(no REVIEW/SIZE/GRADE records)\n")
             sections.append(section)
             after += len(section.encode("utf-8"))
         print(f"compact-journal: {len(shards)} shard(s) -> {target.relative_to(root)}")
@@ -108,7 +109,7 @@ def compact(root: Path, weeks: int, apply: bool) -> int:
             target.parent.mkdir(parents=True, exist_ok=True)
             head = "" if target.is_file() else \
                 f"# Journal archive {month}\n\n<!-- folded by compact_journal.py: " \
-                f"only REVIEW/GRADE records kept; full text in git history -->\n\n"
+                f"only REVIEW/SIZE/GRADE records kept; full text in git history -->\n\n"
             with target.open("a", encoding="utf-8") as fh:
                 fh.write(head + "\n".join(sections) + "\n")
             for p in shards:

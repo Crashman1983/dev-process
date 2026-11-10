@@ -16,8 +16,8 @@ def _git(root, *args, **kw):
                           check=True, **kw)
 
 
-def _repo(render, tmp_path):
-    out = render(tmp_path, {"project_name": "d"})
+def _repo(render, tmp_path, modules=None):
+    out = render(tmp_path, {"project_name": "d", **({"modules": modules} if modules else {})})
     _git(out, "init", "-q", "-b", "main")
     _git(out, "config", "user.email", "t@t")
     _git(out, "config", "user.name", "t")
@@ -1051,3 +1051,80 @@ def test_a_gap_in_the_block_rounds_still_counts_past_the_highest(render, tmp_pat
     r = _attest(out, *ab, "--verdict", "pass", "--round", "4")
     assert r.returncode == 0, r.stderr
     assert "verdict=pass round=4" in _journal(out), _journal(out)
+
+
+# --- v2.94 E3: the size of a review round, written by attest --------------------------
+
+TELEMETRY = {"telemetry": True}
+
+
+def _size_lines(out):
+    return [ln for ln in _journal(out).splitlines() if ln.startswith("SIZE ")]
+
+
+def test_a_code_review_writes_its_size_next_to_the_review_line(render, tmp_path):
+    out, base, head = _repo(render, tmp_path, TELEMETRY)
+    (out / "later.py").write_text("x = 1\n")  # after the reviewed head: not this round's size
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: later")
+    r = _attest(out, "--base", base, "--head", head)
+    assert r.returncode == 0, r.stderr
+    text = _journal(out)
+    review = next(ln for ln in text.splitlines() if ln.startswith("REVIEW "))
+    # widget.py counts; tests/test_widget.py and the plan under .process-work/ do not
+    assert _size_lines(out) == ["SIZE work=widget round=1 lines=2 files=1"], text
+    assert text.splitlines()[text.splitlines().index(review) + 1].startswith("SIZE ")
+    # the REVIEW line is the gate's as before: no new key, parsed without a problem
+    assert "size=" not in review and "lines=" not in review
+    records, problems = _load_gate(out).parse_review_lines(text)
+    assert not problems and [f["head"] for _ln, f in records] == [head], (records, problems)
+    by_flags = _size_lines(out)
+    # the same round from the bundle's range: the same number
+    _git(out, "reset", "-q")
+    for shard in (out / ".process-work/journal").rglob("*.md"):
+        shard.unlink()
+    bundle = out / ".process-work/bundle.md"
+    bundle.write_text(f"REVIEW_ARTIFACT base={base} head={head}\n")
+    r = _attest(out, "--bundle", str(bundle))
+    assert r.returncode == 0, r.stderr
+    assert _size_lines(out) == by_flags
+
+
+def test_no_size_for_a_plan_review_without_a_range_or_without_telemetry(render, tmp_path):
+    out, base, head = _repo(render, tmp_path / "t", TELEMETRY)
+    r = _attest(out, "--plan-review", "--base", base, "--head", head)
+    assert r.returncode == 0, r.stderr
+    assert "REVIEW work=widget-plan" in _journal(out) and not _size_lines(out)
+    r = _attest(out, "--verdict", "block")  # no base, no head: no size
+    assert r.returncode == 0, r.stderr
+    assert "verdict=block" in _journal(out) and not _size_lines(out)
+    bare, base, head = _repo(render, tmp_path / "b")
+    assert not (bare / "scripts/process/process_kpis.py").exists()
+    r = _attest(bare, "--base", base, "--head", head)
+    assert r.returncode == 0, r.stderr
+    assert "REVIEW work=widget" in _journal(bare) and not _size_lines(bare)
+
+
+def test_size_lines_count_no_tests_unlike_the_telemetrys_product_lines(render, tmp_path):
+    """`lines` (the review round) leaves tests out; `product_lines` (a merge event of the
+    telemetry) counts them — two measures, one fixture."""
+    out, base, head = _repo(render, tmp_path, TELEMETRY)
+    assert _attest(out, "--base", base, "--head", head, "--commit").returncode == 0
+    size = _size_lines(out)
+    assert size == ["SIZE work=widget round=1 lines=2 files=1"], size
+    _git(out, "checkout", "-q", "main")
+    _git(out, "merge", "-q", "--no-ff", "-m", "train: merge feature", "feature")
+    sys.path.insert(0, str(out / "scripts/process"))
+    names = ("process_kpis", "tower", "check_review", "process_git")
+    try:
+        for name in names:
+            sys.modules.pop(name, None)
+        kpis = importlib.import_module("process_kpis")
+        events = kpis.merge_events(out, "main")["events"]
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for name in names:
+            sys.modules.pop(name, None)
+    (event,) = [e for e in events if e.get("product_lines") is not None]
+    # widget.py (2) and tests/test_widget.py (5): the test counts there
+    assert event["product_lines"] == 2 + 5, event
