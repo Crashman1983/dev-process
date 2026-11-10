@@ -1190,6 +1190,17 @@ def test_the_rule_budget_asks_for_yield_and_eight_covered_weeks(render, tmp_path
         assert phrase in rule, phrase
 
 
+def test_the_plan_runs_the_gates_before_its_review_bundle(render, tmp_path):
+    """v2.94 C3: the plan-review bundle runs no preflight; the gates run after the plan
+    commit and before the bundle, so a red plan-structure costs no second plan round."""
+    out = render(tmp_path, {"project_name": "demo", "harnesses": {"claude": True, "copilot": True}})
+    plan = _flat(out / ".claude/commands/plan.md")
+    review = plan.split("**A plan is reviewed before `planned` (Tier 2+).**", 1)[1]
+    assert review.index("gate_runner.py") < review.index("make_review_bundle.py --plan"), review[:400]
+    prompt = _flat(out / ".github/prompts/plan.prompt.md")
+    assert prompt.index("gate_runner.py") < prompt.index("on its bundle"), prompt
+
+
 def test_maintaining_carries_the_freeze_until_december():
     """v2.94 A3, owner 2026-11-10 (PR #407): no new rules, gates or mandatory lines until
     2026-12-08 — only fixes that unblock work, removed effort and tool-written measurements."""
