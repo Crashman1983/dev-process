@@ -634,10 +634,28 @@ Richtung des Owners nach Abschnitt 19: `gpt-6.1-sol` soll Standardweg und einzig
 - Als einziger Reviewer verlöre GPT 5 Runden, die nur Claude blockierte. Claude allein verlöre 31.
 - Die Auswahl ist nicht neutral: Getrennte Zeilen entstehen eher, wenn die Urteile auseinandergehen.
 
+**Hielten die Blocks, die nur GPT setzte?**
+
+Die 31 Runden „Claude lässt durch, GPT blockiert“ einzeln nachverfolgt: Gab es danach eine weitere Runde, und was änderte sich zwischen den geprüften Ständen?
+
+| Was folgte | Runden |
+|---|---:|
+| Nächste Runde nach einer Änderung an Code, Tests oder Plan | 14 |
+| Keine weitere Runde: Der Pass der eigenen Familie blieb stehen | 11 |
+| Weitere Runde auf demselben Stand, ohne Änderung | 3 |
+| Nächste Runde, nur Buchhaltung geändert | 1 |
+| Stände nicht im Klon lesbar | 2 |
+
+- Von 29 auswertbaren Runden führten 14 (48 %) zu einer echten Änderung, 15 (52 %) nicht.
+- Eine Änderung nach dem Block beweist nicht, dass sie dem GPT-Befund galt. Ein stehen gebliebener Pass beweist nicht, dass GPT falsch lag; der Befund kann als Rest oder Folge-Issue angenommen worden sein.
+- Die 91 gepaarten Runden stammen überwiegend aus August bis Oktober, mit älteren GPT-Modellen. Für `gpt-6.1-sol` sagen sie wenig.
+
+Folge für den Vorschlag: Als einziger Reviewer hätte GPT niemanden neben sich, der die Hälfte seiner Blocks relativiert. Diese Rolle hat der Prozess schon: Vor einem Block bewertet ein frischer Prozess, der den Befund nicht geschrieben hat, jeden blockierenden Befund; unter Score 80 wird er ein Rest (`verification-independence.md`, „What blocks“). Mit GPT als Reviewer und einem Claude-Modell als Bewerter bliebe eine zweite Familie im Spiel, aber als kurzer Prüfschritt statt als zweites Review.
+
 **Was offen ist**
 
 - Zu `gpt-6.1-sol` selbst gibt es wenig: 8 Code-Review-Zeilen und 26 Plan-Review-Zeilen. Die Zahlen oben stammen überwiegend von `gpt-6-astra` und `gpt-6-sol`.
-- Ob die 31 Blocks, die nur GPT setzte, hielten, ist nicht gezählt. Die Regel aus v2.63, dass ein Codex-Block erst ab Score 80 zählt, spricht für Fehlalarme in der Vergangenheit. Bei Tier 2 trugen 34 von 38 schweren Befunden der zweiten Familie `action=fix`.
+- Bei Tier 2 trugen 34 von 38 schweren Befunden der zweiten Familie `action=fix`; das passt nicht ganz zu den 48 % oben und betrifft einen späteren Zeitraum.
 - Ein strengerer Reviewer bedeutet mehr blockierte Runden. Runden mit zweiter Familie wurden bei Tier 2 zu 39 % blockiert, ohne zu 28 %.
 - Bei den Plan-Reviews von Tier 2 fand die eigene Familie mehr schwere Befunde (42 gegen 28).
 
