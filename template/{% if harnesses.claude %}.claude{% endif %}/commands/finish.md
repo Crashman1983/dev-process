@@ -9,30 +9,31 @@ have one beside it (`<doc>.local.md`), read with the doc
 Where a steward runs the merge train (`docs/process/train.md`), stop after the archive step (`finish.py --apply` without `--tests`), push, and `report.py review-pass` — the train merges the batch behind one full suite. Without a train, this command is the merge tail:
 
 Close a feature branch cleanly — the merge tail as one verdict instead of a
-ritual scattered over four docs. Run:
+ritual scattered over four docs. Without a train, run the whole tail at once:
 
-    uv run scripts/process/finish.py
+    uv run scripts/process/finish.py --apply --tests                         # merge_suite, then merge, push, delete branch
+    uv run scripts/process/finish.py --apply --tests "<CMD>"                 # without a merge_suite: name the full suite
+    uv run scripts/process/finish.py --apply --tests-passed                  # without a merge_suite only: a claim, certifies nothing
 
-The checker is read-only: it verifies the branch is actually done (clean
-worktree, clearing REVIEW pass for every active tier-2+ plan, gate suite
-green) and then prints the exact remaining steps in order — archive the
-plan(s) on the branch, merge, delete the branch, remove the worktree,
-publish/prune. Execute the printed steps; do not improvise the order
+With a train, the archive step alone:
+
+    uv run scripts/process/finish.py --apply            # archive commit + rebase, stops before the merge
+
+`--apply` checks first: the branch is actually done (clean worktree,
+clearing REVIEW pass for every active tier-2+ plan, gate suite green). When
+something blocks, it prints the blockers and applies nothing. Otherwise it
+executes the deterministic tail in order — archive the plan(s) on the
+branch, rebase, merge, delete the branch — and prints what is left by hand:
+the worktree, the `publish_and_prune.py` line of each finished spec dir of
+this branch, the issue. Do not improvise the order
 (`docs/process/commits.md`, Merging — the plan archives BEFORE the merge,
-and merge leaves no residue).
+and merge leaves no residue). `finish.py` without `--apply` stays a
+read-only preview: the same verdict and the remaining steps, printed.
 
 A push whose hook may run tests for minutes is never waited out inside a
 tool call: produce the evidence in the background first (the project's
 certify step, where one exists), then push; on a busy-lane abort do other
 work and push again later — never a retry loop (the `git-hooks` module doc).
-
-Then let the checker execute the deterministic part instead of retyping
-it:
-
-    uv run scripts/process/finish.py --apply            # archive commit + rebase, stops before the merge
-    uv run scripts/process/finish.py --apply --tests                         # … then merge_suite, merge, push, delete branch
-    uv run scripts/process/finish.py --apply --tests "<CMD>"                 # without a merge_suite: name the full suite
-    uv run scripts/process/finish.py --apply --tests-passed                  # without a merge_suite only: a claim, certifies nothing
 
 `--tests` alone runs the `merge_suite` of `testing.local.json`; only that run
 writes the merge certificate the merge push reads, and a `--certify` push
