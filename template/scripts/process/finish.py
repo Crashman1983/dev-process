@@ -79,6 +79,8 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     JOURNAL_DIR,
     PLANS_ACTIVE,
     PUSH_TARGETS_ENV,
+    TELEMETRY_MODULE,
+    cost_line,
     integration_targets,
     PLANS_ARCHIVE,
     SPECS_DIR,
@@ -503,6 +505,9 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
             if not source.is_file() or target.exists():
                 print(f"finish: cannot archive {name}: source missing or target exists; nothing moved", file=sys.stderr)
                 return 1
+        # the work's cost per phase, in a commit of its own right before the archive commit,
+        # which stays the branch's last and pure (v2.94 E2); a failure merges on
+        _record_cost(root, branch)
         (root / PLANS_ARCHIVE).mkdir(parents=True, exist_ok=True)
         moved = []
         for name in to_archive:
@@ -641,6 +646,98 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
         print(f"finish: remote branch {branch} absent or unreadable — no remote delete")
     print(f"finish: merged {branch} into {default} and pushed. {_by_hand()}")
     return 0
+
+
+COST_SUBJECT = "docs: record cost — #{issue}"
+
+
+def _record_cost(root: Path, branch: str) -> None:
+    """The cost commit (v2.94 E2): one COST line per phase of the branch's issue
+    (`dispatch.phase_costs`: wall time including waits, tokens or `not-measured: <reason>`)
+    appended to the journal shard attest writes (`attest._journal_target`), committed on its
+    own — `finish --apply` is its one writer, in the run that writes the archive commit,
+    right before it. Nothing is written without the telemetry module, without an issue in
+    the branch name (`branch_issue`), without a phase record (no dispatch chain), or when
+    the branch's range already carries the issue's COST lines (an earlier run that stopped
+    before its archive commit) or cannot be read. A commit that fails leaves the journal as
+    it was — nothing of it may ride into the archive commit — and the merge goes on."""
+    number = branch_issue(branch) if branch else None
+    if not number or not (root / TELEMETRY_MODULE).is_file():
+        return
+    issue = int(number)
+    try:
+        import dispatch as _dispatch  # lazy, as `usage`: bookkeeping never blocks the merge
+        costs = _dispatch.phase_costs(root, issue, branch)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        print(f"finish: the cost of #{issue} was not recorded ({exc})", file=sys.stderr)
+        return
+    if not costs:
+        return
+    recorded = _cost_recorded(root, issue)
+    if recorded is None:
+        print(f"finish: the cost of #{issue} was not recorded — the branch's range cannot be read",
+              file=sys.stderr)
+        return
+    if recorded:
+        print(f"finish: the cost of #{issue} is already recorded on this branch — no second cost commit")
+        return
+    try:
+        import attest as _attest  # the one owner of the journal shard
+        shard = _attest._journal_target(root, root / JOURNAL_DIR)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001
+        print(f"finish: the cost of #{issue} was not recorded ({exc})", file=sys.stderr)
+        return
+    rel = shard.relative_to(root).as_posix()
+    try:
+        old = shard.read_bytes() if shard.is_file() else None
+    except OSError as exc:
+        print(f"finish: the cost of #{issue} was not recorded ({exc})", file=sys.stderr)
+        return
+    text = (old or b"").decode("utf-8", errors="surrogateescape")
+    if text:
+        text += "\n" if text.endswith("\n") else "\n\n"
+    text += "".join(cost_line(issue, c.phase, c.wall_seconds, c.tokens, c.reason) + "\n" for c in costs)
+    try:
+        shard.parent.mkdir(parents=True, exist_ok=True)
+        shard.write_bytes(text.encode("utf-8", errors="surrogateescape"))
+    except OSError as exc:
+        print(f"finish: the cost of #{issue} was not recorded ({exc})", file=sys.stderr)
+        _restore(root, shard, rel, old)
+        return
+    if _sh(root, ["git", "add", "--", rel]) and _sh(root, ["git", "commit", "-q", "-m",
+                                                          COST_SUBJECT.format(issue=issue), "--", rel]):
+        return
+    _restore(root, shard, rel, old)
+    print(f"finish: the cost commit failed — {rel} is restored, nothing of it rides into the "
+          f"archive commit; the merge goes on", file=sys.stderr)
+
+
+def _cost_recorded(root: Path, issue: int) -> bool | None:
+    """Does the branch's range (its fork point to HEAD) already add COST lines of `issue` to
+    the journal? None when the range cannot be read: nothing is written then."""
+    try:
+        base = merge_base(root)
+    except GitReadError:
+        return None
+    if base is None:
+        return None
+    diff = _git("diff", "--no-color", "--no-ext-diff", base, "HEAD", "--", JOURNAL_DIR)
+    if diff is None:
+        return None
+    return any(ln.startswith(f"+COST work={issue} ") for ln in diff.splitlines())
+
+
+def _restore(root: Path, shard: Path, rel: str, old: bytes | None) -> None:
+    """The journal shard as it was before the cost commit: unstaged, its bytes back, or gone."""
+    subprocess.run(["git", "reset", "-q", "--", rel], cwd=str(root), capture_output=True,
+                   env=git_environment())
+    try:
+        if old is None:
+            shard.unlink(missing_ok=True)
+        else:
+            shard.write_bytes(old)
+    except OSError as exc:
+        print(f"finish: restore {rel} by hand ({exc})", file=sys.stderr)
 
 
 _BY_HAND = ("Remaining by hand: remove the worktree if one carried the branch "
