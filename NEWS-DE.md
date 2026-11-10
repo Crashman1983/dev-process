@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.94.0 — Weniger Wiederholung im Durchlauf; Messwerte, die Werkzeuge schreiben
+
+Eine Arbeit fährt für ein Plan-Review nicht mehr die vollen Prüfungen, und `finish` spart einen Lauf. Prüfungen, die nur beim Merge zählen, halten eine Arbeit jetzt schon in `finish` und im Zug an, nicht erst beim Push. Texte, die nach einem sauberen Rebase ein neues Review verlangten, sind korrigiert. Zwei Spec-Kit-Schritte, die nichts verlangte, sind optional. Die Werkzeuge halten jetzt fest, ohne neue Zeile für einen Agenten, was jede Phase einer Arbeit gekostet hat, wie groß eine Arbeit beim Review war und welche Fixes eine Regression einer früheren Arbeit reparieren könnten. Für neue Regeln ist das Template bis zum 8. Dezember eingefroren.
+
 ## v2.93.0 — Stabile AC-Kennungen; ein Design-GO nur mit voller Abdeckung
 
 Jedes Akzeptanzkriterium behält seine Kennung jetzt dauerhaft: Ein gelöschtes wird als zurückgezogen markiert, statt zu verschwinden, und die Prüfung vergleicht mit dem Stand, an dem der Branch begann. So wird ein Kriterium nicht mehr versehentlich umnummeriert. Ein Plan, der ein Kriterium aus der Liste des Produkts zitiert, gilt nicht mehr fälschlich als Träger eines eigenen Kriteriums. Eine Design-Runde listet jetzt ihre Ansichten, Zustände, Bildschirmgrößen und Themes in einer Datei, und ein GO verlangt, dass jedes Kriterium, das sie zeigt, durch einen Design-Zustand oder eine Owner-Entscheidung mit ID abgedeckt ist. Diese Tabelle berechnet die Prüfung selbst.

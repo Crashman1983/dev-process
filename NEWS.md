@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.94.0 — Less repetition in the run; measurements the tools write
+
+A work no longer runs the full checks for a plan review, and `finish` saves one run. Checks that only matter at the merge now stop a work already in `finish` and in the train, not first at the push. Texts that asked for a new review after a clean rebase are corrected. Two Spec Kit steps that nothing required are optional. The tools now record, without any new line for an agent, what each phase of a work cost, how large a work was at its review, and which fixes may repair an earlier work's regression. The template is frozen for new rules until 8 December.
+
 ## v2.93.0 — Stable acceptance ids; a design GO only with full coverage
 
 Every acceptance criterion now keeps its identifier for good: a deleted one is marked as retired instead of disappearing, and the check compares against where the branch started, so a criterion can no longer be renumbered by accident. A plan that cites a criterion of the product's list is no longer misread as having a criterion of its own. A design round now lists its screens, states, screen sizes and themes in one file, and a GO needs every criterion it shows to be covered by a design state or an owner decision with an ID. The check computes that table itself.
