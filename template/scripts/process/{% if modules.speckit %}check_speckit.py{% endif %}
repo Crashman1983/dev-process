@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """speckit gate: the deterministic floor under the Spec Kit integration.
 
-Spec Kit's own quality steps (analyze, checklist, converge) are LLM judgment;
-this gate enforces the two lines a machine can honestly draw (the independent
+Spec Kit's own quality steps (analyze, checklist, converge) are LLM judgment,
+optional, on demand, at every tier; this gate enforces the two lines a machine can honestly draw (the independent
 design review's F3/F7 conditions — prompts alone must not carry rule 5):
 
   - HARD: the constitution pointer marker is missing from
@@ -28,8 +28,9 @@ design review's F3/F7 conditions — prompts alone must not carry rule 5):
   - SOFT: .specify/ missing entirely — expected before `specify init` ran
     (the BOOTSTRAP step); named, never silently green.
   - SOFT: unchecked tasks in an active specs/*/tasks.md — the deterministic
-    completeness signal at review time (replaces an LLM converge pass for
-    Tier 2; the reviewer judges the note, the gate never blocks mid-build).
+    completeness signal at review time (in place of a required LLM converge
+    pass, which stays optional; the reviewer judges the note, the gate never
+    blocks mid-build).
   - SOFT: the /speckit-* skills an active integration installed
     (.specify/integrations/<name>.manifest.json) are not committed, are
     missing from the checkout, or a skill Setup deliberately removes is back;

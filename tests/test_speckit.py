@@ -197,9 +197,28 @@ def test_module_doc_pins_version_and_exit_scenario(render, tmp_path):
     assert "specify-cli==" in doc  # pinned, vendored dependency
     assert "speckit-implement" in doc  # excluded skills named
     assert "Exit scenario" in doc and "freeze the pin" in doc
-    assert "Tier 3" in doc  # analyze/converge reserved for Tier 3 (token economy)
+    # v2.94 D1: analyze and converge are no Tier 3 steps any more — optional, as checklist
+    flat = " ".join(doc.split())
+    assert "`/speckit-converge` (a full LLM pass" in flat and "optional, on demand, like `-checklist`" in flat
     assert "publish_and_prune.py" in doc
     assert "feature.json" in doc  # gitignored per-checkout state
+
+
+def test_analyze_and_converge_are_optional_at_every_tier(render, tmp_path):
+    """v2.94 D1: no incident stands behind the two Tier 3 steps and no gate enforced them;
+    every text calls them optional, on demand, like `-checklist` — the commands stay."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"speckit": True},
+                            "harnesses": {"claude": True, "copilot": True}})
+    texts = {rel: " ".join((out / rel).read_text().split()) for rel in (
+        "docs/process/modules/speckit.md", ".claude/commands/plan.md",
+        ".github/prompts/plan.prompt.md", "docs/process/workflow.md")}
+    for rel, text in texts.items():
+        assert "optional, on demand, like `-checklist`" in text, rel
+        for stale in ("mandatory Tier 3", "reserved for **Tier 3**", "at plan exit for Tier 3",
+                      "at plan exit for **Tier 3"):
+            assert stale not in text, (rel, stale)
+    gate = (out / "scripts/process/check_speckit.py").read_text()
+    assert "for\n    Tier 2;" not in gate and "optional, on demand" in " ".join(gate.split())
 
 
 def test_publish_and_prune_refuses_without_issue_or_sc_accounting(render, tmp_path):

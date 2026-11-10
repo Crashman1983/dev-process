@@ -15,8 +15,8 @@ agent can execute without more context.
 `issue: <ref>` lines to `specs/<feature>/plan.md` (the review and issue
 gates key on them — `docs/process/journal-state-plans.md`). The input spec
 must be clarification-free (the clarification gate blocks unresolved
-markers here). Run `/speckit-analyze` at plan exit for Tier 3 or a heavily
-iterated spec (`docs/process/modules/speckit.md`, token economy).
+markers here). `/speckit-analyze` is optional, on demand, like `-checklist`
+(`docs/process/modules/speckit.md`, token economy).
 
 **Task grain: one task = one behaviour, test AND implementation.** Do not
 split "write the failing test" and "implement" into two tasks — TDD order
