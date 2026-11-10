@@ -175,6 +175,69 @@ def test_speckit_plan_with_pass_is_ready_and_prunes(render, tmp_path):
     assert "publish_and_prune.py specs/009-widget" in r.stdout
 
 
+def _speckit_main(render, tmp_path):
+    """A speckit-rendered repository on `main`, nothing committed yet."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"speckit": True}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    return out
+
+
+def test_a_foreign_finished_spec_is_not_in_this_branchs_tail(render, tmp_path):
+    """v2.94 B1: the tail printed publish_and_prune for every fully ticked spec dir, also
+    for one somebody else finished on main — the same own-spec rule as spec_plan_findings."""
+    out = _speckit_main(render, tmp_path)
+    _spec_dir(out, "005-old", tier=2, ticked=True, issue="#5")
+    _journal(out, "REVIEW work=5 tier=2 reviewer=fresh model=same "
+                  "independence=bundle,non-implementing verdict=pass round=1")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    _spec_dir(out, "009-widget", tier=2, ticked=True, issue="#9")
+    _journal(out, "REVIEW work=9 tier=2 reviewer=fresh model=same "
+                  "independence=bundle,non-implementing verdict=pass round=1", name="2026-07-05.md")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget with pass")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "publish_and_prune.py specs/009-widget" in r.stdout  # its own stays
+    assert "specs/005-old" not in r.stdout, r.stdout
+    assert "range unknown" not in r.stdout
+
+
+def test_without_a_fork_point_every_finished_spec_is_named_with_a_caution(render, tmp_path):
+    """v2.94 B1: no fork point, no range — the own specs are never hidden, so every
+    finished spec stays in the tail, marked."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"speckit": True}})
+    _git(out, "init", "-q", "-b", "feature")  # no integration branch at all: no fork point
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _spec_dir(out, "005-old", tier=1, ticked=True, issue="#5")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: a history without main")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    line = next(ln for ln in r.stdout.splitlines() if "publish_and_prune.py specs/005-old" in ln)
+    assert line.endswith("(range unknown — run only your own)"), line
+
+
+def test_a_foreign_finished_spec_without_review_still_blocks(render, tmp_path):
+    """Guard (v2.94, M4): `speckit_unreviewed` stays unfiltered — the only hard stop for a
+    ticked Tier 2 spec without review that already sits on main."""
+    out = _speckit_main(render, tmp_path)
+    _spec_dir(out, "005-old", tier=2, ticked=True, issue="#5")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    (out / "payload.txt").write_text("mine\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: unrelated")
+    r = _run(out)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "specs/005-old" in r.stdout and "its tasks are all ticked" in r.stdout, r.stdout
+
+
 def test_speckit_plan_in_flight_without_review_blocks(render, tmp_path):
     """#266: a Spec Kit plan this branch carries owes its review at the merge, like an
     active plan — unticked tasks no longer let it through."""
