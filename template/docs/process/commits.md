@@ -81,7 +81,11 @@ to `.process-work/plans/archive/` — this is what the review-presence gate keys
 the active directory is never presence-checked. Do it before the merge, while you
 can still commit on the branch; archiving after the merge would need a direct
 commit to the main branch, which the branching rule (and the `git-hooks`
-pre-commit) forbid.
+pre-commit) forbid. With the `telemetry` module, `finish.py --apply` writes one
+bookkeeping commit right before it, in the same run: `docs: record cost — #<issue>`,
+the work's `COST` lines per phase in the journal (wall time including waits;
+none for a work without a dispatch record or an issue in its branch name —
+`journal-state-plans.md`). The archive commit stays the last.
 
 **Spec-dir plans (`specs/<feature>/plan.md`) do not archive — their merge
 boundary is the fully-ticked `tasks.md`.** The presence question is the same:
@@ -111,7 +115,8 @@ green gates, runnable hooks, clean tree) and prints the remaining steps in
 order. It names a gate suite that *cannot start* apart from one that ran red,
 and a registered hook that cannot run counts as a missing check, which is a
 blocker, never a skip. With `--apply` it executes the deterministic part
-itself — archive commit, rebase, and (only behind the batch's full suite,
+itself — the cost commit where the telemetry module records one, archive
+commit, rebase, and (only behind the batch's full suite,
 `--tests` — the `merge_suite` — or `--tests CMD`; `--tests-passed` only without a `merge_suite`) the ff-only merge, push and branch
 delete — so the tail is one command, not a transcript to retype. Without any
 remote (`git remote` prints nothing) the merge is local: the gates run with the

@@ -24,6 +24,16 @@ Journal duty scales with the tier: entries are expected from Tier 1 upward, or
 whenever a non-obvious decision was made. Tier 0 changes need none — the
 commit message carries them.
 
+**Lines the tools write.** With the `telemetry` module, two measures land in the
+journal that no agent writes: `attest.py` puts a `SIZE` line beside each code
+review's REVIEW line, and `finish.py --apply` records a work's cost — one line per
+phase, `COST work=<issue> phase=<p> wall_seconds=<n> tokens=<n>|- [not-measured: <reason>]`,
+in the issue's shard — in a commit of its own (`docs: record cost — #<issue>`)
+directly before the archive commit, which stays the branch's last. Wall time is
+the phase's stretch of the dispatch window, waits included; a work without a
+dispatch record or without an issue in its branch name gets no line. No gate
+requires or refuses either line; `process_kpis.py` reads them.
+
 ## Branch-scoped state
 
 `.process-work/state/<branch-slug>.md` is per-branch working memory: active work,

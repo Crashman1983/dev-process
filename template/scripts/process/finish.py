@@ -12,7 +12,7 @@ tail as ONE readable verdict instead of a ritual scattered over four docs.
 
 Read-only by default: it verifies and then PRINTS the exact remaining
 commands. With `--apply` it executes the deterministic part itself
-(archive commit, rebase; then merge, push and branch delete only behind the
+(cost commit, archive commit, rebase; then merge, push and branch delete only behind the
 batch's full suite, `--tests CMD` or `--tests-passed`, or for a quiet range
 (bookkeeping and inert paths only, `quiet.py`) without a test run and without
 a certificate) — every step prints its command and the first failure stops in
@@ -22,6 +22,12 @@ clean tree writes the `merge` certificate, so the push to main runs no suite
 again; `--tests` alone runs that `merge_suite`. `--tests-passed` is a claim
 and certifies nothing — it is refused while `merge_suite` is set (#255), and
 without one the push runs the suite itself.
+
+The cost commit (v2.94 E2, only with the telemetry module) comes right before the
+archive commit, in the run that writes it: `docs: record cost — #<issue>`, the journal's
+COST lines per phase of the branch's issue (wall time including waits). No line for a
+work without a dispatch record or an issue in its branch name, none twice on a branch,
+and a cost commit that fails leaves the journal as it was and merges on.
 
 A repository without any remote (`git remote` prints nothing, #330) merges
 locally: no fetch (a local `<default>` ahead of the branch is rebased in), the
@@ -471,7 +477,8 @@ def _certifiable_tree(root: Path, tests: str) -> tuple[str, str, list[str], list
 
 def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     """--apply: execute the deterministic part of the tail instead of
-    printing it for an agent to retype. Archive commit and rebase always;
+    printing it for an agent to retype. Cost commit (`_record_cost`), archive
+    commit and rebase always;
     the merge only behind the batch's full suite — run here via --tests
     CMD, or asserted with --tests-passed. Every step prints its command and
     the first failure stops the run: the tree is then in a state git

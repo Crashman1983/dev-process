@@ -1193,6 +1193,19 @@ def test_no_cost_commit_without_a_phase_record_an_issue_the_module_or_an_archive
     assert not _journal_costs(out)
 
 
+def test_the_docs_name_the_cost_commit_its_place_and_when_there_is_none(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo", "harnesses": {"claude": True},
+                            "modules": {"telemetry": True}})
+    for rel in (".claude/commands/finish.md", "docs/process/commits.md",
+                "docs/process/journal-state-plans.md", "docs/process/modules/telemetry.md"):
+        text = " ".join((out / rel).read_text(encoding="utf-8").split())
+        assert "docs: record cost — #<issue>" in text, rel
+        at = text.index("docs: record cost")
+        assert "before" in text[at - 300:at + 300] and "archive commit" in text, rel  # its place
+        assert "including waits" in text or "waits included" in text, rel
+        assert "without a dispatch record or" in text and "issue in its branch name" in text, rel
+
+
 def test_a_failing_cost_commit_does_not_stop_the_merge_and_the_archive_stays_pure(render, tmp_path):
     """The cost commit is refused: the journal shard is restored before `git mv`, nothing of it
     rides into the archive commit, and the merge goes on."""

@@ -27,7 +27,13 @@ branch, rebase, merge, delete the branch — and prints what is left by hand:
 the worktree, the `publish_and_prune.py` line of each finished spec dir of
 this branch, the issue. Do not improvise the order
 (`docs/process/commits.md`, Merging — the plan archives BEFORE the merge,
-and merge leaves no residue). `finish.py` without `--apply` stays a
+and merge leaves no residue). With the `telemetry` module, the run that
+writes the archive commit first writes the work's cost commit
+(`docs: record cost — #<issue>`, journal only: one `COST` line per phase,
+wall time including waits) directly before it — on the train route too; a
+work without a dispatch record or without an issue in its branch name gets
+none, a branch that already carries one gets no second, and a cost commit
+that fails changes nothing and stops nothing. `finish.py` without `--apply` stays a
 read-only preview: the same verdict and the remaining steps, printed.
 
 A push whose hook may run tests for minutes is never waited out inside a
