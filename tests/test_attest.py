@@ -1033,6 +1033,55 @@ def test_blocked_round_at_walks_through_a_pure_archive_commit(render, tmp_path):
             sys.modules.pop(name, None)
 
 
+def test_blocked_round_at_walks_through_the_cost_commit_but_no_other_journal_record(render, tmp_path):
+    """v2.94 E2: `finish --apply` writes its cost commit right before the archive commit — a
+    commit that only adds COST lines to journal files is walked through (`_cost_only`). A
+    commit that adds another journal record (a decision, a COST line beside one) is no such
+    commit: the chain stops there, as it would for any change."""
+    import argparse
+    import importlib
+    out, base, head = _repo(render, tmp_path)
+    plan, archived = ".process-work/plans/2026-09-10-widget.md", ".process-work/plans/archive/2026-09-10-widget.md"
+    r = _attest(out, "--base", base, "--head", head, "--verdict", "block", "--commit")
+    assert r.returncode == 0, r.stderr
+    shard = next((out / ".process-work/journal").rglob("*.md"))
+    attested = _git(out, "rev-parse", "HEAD").stdout.strip()
+    cost = ("COST work=7 phase=execute wall_seconds=120 tokens=40\n"
+            "COST work=7 phase=review wall_seconds=60 tokens=- not-measured: remote\n")
+
+    def commit_on(name: str, added: str) -> str:
+        _git(out, "checkout", "-q", "-b", name, attested)
+        with shard.open("a", encoding="utf-8") as fh:
+            fh.write(added)
+        _git(out, "commit", "-qam", f"docs: {name}")
+        if name == "cost":
+            (out / archived).parent.mkdir(parents=True, exist_ok=True)
+            _git(out, "mv", plan, archived)
+            _git(out, "commit", "-q", "-m", "docs: archive plan(s) on merge — 2026-09-10-widget.md")
+        tip = _git(out, "rev-parse", "HEAD").stdout.strip()
+        _git(out, "checkout", "-q", "feature")
+        return tip
+    with_cost = commit_on("cost", "\n" + cost)
+    decision = commit_on("decision", "\nDECISION 2026-09-10 agent: keep the widget\n")
+    mixed = commit_on("mixed", "\n" + cost + "a note on the round\n")
+    names = ("attest", "attest_evidence", "check_review", "check_fix_streak", "dispatch", "report",
+             "process_git", "required_records")
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        for name in names:
+            sys.modules.pop(name, None)
+        attest = importlib.import_module("attest")
+        ns = argparse.Namespace(work="widget")
+        assert attest.blocked_round_at(out, ns, with_cost) == 1
+        assert attest.blocked_round_at(out, ns, decision) is None
+        assert attest.blocked_round_at(out, ns, mixed) is None
+        assert not attest._cost_only(out, attested, attested)  # no COST line: no cost commit
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        for name in names:
+            sys.modules.pop(name, None)
+
+
 def test_a_gap_in_the_block_rounds_still_counts_past_the_highest(render, tmp_path):
     """#397 (Kenni 2322-plan): block rounds {1, 3} — a round-2 block was written and
     replaced before commit. Counted as 1 + len, the next verdict lands in round 3 and a
