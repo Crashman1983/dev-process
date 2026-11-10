@@ -32,7 +32,8 @@ in the issue's shard — in a commit of its own (`docs: record cost — #<issue>
 directly before the archive commit, which stays the branch's last. Wall time is
 the phase's stretch of the dispatch window, waits included; a work without a
 dispatch record or without an issue in its branch name gets no line. No gate
-requires or refuses either line; `process_kpis.py` reads them.
+requires or refuses either line. `process_kpis.py cost` reads the COST lines; the
+SIZE lines are kept for a later evaluation, one per work and round counts.
 
 ## Branch-scoped state
 

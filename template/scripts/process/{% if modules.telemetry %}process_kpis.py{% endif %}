@@ -2473,6 +2473,7 @@ def _event(root: Path, table: dict[str, dict], c: dict, earlier: list[str], kind
         if strays and _reaches_root(strays, roots):
             strays = []  # no event below: no lower bound, as before an event existed
         base = p1
+        ev["closes"] = sorted(_claims(message))  # the merge's own closing claims, never a Refs
         issues = _claims(message) | {int(n) for n in _TRAIN_REFS.findall(message)}
         claim = "message"
         if not issues:
@@ -2664,21 +2665,23 @@ def merged_works(root: Path, ref: str | None = None) -> dict:
 # commits that wrote them, and the merge events own those commits. A line another work wrote is
 # a suspicion of that work's regression — computed here, never written: no trailer, no reference
 # on an old issue. Review fixes and later phases of the same work repair their own work.
-# Tests are told by the review bundle's test-path rule, whose one owner is
-# `check_review._is_test_path` (v2.94 E3).
+# Product lines are told by the review's rule, whose one owner is
+# `check_review._fix_pass_counted` (v2.94 E3: no tests, bookkeeping, lock files, changelogs).
 _OLD_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+")
 _BLAME_HEAD = re.compile(r"^([0-9a-f]{40}|[0-9a-f]{64}) \d+ \d+(?: \d+)?$")
 
 
 def _own_issues(ev: dict) -> set[int]:
     """The issues a merge event is the work of: a train merge's branch issue
-    (`check_review.branch_issue`), a finish range's archived plans' issues — never a `Refs #N`,
-    or works under one epic would hide each other (plan review, round 3)."""
+    (`check_review.branch_issue`) and the issues its message closes, a finish range's archived
+    plans' issues — never a `Refs #N`, or works under one epic would hide each other (plan
+    review, round 3). A follow-up branch without a number that closes the same issue is the
+    same work (refute v2.94)."""
     if ev["kind"] != "train":
         return set(ev["issues"])
     import check_review as _review  # noqa: PLC0415
     n = _review.branch_issue(ev["branch"] or "")
-    return {int(n)} if n else set()
+    return ({int(n)} if n else set()) | set(ev.get("closes") or ())
 
 
 def _changed_old_lines(root: Path, parent: str, fix: str) -> list[tuple[str, int, int]] | None:
@@ -2700,10 +2703,12 @@ def _changed_old_lines(root: Path, parent: str, fix: str) -> list[tuple[str, int
         if not status.startswith("A"):  # an added file has no old lines
             pairs.append((parts[i + 1], parts[i + 1]))
         i += 2
-    import check_review as _review  # noqa: PLC0415 — the one test-path rule
+    import check_review as _review  # noqa: PLC0415 — the one product-path rule
     got: list[tuple[str, int, int]] = []
     for old, new in pairs:
-        if _review._is_test_path(old):
+        # what a review counts as product (v2.94 E3): no test, bookkeeping, lock file or
+        # changelog — a dependency bump is no regression of the work that added the lock
+        if not _review._fix_pass_counted(old):
             continue
         # both paths: a path filter on one side cuts the rename off before git detects it
         diff = _git_out(root, "diff", "--unified=0", "-M", *_DIFF, parent, fix, "--",
