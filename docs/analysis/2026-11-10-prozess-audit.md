@@ -670,6 +670,63 @@ Folge für den Vorschlag: Als einziger Reviewer hätte GPT niemanden neben sich,
 
 Als Versuch mit festen Kriterien, zuerst bei Tier 2: GPT als einziger Code-Reviewer für vier Wochen. Gemessen werden Blockquote, Runden je Arbeit, Durchlaufzeit und Korrekturen innerhalb von sieben Tagen, im Vergleich zu den Werten aus den Abschnitten 14 bis 16. Tier 3 folgt, wenn der Vorfall hinter `own_family_from_tier` benannt ist und nicht dagegen spricht.
 
+## 21. Gegenprüfung der drei Maßnahmen und der Reviewer-Frage
+
+Die Optimierungs-Sitzung hat die Abschnitte 14 bis 17 und 20 gegen das Template und Kennis Klon geprüft (zwei Kommentare im PR #407 vom 2026-11-10). Den ersten habe ich erst nach den Entscheidungen in Abschnitt 18 gelesen; die Zustimmung des Owners zu den drei Maßnahmen fiel also ohne diese Einwände. Stichproben habe ich nachgelesen: die Owner-Entscheidung vom 2026-11-02, Kennis Tier-Regel und die Aufgabenformen in Kennis Plänen.
+
+**Was an meinen Zählungen nicht trägt**
+
+- **Die Aufgabenzahl als Anzeiger ist schwächer als dargestellt.** Ich habe Checkbox-Zeilen gezählt und über alle Phasen eines Issues summiert. Von 166 Tier-2+-Plänen in Kenni tragen 61 Checkboxen; Pläne mit anderen Aufgabenformen zählten bei mir als null Aufgaben. Und mehr Phasen bedeuten von selbst mehr Pläne, mehr Reviews und mehr Blocks. Die Korrelation zeigt nicht, dass ein Schnitt hilft.
+- **Produktzeilen aus dem gemergten Diff enthalten die Reparaturrunden.** Blocks treiben die Größe auch, nicht nur umgekehrt. Am ersten Review-Bundle ist eine Arbeit kleiner als in meiner Tabelle.
+- **Der Sprung bei 300 Zeilen ruht auf 12 und 14 Arbeiten**, unter der Mindestzahl von 20, die das Template für ein Band verlangt.
+- **Die 0,06 Blocks kleiner Tier-3-Arbeiten** sind gemessen, nachdem Refute und zweite Familie gelaufen waren. Was diese Zusätze verhindern, zeigt die Zahl nicht.
+
+Der Hauptbefund bleibt: Die Blocks liegen bei wenigen Arbeiten, und Größe und Zahl der Stacks erklären sie besser als das Tier.
+
+**Maßnahme 1 (Größengrenze): so nicht umsetzbar**
+
+- `plan-structure` hat keine Grammatik für Aufgaben und öffnet `tasks.md` nicht. Eine Grenze je Plan braucht zuerst eine einheitliche Aufgabenform; für Kenni ist das eine Migration.
+- „Ein Stack“ lässt sich am Plantext nicht entscheiden. Jede Vertragsänderung berührt in Kenni Backend und erzeugte Frontend-Typen.
+- Gegen eine harte Verweigerung am Bundle steht die eigene Geschichte: v2.52 machte Verweigerungen nach getaner Arbeit zu Hinweisen, v2.77 strich die Verweigerung beim Execute-Start, und der Owner entschied für v2.80 „ohne neue Gates“.
+- Das Bundle misst heute alle Zeilen, nicht Produktzeilen; die Schwellen lassen sich per Umgebungsvariable überschreiben; `attest.py` nimmt auch einen Bereich ohne Bundle an.
+- Vorschlag der Optimierungs-Sitzung: erst die Aufgabenform, dann die Grenze je Plan. Am Bundle keine Verweigerung, sondern ein Pflichtnachweis oberhalb der Schwelle (`size-waived:` mit gebundener Owner-Entscheidung), mit einer einzigen Definition von Produktzeilen.
+
+**Maßnahme 2 (Neuschnitt nach dem zweiten Block): richtig, aber an anderer Stelle**
+
+- `attest.py` kennt die Zahl der Blocks, ist aber der falsche Ort: Eine Verweigerung dort wirft das Review der dritten Runde weg, nachdem es gelaufen ist. Der Halt gehört vor das Review, in das Bundle oder an den Dispatch-Start der dritten Runde.
+- Die 13 % geschriebener REPLAN-Zeilen sind zum Teil ein Messfehler: Die Auswertung verbindet Arbeit und Runde über die exakte Zeichenkette, und Kenni schreibt REPLAN oft unter dem Slug statt der Issue-Nummer.
+- Bestandene Teile gibt es nicht; ein Urteil bindet den ganzen Branch. Ein Neubau heißt neue Branches von main.
+- Damit die Regel sich nicht pro forma erfüllen lässt: Ein `rebuild` zählt nur, wenn der Branch danach neue Plandateien mit eigenem Plan-Review trägt.
+
+**Maßnahme 3 (leichter Weg für kleine Tier-3-Arbeiten): nur zum Teil haltbar**
+
+- Refute und zweite Familie wurden wegen der Risikoklasse eingeführt, nicht wegen der Größe. Eine Änderung von 20 Zeilen kann einen zweiten Eigentümer einer Regel schaffen.
+- Eine Risikokarte nach Pfaden deckt die Klasse nicht ab: Persistenz außerhalb von Migrationen, Sicherheitsfläche, Verträge über Repositories und Nebenläufigkeit lassen sich an Pfaden nicht erkennen.
+- Ein Versuch bräuchte ein Mandat, das Kenni nicht hat, und 20 kleine Tier-3-Arbeiten kommen in 30 Tagen nicht zusammen.
+- Haltbar ist: `analyze` und `converge` streichen. Dahinter steht kein Vorfall und keine Durchsetzung.
+- Der größere Hebel liegt in Kenni: Die lokale Regel macht aus jedem einzelnen Ja auf eine Folgenfrage Tier 3 (`docs/dev/process-risk-tiers.md:85-87`).
+
+**Konflikt mit zwei Owner-Entscheidungen**
+
+- Am 2026-11-02 entschied der Owner, drei Wochen nur zu messen und keine neuen Pflichten einzuführen (`docs/analysis/2026-11-02-v2.81.md:20`); das läuft bis etwa 2026-11-23.
+- Am 2026-11-10 entschied er das Einfrieren bis 2026-12-08.
+- Die Maßnahmen 1 und 2 sind neue Pflichten. Meine Lesart in Abschnitt 18, sie fielen unter die Ausnahme, weil sie Aufwand entfernen sollen, teilt die Optimierungs-Sitzung nicht. Sie brauchen eine ausdrückliche Ausnahme des Owners oder warten bis nach dem Einfrieren.
+
+**GPT als einziger Reviewer: die Regel dahinter**
+
+- Hinter `own_family_from_tier` steht kein durchgerutschter Fehler. Es ist eine Owner-Entscheidung vom 2026-10-15 (Kenni #2612: „E1 übernehmen, Claude bleibt Pflicht ab Tier 3“), die einen Widerspruch zweier Regeln schloss.
+- Laut Optimierungs-Sitzung nennt #241 eine ältere Zählung aus Kenni (#2617): In 176 Tier-3-Runden, die beide Familien prüften, blockierte in 101 von 103 abweichenden Runden nur Codex. Das habe ich nicht nachgelesen; es stützt Abschnitt 20 mit einer größeren Menge.
+- Für einen Versuch bei Tier 2 muss im Template nichts geändert werden. In Kenni steht dem nur Abschnitt 4 von `review.local.md` entgegen, der das Claude-Gate vorschreibt.
+- Für Tier 3 genügt später `own_family_from_tier: 4` in Kenni.
+
+**Reihenfolge nach der Gegenprüfung**
+
+1. In Kenni, als Owner-Entscheidungen ohne Template-Release: GPT als einziger Code-Reviewer bei Tier 2 mit einem Claude-Modell als Bewerter der Blocks; die Tier-Regel „ein Ja ergibt Tier 3“ überprüfen; `inert` und `red_ids` setzen; die REPLAN-Zählung berichtigen.
+2. Template-Release 1 wie in Abschnitt 12, ergänzt um das Streichen von `analyze` und `converge`. Alles darin entfernt Aufwand oder korrigiert Text.
+3. Template-Release 2: der rote Zugpfad (17, dann 16).
+4. Maßnahme 2 in der berichtigten Form und Maßnahme 1 mit Aufgabenform und Pflichtnachweis: nach dem Einfrieren, oder früher mit ausdrücklicher Ausnahme des Owners.
+5. Maßnahme 3 über `analyze` und `converge` hinaus: zurückgestellt.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
