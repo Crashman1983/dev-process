@@ -303,6 +303,77 @@ Bedingungen für das Marker-Signal in Release 2, je mit Negativtest: Ein solcher
 
 **Offen:** Wo die Marker-Datei liegt. Die Optimierungs-Sitzung schlägt einen Pfad im Worktree vor, den der Zug per Umgebungsvariable vorgibt; der Steward das git-dir. Das entscheidet der Plan für Release 2.
 
+## 13. Radikalere Varianten (Auswahl des Owners: 1, 4, 5 und 2)
+
+Anlass: Die Pakete aus Abschnitt 12 reparieren den Zug. Der Aufwand je Arbeitspaket entsteht woanders. Belege aus den eigenen Analysen:
+- 47 % der Blocker ab Runde 2 stammen aus dem Fix der Vorrunde, 39 % sind Plan-Lücken, 0 % Rauschen (`docs/analysis/2026-10-21-v2.77.md:19-26`).
+- Unter 200 Produktzeilen brauchen 10 % der Arbeiten drei oder mehr Runden, über 1.500 Zeilen 53 %; über mehrere Stacks 44 %, in einem 18 % (`docs/analysis/2026-10-28-v2.80.md:14-15`).
+- Ein Fix-Durchgang über 300 Zeilen zog in zwei von drei Folgerunden einen neuen Blocker nach sich (`make_review_bundle.py:793-796`).
+
+Die Zahlen, die für eine Entscheidung noch fehlen, sind beim Steward angefragt: Zeit je Arbeitspaket nach Phase, Runden mit und ohne Plan-Review, Durchrutscher je Tier, Größenverteilung, Aufwand der Template-Updates.
+
+### Variante 1: Größe begrenzen
+
+Heute: ein Hinweis in `/plan` ab etwa 500 Produktzeilen und eine Warnung im Bundle ab 30 Dateien oder 1.500 Zeilen (`make_review_bundle.py:591-592,929`). Beides blockiert nicht.
+
+Vorschlag:
+- Das Bundle für Runde 1 verweigert oberhalb der Grenze, statt zu warnen. Die Zahl misst es schon. Eine Ausnahme ist eine `DECISION`-Zeile des Owners im Plan mit Grund, wie bei `review-waived`.
+- Die Grenze kommt aus den Zahlen des Projekts (`process_kpis.py size`), als Start 500 Produktzeilen und ein Stack.
+- Keine neue Pflichtangabe im Plan. Eine geschätzte Größe ließe sich pro forma erfüllen; die gemessene nicht.
+
+Preis: Jeder Schnitt zahlt den festen Prozess noch einmal (Plan-Review, Review, Attest, Merge). Die Variante lohnt sich deshalb erst richtig zusammen mit Variante 4. Risiko für die Qualität: keins; kleinere Arbeiten werden gründlicher gelesen.
+
+Entscheidende Zahl: Anteil der Arbeiten über 500 Zeilen und ihr Anteil an allen Runden.
+
+### Variante 2: Fix-Schleife umbauen
+
+Heute: Jede blockierte Runde startet eine neue Fix-Sitzung und danach ein neues Review. Ab Runde 2 kommt eine `REPLAN`-Zeile dazu, nach Runde 3 entscheidet der Owner (`verification-independence.md:183-224`).
+
+Vorschlag:
+1. **Ein Block braucht einen ausführbaren Beleg.** Der Reviewer liefert je Blocker einen roten Test oder ein Skript, als Patch am Report, nicht als Commit auf dem Branch. Ohne Beleg ist der Befund ein Rest oder ein Folge-Issue. Ausnahme mit Begründung: Befunde, die sich nicht als Test fassen lassen, etwa eine fehlende Berechtigungsprüfung im Entwurf. Die Skala kennt das schon: Ein gemessener Unterschied alt/neu zählt 100.
+2. **Der Fix-Durchgang ist begrenzt.** Er macht die gelieferten Tests grün und deckt die Geschwisterstellen ab. Über 300 Zeilen ist er kein Fix mehr, sondern ein Neubau mit neuem Plan-Review.
+3. **Runde 2 ist eine Delta-Prüfung durch dieselbe Reviewer-Sitzung.** Sie prüft, ob die Tests grün sind und ob der Fix neue Wege öffnet. Befunde auf Code, der seit Runde 1 unverändert ist, werden in Runde 2 Folge-Issues, außer bei Datenverlust und Sicherheit.
+4. **Nach Runde 2 entscheidet der Owner**, nicht erst nach Runde 3.
+
+Risiko für die Qualität: mittel. Ein spät gefundener Fehler auf unverändertem Code wird mit Folge-Issue gemergt. Die Variante gehört als Versuch nach `optimization.md` gefahren, mit vorher festgelegten Kriterien: Runden je Arbeit, Anteil fix-induzierter Blocker, Durchrutscher innerhalb von sieben Tagen.
+
+Entscheidende Zahl: Anteil der Blocks ab Runde 2 auf seit Runde 1 unveränderten Zeilen (`process_kpis.py rounds`).
+
+### Variante 4: Nachweise aus dem Commit-Strom
+
+Heute: Jede Runde endet mit einem Attest-Commit auf dem Branch, einem Push und einem vollen Gate-Lauf. In Kenni sind das 1.380 Commits in 90 Tagen, 10,7 % aller Commits (Zahl aus dem Kenni-Audit).
+
+**4a, klein:** Ein Push, der gegenüber einem grün gestempelten Stand nur `.process-work/` ändert, fährt nur die Gates, die Journal und Plan lesen. Die Projekt-Gates laufen nicht. Das ist dieselbe Annahme, die der Hook heute für Tests macht („tree passed this push before — gates only“, `pre_push.py:236-237`), und damit keine schwächere Prüfung. Die Projekt-Gates sind in Kenni zwar pfadbegrenzt, aber gegen alle Pfade des Branches, nicht gegen das, was der Push ändert; deshalb laufen sie heute bei jedem Attest-Push mit.
+- Wirkung, Obergrenze: 460 Attest-Commits im Monat mal rund 115 s sind etwa 15 Stunden Gate-Zeit bei 23 Stunden insgesamt. Tatsächlich weniger, weil mehrere Commits in einem Push fahren können.
+- Aufwand: eine Änderung an Hook und Runner; Gate-Code, also Tier 3.
+
+**4b, strukturell:** Der Attest landet nicht mehr als Commit auf dem Branch. Wo alle Worktrees ein Repository teilen, wie in Kenni, schreibt `attest.py` in eine eigene Referenz, gebunden an den geprüften Commit. Der Zug schreibt die Zeilen einer Arbeit beim Merge in das Journal auf main, im Merge-Commit. Die dauerhafte Akte auf main bleibt.
+- Wirkung: ein Commit je Merge statt mehrerer je Runde; die Unterscheidung „Buchhaltung oder Code“ im Review-Gate wird einfacher.
+- Grenze: Cloud-Umgebungen lehnen Pushes auf andere Referenzen ab (`tower.md:340-345`). Für entfernte Reviewer muss der Weg über den Branch bleiben. Damit gäbe es zwei Wege für denselben Nachweis im größten Gate (`check_review.py`, 3.691 Zeilen).
+- Urteil: erst 4a, messen, dann über 4b entscheiden. 4b lohnt nur, wenn 4a den größten Teil nicht holt.
+
+Risiko für die Qualität: gering bei beiden; die Bindung an den geprüften Commit bleibt.
+
+### Variante 5: Prozess einfrieren
+
+Heute: 74 Release-Tags seit Anfang Oktober. Jedes Update ist im Projekt ein Arbeitspaket.
+
+Vorschlag:
+- Bis zu einem festen Datum, etwa acht Wochen: keine neuen Regeln, Gates oder Pflichtzeilen. Erlaubt sind Fehlerkorrekturen, die Arbeit blockieren, und Änderungen, die Aufwand entfernen.
+- Ein Release im Monat. Die Änderungen aus den Abschnitten 12 und 13 fahren gebündelt in einem Release statt in fünf.
+- Jeder Wunsch nach einer neuen Regel wird in der Zeit als Issue gesammelt und am Ende gemeinsam bewertet, mit der Messung aus 9.5 und den Zahlen des Stewards.
+
+Das ist eine Entscheidung des Owners in `MAINTAINING.md`, kein Code. Risiko für die Qualität: gering; eine Lücke, die in der Zeit auffällt, bleibt bis zum nächsten Release offen, sofern sie keine Arbeit blockiert.
+
+Entscheidende Zahl: wie viele Arbeitspakete, Sitzungen und Review-Runden die Template-Updates in Kenni in 30 Tagen gekostet haben.
+
+### Zusammenspiel und Reihenfolge
+
+- 5 zuerst: Es kostet nichts und ändert den Plan aus Abschnitt 12 von fünf Releases auf eines.
+- 1 und 4a in dieses eine Release, zusammen mit Release 1 und 2 aus Abschnitt 12. 1 erhöht die Zahl der Arbeiten, 4a senkt den festen Preis je Arbeit.
+- 2 als Versuch in Kenni, sobald die Zahlen des Stewards vorliegen.
+- 4b, Gate-Merker und Tier 0/1 im Zug bleiben zurückgestellt.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
