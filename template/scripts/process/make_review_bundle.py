@@ -593,8 +593,11 @@ DELTA_ROUND_RULE = ("Judge the fix diff and the open findings, and re-check the 
 # five to seven rounds were 3,000–5,500 changed lines or a batch of issues
 REVIEW_MAX_FILES = int(os.environ.get("PROCESS_REVIEW_MAX_FILES", "30"))
 REVIEW_MAX_LINES = int(os.environ.get("PROCESS_REVIEW_MAX_LINES", "1500"))
-SIZE_IGNORED = re.compile(r"^\.process-work/|(^|/)(package-lock\.json|uv\.lock|poetry\.lock|yarn\.lock|"
-                          r"pnpm-lock\.yaml|Cargo\.lock|go\.sum)$")
+# what a size leaves out has one owner, the review gate (v2.94 E3): bookkeeping and lock
+# files here; tests and changelogs too for a fix pass and the journal's SIZE line
+SIZE_IGNORED = _review_gate.SIZE_IGNORED
+_is_test_path, _fix_pass_counted = _review_gate._is_test_path, _review_gate._fix_pass_counted
+_numstat = _review_gate._numstat
 
 
 # gate code as `docs/process/refute.md` defines it — the review gate owns the paths
@@ -719,26 +722,6 @@ def _shown(path: str) -> str:
     return "".join(c if c.isprintable() else repr(c)[1:-1] for c in path)
 
 
-def _numstat(out: bytes) -> list[tuple[str, int]]:
-    """(path, changed lines) of `git diff --numstat -z` output; a binary counts 0.
-    -z: a quoted non-ASCII name escaped a path filter. Each entry is
-    "added\\tdeleted\\tpath"; a rename leaves the path empty and names the old
-    and the new path in the next two fields."""
-    entries = []
-    fields = iter(out.decode(errors="surrogateescape").split("\0"))
-    for field in fields:
-        parts = field.lstrip("\n").split("\t", 2)
-        if len(parts) < 3:
-            continue
-        path = parts[2]
-        if not path:
-            next(fields, None)
-            path = next(fields, "")
-        changed = int(parts[0]) + int(parts[1]) if parts[0].isdigit() and parts[1].isdigit() else 0
-        entries.append((path, changed))
-    return entries
-
-
 def review_size(root: Path, base_ref: str) -> tuple[int, int]:
     """(files, changed lines) of the whole branch — process bookkeeping,
     lock files and binaries left out."""
@@ -751,15 +734,6 @@ def review_size(root: Path, base_ref: str) -> tuple[int, int]:
 # lines were followed by a fix-induced blocker in 67–100 % of next rounds (n=13); by
 # findings, six to nine in 46 % of rounds, ten or more in 86 %
 FIX_PASS_MAX_LINES = 300
-_CHANGELOG_FRAGMENTS = re.compile(r"(^|/)changelog\.d/", re.IGNORECASE)
-
-
-def _fix_pass_counted(rel: str) -> bool:
-    """A line a fix pass writes into the product: not a test, not what the SIZE WARNING
-    leaves out (bookkeeping, lock files), no changelog or changelog fragment."""
-    return not (_is_test_path(rel) or rel.startswith(_review_gate.BOOKKEEPING)
-                or SIZE_IGNORED.search(rel) or _CHANGELOG_FRAGMENTS.search(rel)
-                or rel.rsplit("/", 1)[-1].upper().startswith("CHANGELOG"))
 
 
 def fix_pass_size(root: Path, since: str, head: str) -> int | None:
@@ -849,16 +823,8 @@ def _transitions_note(text: str, vocabulary: tuple[str, ...]) -> str | None:
             "but has no `## Transitions` section; design-template.md asks for state × event → result)*\n")
 
 
-_TEST_DIRS = frozenset({"test", "tests", "spec", "specs", "__tests__"})
-_TEST_NAME = re.compile(r"^(?:test_.+\..+|.+_test\..+|.+\.spec\..+|.+\.(?:vi)?test\..+|conftest\.py)$")
 _PROSE = (".md", ".rst", ".txt")
 _CONFIG = (".json", ".yaml", ".yml", ".toml", ".lock", ".ini", ".cfg", ".env")
-
-
-def _is_test_path(rel: str) -> bool:
-    """A test file by path: a test directory segment or a test file name."""
-    *dirs, name = rel.split("/")
-    return any(d in _TEST_DIRS for d in dirs) or bool(_TEST_NAME.match(name))
 
 
 def _is_code_path(rel: str) -> bool:
@@ -935,6 +901,12 @@ def build(root: Path, base: str | None, plan_filter: str | None = None,
                 "Reviews this large ran five to seven rounds downstream. Split it before the "
                 "first round if the plan allows; otherwise say so in the verdict and review "
                 "it slice by slice.\n")
+        if not plan_review:
+            # the number attest records as this round's SIZE line (v2.94 E3): the same range
+            size = _review_gate.review_lines(root, resolved, "HEAD")
+            add(f"Review size: {size.lines} changed lines in {size.files} file(s), tests, bookkeeping, "
+                "lock files and changelogs left out (the round's `SIZE` journal line).\n" if size else
+                "*(review size unavailable: git could not count the branch's changed lines)*\n")
 
     # read where attest reads it: at the fork point the REVIEW_ARTIFACT names, not main's tip
     refute_rows, rows_problem = _refute_rows(root, _fork(root, resolved) if resolved else None)

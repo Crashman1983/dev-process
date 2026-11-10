@@ -1397,3 +1397,53 @@ def test_feature_registry_config_files_are_gate_files():
     cr = _cr()
     assert cr.is_gate_path("docs/process/feature-registry.json")
     assert cr.is_gate_path("docs/process/feature-registry.local.json")
+
+
+# --- v2.94 E3: the size of a review round --------------------------------------------
+
+def _size_repo(root: Path) -> tuple[str, str]:
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    (root / "old.py").write_text("".join(f"line {i}\n" for i in range(20)), encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    base = _git(root, "rev-parse", "HEAD").stdout.strip()
+    _git(root, "checkout", "-q", "-b", "feature")
+    files = {"src/app.py": "a\nb\nc\n",                         # 3 product lines
+             "tests/test_app.py": "t\n" * 7,                    # a test directory
+             "src/app_test.go": "t\n" * 5,                      # a test file name
+             ".process-work/journal/2026-11-10.md": "j\n" * 9,  # bookkeeping
+             "uv.lock": "l\n" * 11, "web/package-lock.json": "l\n" * 4,  # lock files
+             "CHANGELOG.md": "c\n" * 6, "changelog.d/1.md": "c\n" * 2}  # changelogs
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    (root / "src").mkdir(exist_ok=True)
+    _git(root, "mv", "old.py", "src/moved.py")  # a pure move: no line, one file
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "feat: app")
+    return base, _git(root, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_review_lines_leaves_out_tests_bookkeeping_lockfiles_and_changelogs(tmp_path):
+    cr, root = _cr(), tmp_path / "p"
+    base, head = _size_repo(root)
+    size = cr.review_lines(root, base, head)
+    assert (size.lines, size.files) == (3, 2), size  # src/app.py, src/moved.py
+    assert cr.review_lines(root, base, "0" * 40) is None  # git cannot tell: no number
+
+
+def test_the_size_helpers_have_one_owner():
+    cr = _cr()
+    assert cr._is_test_path("pkg/tests/x.py") and cr._is_test_path("conftest.py")
+    assert not cr._is_test_path("src/testing_tools.py")
+    assert cr._fix_pass_counted("src/a.py")
+    assert not any(cr._fix_pass_counted(p) for p in ("tests/a.py", ".process-work/x.md", "uv.lock",
+                                                     "CHANGELOG-DE.md", "changelog.d/x.md"))
+    bundle = (_CR.parent / "make_review_bundle.py").read_text(encoding="utf-8")
+    for name in ("_is_test_path", "_fix_pass_counted", "_numstat"):
+        assert f"def {name}(" not in bundle, name
+    for name in ("_TEST_DIRS", "_TEST_NAME", "SIZE_IGNORED", "_CHANGELOG_FRAGMENTS"):
+        assert f"\n{name} = re.compile" not in bundle and f"\n{name} = frozenset" not in bundle, name
