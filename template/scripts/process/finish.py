@@ -193,6 +193,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     global ROOT
     ROOT = root
+    check.green_at = None  # (HEAD SHA, merge target) of a green gate run on a clean tree
     branch = _git("rev-parse", "--abbrev-ref", "HEAD")
     if branch is None:
         return ["not a git repository (or git missing)"], []
@@ -330,12 +331,16 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         # with the merge target, as the push to main runs them: a merge finding blocks
         # here, before the archive commit, not first at the push (v2.94 C1);
         # git_environment(extra) replaces os.environ, so the inherited one is spread in
+        target = f"refs/heads/{default}"
+        head = _git("rev-parse", "HEAD")
         gr = subprocess.run(argv, cwd=str(root), capture_output=True, text=True,
-                            env=git_environment({**os.environ, PUSH_TARGETS_ENV: f"refs/heads/{default}"}))
+                            env=git_environment({**os.environ, PUSH_TARGETS_ENV: target}))
         if gr.returncode != 0:
             last = [ln for ln in (gr.stdout + gr.stderr).splitlines()
                     if ln.strip()][-3:]
             blockers.append("gate suite red: " + " | ".join(last))
+        elif head and not dirty:
+            check.green_at = (head, target)  # the local merge reuses it (v2.94 B3)
 
     check.last_archive = list(to_archive)  # apply() reuses the same verdict
     check.last_spec_steps = list(spec_steps)  # … and prints these after the merge
@@ -664,17 +669,23 @@ def _by_hand() -> str:
 def _merge_locally(root: Path, branch: str, default: str, other: Path | None) -> int:
     """The merge of a repository without a remote (#330). Nothing is pushed, so no
     pre-push runs the gates: they run here first, with the merge target, as the
-    push to main would run them — red merges nothing. No route marker and no
+    push to main would run them — red merges nothing; a green check() of this
+    same run on this HEAD and a clean tree already did (`_seen_green`). No route marker and no
     certificate: both have the pre-push as their only reader. `other` is the
     checkout that holds `default` when it is not this one: the fast-forward
     happens there, and this branch stays (it is checked out here)."""
-    argv = gate_runner_argv(root)
-    if argv is None:
-        print(f"finish: gate suite NOT RUNNABLE (not red): {not_runnable_reason(root)} — nothing merged")
-        return 1
-    if not _sh(root, argv, {PUSH_TARGETS_ENV: f"refs/heads/{default}"}):
-        print(f"finish: the gates are red for the merge into {default} — nothing merged")
-        return 1
+    target = f"refs/heads/{default}"
+    if _seen_green(target):
+        print(f"finish: the gates ran green in this run on this HEAD with the merge target "
+              f"{target}, on a clean tree — not run again")
+    else:
+        argv = gate_runner_argv(root)
+        if argv is None:
+            print(f"finish: gate suite NOT RUNNABLE (not red): {not_runnable_reason(root)} — nothing merged")
+            return 1
+        if not _sh(root, argv, {PUSH_TARGETS_ENV: target}):
+            print(f"finish: the gates are red for the merge into {default} — nothing merged")
+            return 1
     if other is not None:
         if _git("merge-base", "--is-ancestor", default, "HEAD") is None:
             print(f"finish: {default} is not an ancestor of HEAD — rebase onto {default} "
@@ -696,6 +707,17 @@ def _merge_locally(root: Path, branch: str, default: str, other: Path | None) ->
             f"delete it there.")
     print(f"finish: merged {branch} into {default} locally (the repository has no remote).{kept} {_by_hand()}")
     return 0
+
+
+def _seen_green(target: str) -> bool:
+    """check() saw the gates green in THIS process on the current HEAD, with a clean tree
+    and this merge target (v2.94 B3). Nothing is stamped or kept across processes: after
+    an archive commit or a rebase HEAD is another commit, and a tree left dirty since —
+    or one git cannot read — runs them again."""
+    seen = getattr(check, "green_at", None)
+    if seen is None or seen[1] != target:
+        return False
+    return _git("rev-parse", "HEAD") == seen[0] and _git("status", "--porcelain") == ""
 
 
 def _done(root: Path, branch: str) -> None:
