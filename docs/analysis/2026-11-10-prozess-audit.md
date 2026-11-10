@@ -583,7 +583,7 @@ Gezählt sind Checkbox-Zeilen in Plan und Aufgabenliste, über alle Phasen eines
 | Entscheidung | Inhalt | Umsetzung |
 |---|---|---|
 | Einfrieren | Vier Wochen, bis 2026-12-08: keine neuen Regeln, Gates oder Pflichtzeilen im Template. Erlaubt sind Korrekturen, die Arbeit blockieren, und Änderungen, die Aufwand entfernen. | Eintrag in `MAINTAINING.md` durch die Optimierungs-Sitzung; offen |
-| Zweite Modellfamilie in Kenni | Bei Tier 2 keine Pflicht mehr; es gilt der Template-Wert (ab Tier 3). | In Kenni durch den Steward, nach Bestätigung beim Owner: `model-policy.local.json:44`, `review.local.md:173`, `docs/dev/process-risk-tiers.md:138`; offen |
+| Zweite Modellfamilie in Kenni | Zunächst: bei Tier 2 keine Pflicht mehr. Nach der Zählung in Abschnitt 19 vom Owner am selben Tag ersetzt durch die Richtung in Abschnitt 20: GPT als Standardweg und einziger Reviewer. Die Streichung ist zurückgezogen. | Steward ist informiert; nichts geändert |
 | Drei Maßnahmen (Abschnitt 17) | Größengrenze mit den Startwerten zehn Aufgaben, 300 und 500 Produktzeilen; Neuschnitt nach dem zweiten Block; leichter Weg für kleine Arbeiten. | Gegenprüfung durch die Optimierungs-Sitzung steht aus; danach Freigabe der Umsetzung |
 
 Die drei Maßnahmen fallen unter die Ausnahme des Einfrierens: 1 und 2 sind neue Grenzen, die Aufwand entfernen sollen; 3 nimmt Pflichten weg. Ob sie während der vier Wochen ausgeliefert werden oder am Ende gebündelt, ist mit der Freigabe zu entscheiden.
@@ -618,6 +618,39 @@ Von 185 Tier-2-Review-Runden liefen 111 mit zweiter Familie. Blockiert wurden da
 - Rund die Hälfte davon sind Testlücken: ein Akzeptanzkriterium ohne Test, der rot werden kann. Die andere Hälfte sind Fehler im Code.
 - Grenzen der Zählung: 28 % der Befunde tragen kein `by=`. Wer zuerst liest, bekommt den Befund zugeschrieben; ob die eigene Familie ihn allein auch gefunden hätte, zeigt die Zählung nicht.
 - Die Entscheidung des Owners vom 2026-11-10, die Pflicht bei Tier 2 zu streichen, wurde vor dieser Zählung getroffen.
+
+## 20. GPT als einziger Reviewer: was die Journale dazu sagen
+
+Richtung des Owners nach Abschnitt 19: `gpt-6.1-sol` soll Standardweg und einziger Reviewer sein können. Geprüft an den `REVIEW`-Zeilen aus Kenni.
+
+**Dieselbe Runde, von beiden Familien in getrennten Zeilen beurteilt** (91 Runden, alle GPT-Modelle zusammen)
+
+| | GPT blockiert | GPT lässt durch |
+|---|---:|---:|
+| Claude blockiert | 32 | 5 |
+| Claude lässt durch | 31 | 23 |
+
+- Von 68 Runden mit mindestens einem Block hätte GPT allein 63 blockiert (93 %), Claude allein 37 (54 %).
+- Als einziger Reviewer verlöre GPT 5 Runden, die nur Claude blockierte. Claude allein verlöre 31.
+- Die Auswahl ist nicht neutral: Getrennte Zeilen entstehen eher, wenn die Urteile auseinandergehen.
+
+**Was offen ist**
+
+- Zu `gpt-6.1-sol` selbst gibt es wenig: 8 Code-Review-Zeilen und 26 Plan-Review-Zeilen. Die Zahlen oben stammen überwiegend von `gpt-6-astra` und `gpt-6-sol`.
+- Ob die 31 Blocks, die nur GPT setzte, hielten, ist nicht gezählt. Die Regel aus v2.63, dass ein Codex-Block erst ab Score 80 zählt, spricht für Fehlalarme in der Vergangenheit. Bei Tier 2 trugen 34 von 38 schweren Befunden der zweiten Familie `action=fix`.
+- Ein strengerer Reviewer bedeutet mehr blockierte Runden. Runden mit zweiter Familie wurden bei Tier 2 zu 39 % blockiert, ohne zu 28 %.
+- Bei den Plan-Reviews von Tier 2 fand die eigene Familie mehr schwere Befunde (42 gegen 28).
+
+**Was dafür geändert werden müsste**
+
+- Im Template wenig: Der Voreinstellungswert `own_family_from_tier` ist 4 („nie“), und ein Codex-Review über den Dispatcher schreibt seit v2.73 eine vollständige `REVIEW`-Zeile. Ob `/review` und die Dispatch-Kette den Claude-Reviewer an weiteren Stellen voraussetzen, ist nicht geprüft.
+- In Kenni: die Review-Zelle der Modell-Policy, `own_family_from_tier: 3` (heute klärt ab Tier 3 nur ein Pass der eigenen Familie) und Abschnitt 4 von `review.local.md`, der das Claude-Gate vorschreibt.
+- Die Regel sollte „Reviewer aus der anderen Familie als der Implementierer“ lauten. Wo Claude baut, ist ein GPT-Review für sich schon familienübergreifend. Wo Codex baut, wäre GPT als Reviewer dieselbe Familie.
+- Ein Rückfall auf den Claude-Reviewer, wenn das Codex-CLI nicht verfügbar ist, mit sichtbarem Vermerk.
+
+**Vorschlag**
+
+Als Versuch mit festen Kriterien, zuerst bei Tier 2: GPT als einziger Code-Reviewer für vier Wochen. Gemessen werden Blockquote, Runden je Arbeit, Durchlaufzeit und Korrekturen innerhalb von sieben Tagen, im Vergleich zu den Werten aus den Abschnitten 14 bis 16. Tier 3 folgt, wenn der Vorfall hinter `own_family_from_tier` benannt ist und nicht dagegen spricht.
 
 ## Anhang: Befunde außerhalb des Fokus
 
