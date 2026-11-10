@@ -45,8 +45,10 @@ Checks, in order:
      merge base the check stays conservative (every active plan).
   4. the registered local hooks can actually run (gate_invoke's hook doctor)
      — a check that is missing is a blocker, never a skip
-  5. the gate suite is green (gate_runner, launched via gate_invoke); "not
-     runnable" is reported distinctly from "red"
+  5. the gate suite is green (gate_runner, launched via gate_invoke) with the
+     merge target (`PROCESS_PUSH_TARGETS=refs/heads/<default>`), as the push
+     to main runs it: a merge finding blocks here, not first at the push;
+     "not runnable" is reported distinctly from "red"
 Then it prints the tail: archive plan(s) -> merge -> delete branch ->
 remove worktree -> publish/prune where those modules are installed, for the
 finished spec dirs this branch's range touches (every one, marked, when the
@@ -325,7 +327,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         blockers.append(f"gate suite NOT RUNNABLE (not red): "
                         f"{not_runnable_reason(root)}")
     else:
-        gr = subprocess.run(argv, cwd=str(root), capture_output=True, text=True, env=git_environment())
+        # with the merge target, as the push to main runs them: a merge finding blocks
+        # here, before the archive commit, not first at the push (v2.94 C1);
+        # git_environment(extra) replaces os.environ, so the inherited one is spread in
+        gr = subprocess.run(argv, cwd=str(root), capture_output=True, text=True,
+                            env=git_environment({**os.environ, PUSH_TARGETS_ENV: f"refs/heads/{default}"}))
         if gr.returncode != 0:
             last = [ln for ln in (gr.stdout + gr.stderr).splitlines()
                     if ln.strip()][-3:]
