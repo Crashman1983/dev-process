@@ -2612,3 +2612,208 @@ def test_report_runs_the_families_the_doc_names(render, tmp_path):
     assert f"`report` runs {listed}" in doc
     for family in ("works", "load", "size"):
         assert f"| `{family}` |" in doc
+
+
+# --- v2.94 E1: regression suspicion, computed from git blame at read time ------------------
+
+def _alpha(out: Path) -> None:
+    """#7 merged by the train: `src/a.py` with ten lines."""
+    _train_merge(out, "7-alpha", [("feat: alpha (#7)", {"src/a.py": _lines(10, "a")}, _at(3))],
+                 "train: merge 7-alpha\n\nCloses #7", _at(4, 12))
+
+
+def _edit(text: str, *rows: int, tag: str = "fixed") -> str:
+    lines = text.splitlines(keepends=True)
+    for i in rows:
+        lines[i] = f"{tag} {i}\n"
+    return "".join(lines)
+
+
+def _suspicion(out: Path, window: str = "2026-03-05:") -> dict:
+    m = _flow_module(out)
+    return m.regression_suspicion(out, *m._window(window))
+
+
+def _shape(s: dict) -> tuple:
+    return (s["evaluated"], [p["issue"] for p in s["suspected"]], sorted(o["why"] for o in s["open"]),
+            s["repairs"], s["no_lines"])
+
+
+def test_a_fix_of_an_earlier_works_line_is_suspected_as_its_regression(render, tmp_path):
+    """E1: a fix merged later changes a line #7's merge wrote — "suspected regression of #7",
+    computed from `git blame` at the fix's parent; the `Regression-of:` trailer is counted
+    apart, never folded in; nothing is written."""
+    out = _merges_repo(render, tmp_path)
+    _alpha(out)
+    _train_merge(out, "8-fix", [("fix: guard alpha (#8)\n\nRegression-of: #7",
+                                 {"src/a.py": _edit(_lines(10, "a"), 3)}, _at(5))],
+                 "train: merge 8-fix\n\nCloses #8", _at(6, 12))
+    head = _g(out, "rev-parse", "HEAD")
+    s = _suspicion(out)
+    assert _shape(s) == (1, [7], [], 0, 0), s
+    assert s["trailers"] == 1
+    fix = _g(out, "rev-parse", "8-fix")
+    assert s["suspected"][0]["fix"] == fix and s["suspected"][0]["origin"] == _g(out, "rev-parse", "HEAD^1")
+    text = _cli(out, "works", "--window", "2026-03-05:")
+    assert _g(out, "rev-parse", "HEAD") == head and not _g(out, "status", "--porcelain")
+    assert "regression suspicion" in text, text
+    line = next(ln for ln in text.splitlines() if "fix commits evaluated" in ln)
+    assert "fix commits evaluated 1" in line and "suspected 1" in line and "open 0" in line, line
+    assert "Regression-of: trailers 1 (counted apart)" in line, line
+    assert f"{fix[:12]} fix: guard alpha (#8) → #7" in text, text
+    got = json.loads(_cli(out, "works", "--window", "2026-03-05:", "--json"))["regression_suspicion"]
+    assert got["evaluated"] == 1 and got["suspected"][0]["issue"] == 7
+    # without a window `works` would blame the whole history: no E1 at all
+    assert "regression suspicion" not in _cli(out, "works")
+    assert "regression_suspicion" not in json.loads(_cli(out, "works", "--json"))
+
+
+def test_a_review_fix_inside_its_own_train_branch_is_no_suspicion(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "7-alpha", [("feat: alpha (#7)", {"src/a.py": _lines(10, "a")}, _at(3)),
+                                  ("fix: review round 1 (#7)", {"src/a.py": _edit(_lines(10, "a"), 2)}, _at(3, 12))],
+                 "train: merge 7-alpha\n\nCloses #7", _at(4, 12))
+    assert _shape(_suspicion(out, "2026-03-04:")) == (1, [], [], 1, 0)
+
+
+def test_a_review_fix_inside_a_finish_range_is_no_suspicion(render, tmp_path):
+    """A fast-forward cannot tell the branch's commits apart: the range of the `finish` event
+    is the work's own, and a fix of a line inside it repairs that work."""
+    out = _merges_repo(render, tmp_path)
+    _alpha(out)
+    _finish_merge(out, "8-beta", [
+        ("docs: plan beta", {".process-work/plans/2026-03-05-beta.md": _plan_text(8)}, _at(5)),
+        ("feat: beta (#8)", {"src/b.py": _lines(6, "b")}, _at(6)),
+        ("fix: review round 1 (#8)", {"src/b.py": _edit(_lines(6, "b"), 1)}, _at(7))],
+        ["2026-03-05-beta.md"], _at(10, 12))
+    assert _shape(_suspicion(out, "2026-03-09:")) == (1, [], [], 1, 0)
+
+
+def test_a_fix_of_an_earlier_phase_of_the_same_issue_is_no_suspicion(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "9-one", [("feat: phase one (#9)", {"src/a.py": _lines(10, "a")}, _at(2))],
+                 "train: merge 9-one\n\nRefs #9", _at(3, 12))
+    _train_merge(out, "9-two", [("fix: phase one's edge (#9)", {"src/a.py": _edit(_lines(10, "a"), 4)}, _at(5))],
+                 "train: merge 9-two\n\nCloses #9", _at(6, 12))
+    assert _shape(_suspicion(out)) == (1, [], [], 1, 0)
+
+
+def test_a_fix_whose_lines_go_back_to_two_merges_stays_open(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _alpha(out)
+    _train_merge(out, "8-beta", [("feat: beta (#8)", {"src/b.py": _lines(6, "b")}, _at(4, 14))],
+                 "train: merge 8-beta\n\nCloses #8", _at(4, 18))
+    _train_merge(out, "10-fix", [("fix: both (#10)", {"src/a.py": _edit(_lines(10, "a"), 1),
+                                                     "src/b.py": _edit(_lines(6, "b"), 1)}, _at(5))],
+                 "train: merge 10-fix\n\nCloses #10", _at(6, 12))
+    assert _shape(_suspicion(out)) == (1, [], ["several-origins"], 0, 0)
+
+
+def test_an_origin_naming_no_issue_or_several_gives_no_suspicion(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "misc", [("feat: misc", {"src/m.py": _lines(5, "m")}, _at(2))],
+                 "train: merge misc", _at(2, 12))
+    _finish_merge(out, "11-pair", [
+        ("docs: plans", {".process-work/plans/2026-03-03-one.md": _plan_text(11),
+                         ".process-work/plans/2026-03-03-two.md": _plan_text(12)}, _at(3)),
+        ("feat: one and two (#11)", {"src/p.py": _lines(5, "p")}, _at(3, 12))],
+        ["2026-03-03-one.md", "2026-03-03-two.md"], _at(4, 12))
+    _train_merge(out, "10-fix", [("fix: misc (#10)", {"src/m.py": _edit(_lines(5, "m"), 1)}, _at(5))],
+                 "train: merge 10-fix\n\nCloses #10", _at(6, 12))
+    _train_merge(out, "13-fix", [("fix: pair (#13)", {"src/p.py": _edit(_lines(5, "p"), 1)}, _at(7))],
+                 "train: merge 13-fix\n\nCloses #13", _at(8, 12))
+    assert _shape(_suspicion(out)) == (2, [], ["origin-issues", "origin-issues"], 0, 0)
+
+
+def test_only_fix_commits_on_non_test_lines_are_judged(render, tmp_path):
+    """A `feat:` that changes #7's line is no fix; `fixup!` and `fixture…` are no `fix` kind
+    (`_commit_kind`); a fix that changes test lines only has nothing to blame."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "7-alpha", [("feat: alpha (#7)", {"src/a.py": _lines(10, "a"),
+                                                        "tests/test_a.py": _lines(4, "t")}, _at(3))],
+                 "train: merge 7-alpha\n\nCloses #7", _at(4, 12))
+    _train_merge(out, "10-misc", [
+        ("feat: tweak alpha (#10)", {"src/a.py": _edit(_lines(10, "a"), 1)}, _at(5)),
+        ("fixup! feat: tweak alpha", {"src/a.py": _edit(_lines(10, "a"), 1, 2)}, _at(5, 10)),
+        ("fixture: alpha data (#10)", {"src/a.py": _edit(_lines(10, "a"), 1, 2, 3)}, _at(5, 11)),
+        ("fix: the alpha test (#10)", {"tests/test_a.py": _edit(_lines(4, "t"), 1)}, _at(5, 12))],
+        "train: merge 10-misc\n\nCloses #10", _at(6, 12))
+    assert _shape(_suspicion(out)) == (1, [], [], 0, 1)
+
+
+def test_an_origin_in_a_stray_or_mixed_range_stays_open(render, tmp_path):
+    """Limit (r3): a `finish` range is mixed once a product commit names no issue — a
+    suspicion into such a finish work stays open; so does one into a stray commit."""
+    out = _merges_repo(render, tmp_path)
+    _alpha(out)
+    _put(out, "feat: straight onto main", {"src/s.py": _lines(5, "s")}, _at(4, 14))  # no marker
+    _train_merge(out, "8-beta", [("feat: beta (#8)", {"src/c.py": _lines(3, "c")}, _at(4, 16))],
+                 "train: merge 8-beta\n\nCloses #8", _at(4, 18))  # the stray lies in its range's strays
+    _finish_merge(out, "9-gamma", [
+        ("docs: plan gamma", {".process-work/plans/2026-03-05-gamma.md": _plan_text(9)}, _at(5)),
+        ("feat: gamma", {"src/g.py": _lines(6, "g")}, _at(5, 12))],  # no issue in the subject
+        ["2026-03-05-gamma.md"], _at(6, 12))
+    m = _flow_module(out)
+    gamma = next(e for e in m.merge_events(out)["events"] if e["issues"] == [9])
+    assert gamma["mixed"] and gamma["bounded"]
+    _train_merge(out, "10-fix", [("fix: stray (#10)", {"src/s.py": _edit(_lines(5, "s"), 1)}, _at(7))],
+                 "train: merge 10-fix\n\nCloses #10", _at(8, 12))
+    _train_merge(out, "11-fix", [("fix: gamma (#11)", {"src/g.py": _edit(_lines(6, "g"), 1)}, _at(9))],
+                 "train: merge 11-fix\n\nCloses #11", _at(10, 12))
+    assert _shape(_suspicion(out, "2026-03-07:")) == (2, [], ["mixed-origin", "no-event"], 0, 0)
+
+
+def test_a_fix_in_a_mixed_event_stays_open(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _alpha(out)
+    _train_merge(out, "10-fix", [("fix: guard alpha (#10)", {"src/a.py": _edit(_lines(10, "a"), 1)}, _at(5)),
+                                 ("chore: another work's change (#99)", {"src/o.py": _lines(2)}, _at(5, 12))],
+                 "train: merge 10-fix\n\nCloses #10", _at(6, 12))
+    assert _shape(_suspicion(out)) == (1, [], ["mixed-fix"], 0, 0)
+
+
+def test_a_blame_git_cannot_answer_stays_open(render, tmp_path, monkeypatch):
+    """A timeout is no answer: open, never "no suspicion"."""
+    out = _merges_repo(render, tmp_path)
+    _alpha(out)
+    _train_merge(out, "8-fix", [("fix: guard alpha (#8)", {"src/a.py": _edit(_lines(10, "a"), 3)}, _at(5))],
+                 "train: merge 8-fix\n\nCloses #8", _at(6, 12))
+    m = _flow_module(out)
+    real = m._git_out
+    monkeypatch.setattr(m, "_git_out", lambda root, *a, **kw: None if a[0] == "blame" else real(root, *a, **kw))
+    s = m.regression_suspicion(out, *m._window("2026-03-05:"))
+    assert _shape(s) == (1, [], ["git"], 0, 0), s
+
+
+def test_works_sharing_only_a_refs_issue_do_not_hide_a_regression(render, tmp_path):
+    """r3: own issues only — two works under one epic (`Refs #9`) are no phases of one work."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "5-x", [("feat: x (#5)", {"src/a.py": _lines(10, "a")}, _at(2))],
+                 "train: merge 5-x\n\nCloses #5\nRefs #9", _at(3, 12))
+    _train_merge(out, "6-y", [("fix: x's edge (#6)", {"src/a.py": _edit(_lines(10, "a"), 5)}, _at(5))],
+                 "train: merge 6-y\n\nCloses #6\nRefs #9", _at(6, 12))
+    s = _suspicion(out)
+    assert _shape(s) == (1, [5], [], 0, 0), s
+    assert s["trailers"] == 0
+
+
+def test_a_fix_that_renames_the_file_is_blamed_through_the_old_path(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    _alpha(out)
+    _train_merge(out, "10-mv", [("fix: move alpha (#10)", {"src/a.py": None,
+                                                          "src/b.py": _edit(_lines(10, "a"), 6)}, _at(5))],
+                 "train: merge 10-mv\n\nCloses #10", _at(6, 12))
+    assert _shape(_suspicion(out)) == (1, [7], [], 0, 0)
+
+
+def test_the_test_path_rule_is_the_bundles(render, tmp_path):
+    """E1 reads tests as the bundle does (`_is_test_path`, which E3 moves to check_review):
+    one rule, pinned here until the import replaces the copy."""
+    out = _render(render, tmp_path)
+    m = _flow_module(out)
+    import check_review
+    import make_review_bundle
+    theirs = getattr(check_review, "_is_test_path", None) or make_review_bundle._is_test_path
+    for rel in ("tests/test_a.py", "src/a.py", "src/a_test.go", "web/__tests__/x.ts", "spec/x.rb",
+                "src/conftest.py", "src/x.spec.ts", "src/x.vitest.ts", "src/testing.py", "a/specs/b.md"):
+        assert m._is_test_path(rel) == theirs(rel), rel
