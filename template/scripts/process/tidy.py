@@ -483,7 +483,7 @@ def report(root: Path, days: int, keep: tuple[str, ...] = DEFAULT_KEEP,
                  + (" — `tidy.py --apply` removes them (git history keeps them)" if a else ""))
     j = items["journal"]
     lines.append(f"- journal shards older than {days} days: {j}"
-                 + (" — `tidy.py --apply` folds them (REVIEW/SIZE/GRADE lines kept)" if j else ""))
+                 + (" — `tidy.py --apply` folds them (REVIEW/SIZE/COST/GRADE lines kept)" if j else ""))
     rv = items["reviews"]
     gone, md, other = review_sizes(root, rv)
     lines.append(f"- review reports of closed work older than {days} days: {len(rv)} ({_human(gone)})"

@@ -329,7 +329,7 @@ ordinary change: delete or move journal shards and archived plans older than
 what you still reference, in a commit that says so. `scripts/process/compact_journal.py`
 does the routine form of it: shards older than N weeks (default 8) are folded
 into a monthly `journal/archive/YYYY-MM.md` that keeps exactly the machine-read
-records (`REVIEW`, `SIZE`, `GRADE`) verbatim — the gates glob the archive
+records (`REVIEW`, `SIZE`, `COST`, `GRADE`) verbatim — the gates glob the archive
 like any shard — and drops the prose, which git still holds. Dry run by
 default, `--apply` writes. Decision records are never pruned (they are not
 working memory at all). Review reports (the audit trail the review gate's

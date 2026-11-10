@@ -117,7 +117,9 @@ from attest_evidence import (  # noqa: E402  (one file-set owner)
 )
 from check_review import (  # noqa: E402  (one owner for grammar, digest, record homes)
     BOOKKEEPING,
+    COST_LINE,
     JOURNAL_DIR,
+    TELEMETRY_MODULE,
     full_round_base_problem,
     integration_targets,
     PLAN_KINDS,
@@ -142,10 +144,8 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     review_lines,
 )
 
-# the telemetry module, rendered or not ("optional stays optional"): the SIZE line is a
-# measure its readers count, so a project without it gets none (human_digest reads it so)
-TELEMETRY_MODULE = "scripts/process/process_kpis.py"
-
+# TELEMETRY_MODULE (check_review): the SIZE line is a measure its readers count, so a
+# project without the module gets none (human_digest reads it so)
 
 def size_line(root: Path, record: dict, *, plan_review: bool) -> str | None:
     """`SIZE work=<id> round=<r> lines=<n> files=<n>`, written next to a code review's
@@ -510,8 +510,9 @@ def build_line(args, root: Path, journal_dir: Path | None = None,
 def blocked_round_at(root: Path, args: argparse.Namespace, head: str) -> int | None:
     """The round of a blocking REVIEW line of the work (`round_ids`) on this head —
     another lens already blocked the round this review is a lens of — or None. "This head"
-    is the line's own head, or one only attest commits and pure archive commits lie above
-    (`_attest_commit`, `_archive_only`), as a lens built after the first lens's attest
+    is the line's own head, or one only attest commits, pure archive commits and the cost
+    commit before the archive (v2.94 E2) lie above (`_attest_commit`, `_archive_only`,
+    `_cost_only`), as a lens built after the first lens's attest
     commit — or after the plan's own archive commit (#308) — sees it. Rebuilt in the v2.77
     cross-model review (round 3): a rule over paths read the reviewed plan as bookkeeping,
     or the records an attest commit carries as content."""
@@ -525,7 +526,8 @@ def blocked_round_at(root: Path, args: argparse.Namespace, head: str) -> int | N
         except ValueError:
             break  # git cannot tell: this head alone
         if len(parents) != 1 or not (_attest_commit(root, parents[0], at, mine)
-                                     or _archive_only(root, parents[0], at)):
+                                     or _archive_only(root, parents[0], at)
+                                     or _cost_only(root, parents[0], at)):
             break
         at = parents[0]
     rounds = [int(f["round"]) for t in _texts(root, root / JOURNAL_DIR) for _ln, f in parse_review_lines(t)[0]
@@ -603,6 +605,35 @@ def _archive_only(root: Path, parent: str, commit: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _cost_only(root: Path, parent: str, commit: str) -> bool:
+    """Is `commit` over `parent` the cost commit `finish --apply` writes before the archive
+    commit (v2.94 E2): it adds COST lines (`check_review.COST_LINE`) to journal files and
+    nothing else — no other line, blank lines aside, no line removed, no path outside the
+    journal? Narrow on purpose: a commit adding any other journal record (a decision, a
+    note) would carry a block across it. Unreadable is no."""
+    try:
+        status = _git_out(root, "diff", "--name-status", "-z", "--no-renames", parent, commit).decode().split("\0")
+        changes = dict(zip(status[1::2], status[0::2]))  # path -> A|D|M|T
+        if not changes:
+            return False
+        costs = 0
+        for rel, kind in changes.items():
+            if kind not in ("A", "M") or not (rel.startswith(f"{JOURNAL_DIR}/") and rel.endswith(".md")):
+                return False
+            after = Counter(_git_out(root, "show", f"{commit}:{rel}").decode("utf-8").splitlines())
+            before = (Counter(_git_out(root, "show", f"{parent}:{rel}").decode("utf-8").splitlines())
+                      if kind == "M" else Counter())
+            if before - after:
+                return False  # a line removed or changed
+            for line in (after - before).elements():
+                if line.strip() and not COST_LINE.match(line):
+                    return False
+                costs += bool(line.strip())
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return costs > 0
 
 
 def _write_seam(stage: str) -> None:

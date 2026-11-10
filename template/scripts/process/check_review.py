@@ -2063,6 +2063,25 @@ def review_lines(root: Path, base: str, head: str) -> ReviewSize | None:
     return ReviewSize(sum(kept), len(kept))
 
 
+# --- the cost of a work per phase (v2.94 E2) ------------------------------------------
+# `finish --apply` writes one COST line per phase into the journal, in a commit of its own
+# right before the archive commit; attest walks through that commit (`_cost_only`), the
+# telemetry reads the lines (`process_kpis cost`). No gate refuses or requires them. The
+# reason comes last: it may carry `:` (`no-files:<glob>`, `partial: remote`).
+# The telemetry module, rendered or not ("optional stays optional"): its readers count the
+# SIZE and COST lines, so a project without it gets none.
+TELEMETRY_MODULE = "scripts/process/process_kpis.py"
+COST_LINE = re.compile(r"^COST work=(?P<work>\d+) phase=(?P<phase>[a-z]+) wall_seconds=(?P<wall>\d+) "
+                       r"tokens=(?P<tokens>\d+|-)(?: not-measured: (?P<reason>\S.*?))?\s*$")
+
+
+def cost_line(work: int, phase: str, wall_seconds: int, tokens: int | None, reason: str | None) -> str:
+    """`COST work=<issue> phase=<p> wall_seconds=<n> tokens=<n>|- [not-measured: <reason>]` —
+    `-` and the reason where the tokens are not (or only partly) measured, never a 0."""
+    line = f"COST work={work} phase={phase} wall_seconds={wall_seconds} tokens={'-' if tokens is None else tokens}"
+    return f"{line} not-measured: {reason or 'unknown'}" if reason or tokens is None else line
+
+
 REMOTE_INTEGRATION_REFS = tuple(ref for ref in INTEGRATION_REFS if "/" in ref)
 
 
