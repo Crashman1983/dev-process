@@ -365,6 +365,64 @@ def test_a_red_base_blames_nobody(render, tmp_path):
     assert "alpha" in branches and "beta" in branches and not any(b.startswith("train/") for b in branches)
 
 
+_OPEN_TASK_PLAN = "# {name}\n\ntier: 2\nissue: none\n\n- [ ] T1 the task still open\n\n## Decisions\n"
+
+
+def test_a_passenger_with_an_open_task_is_dropped_at_the_gates_not_at_the_push(render, tmp_path):
+    # v2.94 C2: the train's gates run told where the merge goes — a merge-only
+    # finding is red on the combined tree, the search drops its owner
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "beta", {"src/b.py": "b\n", ".process-work/plans/archive/2026-09-20-beta.md":
+                          _OPEN_TASK_PLAN.format(name="beta")}, archive=False)
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert "beta was dropped as the offender" in r.stdout, r.stdout + r.stderr
+    log = "".join(p.read_text() for p in (out / ".git/process-train").glob("*.log"))
+    assert "open task at the merge" in log or "open task at the merge" in r.stdout, log
+    files = _git(out, "ls-tree", "-r", "--name-only", "main").stdout.split()
+    assert "src/a.py" in files and "src/b.py" not in files
+
+
+def test_an_open_task_on_main_leaves_base_and_train_green(render, tmp_path):
+    # the base runs without a target, the combined tree with one: a plan main
+    # already carries is not this range's (`_bound`), so neither is red
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _main_commit(out, {".process-work/plans/2026-09-19-old.md": _OPEN_TASK_PLAN.format(name="old")},
+                 "docs: an active plan")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "src/a.py" in _git(out, "ls-tree", "-r", "--name-only", "main").stdout.split()
+
+
+def test_a_train_of_contained_passengers_runs_its_gates_without_a_target(render, tmp_path, monkeypatch):
+    # every passenger already in the base: the tree IS the base, and with a
+    # target its active Tier 2 plan would read "no proper integration base"
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _main_commit(out, {".process-work/plans/2026-09-19-old.md": _OPEN_TASK_PLAN.format(name="old")},
+                 "docs: an active plan")
+    _git(out, "branch", "inside", "main")
+    train = _load_train(out)
+    seen: list = []
+    real = train._run_gates
+
+    def spy(wt, log, *a, **k):
+        seen.append(a or tuple(k.values()))
+        return real(wt, log, *a, **k)
+
+    monkeypatch.setattr(train, "_run_gates", spy)
+    monkeypatch.setattr(train, "_write", lambda *a, **k: None)
+    base = _git(out, "rev-parse", "main").stdout.strip()
+    p = {"base": "main", "base_sha": base, "candidates": [{"branch": "inside", "hours_waiting": 1}]}
+    rc = train._run_batch(out, "main", p, ["inside"], "t9", tmp_path / "t.log", suite=None, deploy=None,
+                          push=False, keep_branches=True)
+    assert rc == 0, (tmp_path / "t.log").read_text()
+    assert seen and all(not s or s == (None,) for s in seen), seen
+
+
 def test_local_main_ahead_of_origin_refuses_to_depart(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
@@ -516,7 +574,7 @@ def test_after_a_drop_the_rest_gets_its_own_flake_rerun(render, tmp_path, monkey
     wt = tmp_path / "wt"
     wt.mkdir()
     monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (wt, "train/x", list(subset), []))
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(train, "_out", lambda *a, **k: "")
@@ -906,7 +964,7 @@ def test_a_suite_the_base_has_but_the_combined_tree_lost_is_red(render, tmp_path
     wt.mkdir()
     written = []
     monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (wt, "train/x", list(subset), []))
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(train, "_out", lambda *a, **k: "")
@@ -948,7 +1006,7 @@ def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, 
         builds.append((base, dict(kw["shas"])))
         return wt, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(train, "_out", lambda *a, **k: "")
@@ -1973,7 +2031,7 @@ def _memo_batch(render, tmp_path, monkeypatch, *, seen, red):
         _git(out, "checkout", "-q", {0: "main", 1: "one", 2: "both"}[len(subset)])
         return out, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(list(current)) or
                         ("red" if red(current) else "green"))
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
@@ -2048,7 +2106,7 @@ def _retry_batch_with(train, render, tmp_path, monkeypatch, *, retry, sh):
         builds.append(list(subset))
         return out, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or sh(cmd, len(runs)))
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
@@ -2163,7 +2221,7 @@ def test_red_gates_rerun_the_gates_on_the_same_tree_then_the_suite(render, tmp_p
     builds, runs, gates = [], [], iter([False, True])
     monkeypatch.setattr(train, "build_train",
                         lambda root, base, subset, stamp, log, **kw: builds.append(1) or (out, "train/x", list(subset), []))
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: next(gates))
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: next(gates))
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or "green")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
@@ -2209,7 +2267,7 @@ def test_a_tree_this_train_saw_green_is_not_run_again_after_the_drop(render, tmp
         _git(out, "checkout", "-q", {0: "main", 1: "one", 2: "both"}[len(subset)])
         return out, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(list(current)) or
                         ("red" if "b2" in current else "green"))
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
@@ -2659,7 +2717,7 @@ def test_red_gates_then_green_are_a_gate_flake_not_a_flaky_suite(render, tmp_pat
     train = _load_train(out)
     gates = iter([False, True, True, True])
     monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (out, "train/x", list(subset), []))
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: next(gates))
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: next(gates))
     monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: "green")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
@@ -2946,7 +3004,7 @@ def _measured(render, tmp_path, monkeypatch, *, sh, n=2, gates=None, retry=None,
         return sh(tuple(current), cmd, len(calls))
     monkeypatch.setattr(train, "build_train", build)
     gate = iter(gates) if gates is not None else None
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: next(gate, True) if gate else True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: next(gate, True) if gate else True)
     monkeypatch.setattr(train, "_sh", fake_sh)
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
@@ -3079,7 +3137,7 @@ def test_measure_reaches_the_row_when_the_run_aborts(render, tmp_path, monkeypat
 
     def boom(*a, **k):
         raise RuntimeError("boom")
-    monkeypatch.setattr(train, "_run_gates", lambda w, log: True)
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
     monkeypatch.setattr(train, "_sh", boom)
     with pytest.raises(RuntimeError):
         train.run(out, suite="s", deploy=None, push=False, min_candidates=1, max_wait_hours=0, force=True,

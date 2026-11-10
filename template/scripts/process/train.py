@@ -1060,19 +1060,21 @@ def _echo(text: str, end: str = "\n") -> None:
         print(text.encode(enc, "replace").decode(enc), end=end, flush=True)
 
 
-def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state: str = "red") -> str:
+def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state: str = "red",
+        env: dict[str, str] | None = None) -> str:
     """Run cmd, streaming its output; "green", "red" or "undefined" (the
     command or make target does not exist on this tree) — `decide`'s verdict.
     Past `timeout` seconds its whole process group is killed: `timeout_state` —
     red for the preflight, the suite and the deploy; the preboard check asks
-    for "undefined" (a slow check says nothing about the candidate, #386)."""
+    for "undefined" (a slow check says nothing about the candidate, #386).
+    `env` extends the inherited environment, never replaces it."""
     _echo(f"train: $ {cmd}")
     # the lines that can carry a fact, over the whole run: those that make a
     # run red whatever follows without a cap, the others the last 400
     red: dict[str, None] = {}
     kept: list[str] = []
     proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, errors="replace", env=git_environment(),
+                            text=True, errors="replace", env=git_environment({**os.environ, **(env or {})}),
                             start_new_session=timeout is not None)
     assert proc.stdout is not None
     expired = threading.Event()
@@ -1112,15 +1114,18 @@ def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state
 GATE_RUNNER_REL = "scripts/process/gate_runner.py"
 
 
-def _run_gates(wt: Path, log) -> bool:
+def _run_gates(wt: Path, log, target: str | None = None) -> bool:
     """Process gates on the tree in `wt`. No runner in the checkout means no
     gates; the start path is gate_invoke's decision, as in finish.py — a bare
     `sys.executable` cannot resolve the runner's PEP-723 dependencies, and the
-    crash read as a red main (observed downstream)."""
+    crash read as a red main (observed downstream). `target` (a full ref name)
+    tells the gates where the merge goes, as the push hook does: the merge-only
+    checks are hard here, before the push (v2.94)."""
     if not (wt / GATE_RUNNER_REL).is_file():
         return True
     argv = gate_runner_argv(wt)
-    return argv is not None and _sh(wt, shlex.join(argv), log) == "green"
+    env = {_review.PUSH_TARGETS_ENV: target} if target else None
+    return argv is not None and _sh(wt, shlex.join(argv), log, env=env) == "green"
 
 
 
@@ -2069,6 +2074,16 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     last_wt: Path | None = None
     green_here: set[str] = set()  # trees whose suite this run saw green
 
+    def merge_target(wt: Path) -> str | None:
+        """Where this tree's merge goes, for the gates (v2.94 C2) — only when the
+        tree differs from the base: with every passenger already contained the
+        tree IS the base, never pushed, and a target there would red the arms
+        that need a branch range ("no proper integration base"). Unreadable: none,
+        the push hook still judges with one."""
+        head = _out(wt, "rev-parse", "HEAD")
+        at = _out(wt, "rev-parse", f"{base}^{{commit}}")
+        return f"refs/heads/{local}" if head and at and head != at else None
+
     def judge(wt: Path, *, bare_base: bool = False, memo: bool = True) -> str:
         """"green", "red" or "undefined" (the suite does not exist on this tree).
         The bare base skips the suite when this train saw it green on that tree —
@@ -2079,7 +2094,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 raise EnvironmentRed(f"the preflight `{preflight}` is red")
             preflight_done = True
         red_in = "gates"
-        if not timed("gates", _run_gates, wt, log):
+        # the bare base runs without a target: it is never pushed (v2.94 C2)
+        if not timed("gates", _run_gates, wt, log, None if bare_base else merge_target(wt)):
             return "red"
         red_in = "suite"
         if not suite:
@@ -2227,7 +2243,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             if how == "gates" and last_wt is not None:
                 ran = "gates"
                 with counted("retry_gates"):
-                    state = "green" if timed("gates", _run_gates, last_wt, log) else "red"
+                    state = "green" if timed("gates", _run_gates, last_wt, log, merge_target(last_wt)) else "red"
                 if state == "green" and suite:
                     red_in = "suite"
                     # the suite never ran behind the red gates
