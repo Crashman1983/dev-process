@@ -374,6 +374,55 @@ Entscheidende Zahl: wie viele Arbeitspakete, Sitzungen und Review-Runden die Tem
 - 2 als Versuch in Kenni, sobald die Zahlen des Stewards vorliegen.
 - 4b, Gate-Merker und Tier 0/1 im Zug bleiben zurückgestellt.
 
+## 14. Eigene Zählung in Kenni (Stand `f0f03360ef`, 2026-11-10)
+
+Der Owner hat der Audit-Sitzung Lesezugriff auf Kenni gegeben. Gezählt sind die `REVIEW`-Zeilen der Journale (1.173, davon 379 Plan-Reviews) und die `FINDING`-Zeilen der Review-Reports (4.714), Zeitraum im Wesentlichen 2026-10-01 bis 2026-11-10. Der Klon ist flach: Größen und Zeiten je Arbeit, die die Git-Historie brauchen, fehlen weiter.
+
+**Code-Reviews je Tier**
+
+| Tier | Arbeiten | Ø Blocks | mit ≥ 1 Block | mit ≥ 2 | mit ≥ 3 |
+|---|---:|---:|---:|---:|---:|
+| 1 | 24 | 0,12 | 12 % | 0 % | 0 % |
+| 2 | 140 | 0,49 | 28 % | 7 % | 5 % |
+| 3 | 163 | 1,37 | 53 % | 29 % | 14 % |
+
+- 198 von 327 Arbeiten (61 %) gehen ohne Block durch. Die oberen 10 % der Arbeiten tragen 59 % aller Code-Blocks.
+- Der Tier-3-Wert liegt über dem des Stewards (1,11), weil hier jede `block`-Zeile zählt.
+- Verlauf: Im Oktober waren 51 % der neuen Arbeiten Tier 3 bei 0,84 Blocks im Mittel, im November bisher 33 % bei 0,77 (43 Arbeiten).
+
+**Plan-Reviews**
+
+| Tier | Pläne | Ø Blocks | mit ≥ 1 Block |
+|---|---:|---:|---:|
+| 2 | 87 | 0,32 | 6 % |
+| 3 | 107 | 0,58 | 37 % |
+
+Tier-2-Arbeiten seit 2026-10-10 mit Plan-Review: 79, im Mittel 0,44 Code-Blocks; ohne: 14, im Mittel 1,07. Die zweite Gruppe ist klein, und Arbeiten ohne Plan-Review können sich auch sonst unterscheiden. Die Zahl spricht für das Plan-Review, beweist es aber nicht.
+
+**Befunde**
+
+- 80 % aller Befunde sind `minor` oder `nit` (3.814 von 4.714). 1.412 davon tragen `action=fix`: Sie blockieren nicht, werden aber bearbeitet.
+- Blocker und Major in Code-Reviews (577). Wo die Felder gesetzt sind:
+  - Herkunft (321): 61 % aus dem ersten Entwurf, 26 % aus dem Fix der Vorrunde, 12 % spät gefunden.
+  - Klasse (257): 86 % `testable`, also als Test fassbar.
+  - Prüfbarkeit (435): bei 115 Befunden hätte nach Einschätzung des Reviewers ein Gate oder Test sie finden können.
+- Blocker und Major in Plan-Reviews (288): 39 % `requirement`, 14 % `knowledge-gap`.
+- Gut 40 % der Blocker und Majors tragen die Felder nicht; die Anteile gelten für die beschrifteten.
+
+**Kenni ist strenger als das Template**
+
+- `cross_model_from_tier` steht in Kenni auf 2 (Template: 3). 177 von 280 Tier-2-Review-Zeilen tragen `cross-model`. Jede Tier-2-Arbeit zahlt damit eine zweite Modellfamilie.
+- 16 projekteigene Gates, 17 lokale Regeldateien, 195 `REVIEW-EXCEPTION`-Zeilen, 111 von 455 Plänen mit `spec-waived`.
+- Kenni führt ein eigenes Tier-Dokument mit 2.833 Wörtern neben dem des Templates (908 Wörter).
+
+**Was die Zahlen für die Varianten bedeuten**
+
+- **Variante 2 (Blocks als Tests) ist gestützt:** 86 % der beschrifteten Blocker und Majors sind als Test fassbar.
+- **Der Anteil fix-induzierter Blocker liegt hier bei 26 %**, nicht bei 47 % wie in der v2.77-Analyse. Jene zählte Blocker ab Runde 2; hier sind alle Runden gezählt.
+- **Die Last ist stark konzentriert.** Eine Regel für die wenigen entgleisenden Arbeiten (früher Abbruch, Neuschnitt) trifft 59 % der Blocks, ohne die 61 % zu berühren, die glatt durchgehen.
+- **Die Nebenlast der kleinen Befunde ist neu:** 1.412 bearbeitete `minor`- und `nit`-Befunde.
+- **Warum eine Arbeit Tier 3 ist, lässt sich nicht auszählen.** Die Pläne tragen dafür kein Feld; `mutation:` steht bei der Hälfte auf `runtime`, bei einem Drittel fehlt es.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
