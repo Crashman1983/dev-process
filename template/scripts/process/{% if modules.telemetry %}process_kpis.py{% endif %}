@@ -2603,18 +2603,10 @@ def merged_works(root: Path, ref: str | None = None) -> dict:
 # commits that wrote them, and the merge events own those commits. A line another work wrote is
 # a suspicion of that work's regression — computed here, never written: no trailer, no reference
 # on an old issue. Review fixes and later phases of the same work repair their own work.
-# The bundle's test-path rule (`make_review_bundle._is_test_path`; v2.94 E3 gives it its home in
-# check_review, and this copy then imports it — a test pins the two equal until then).
-_TEST_DIRS = frozenset({"test", "tests", "spec", "specs", "__tests__"})
-_TEST_NAME = re.compile(r"^(?:test_.+\..+|.+_test\..+|.+\.spec\..+|.+\.(?:vi)?test\..+|conftest\.py)$")
+# Tests are told by the review bundle's test-path rule, whose one owner is
+# `check_review._is_test_path` (v2.94 E3).
 _OLD_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+")
 _BLAME_HEAD = re.compile(r"^([0-9a-f]{40}|[0-9a-f]{64}) \d+ \d+(?: \d+)?$")
-
-
-def _is_test_path(rel: str) -> bool:
-    """A test file by path: a test directory segment or a test file name."""
-    *dirs, name = rel.split("/")
-    return any(d in _TEST_DIRS for d in dirs) or bool(_TEST_NAME.match(name))
 
 
 def _own_issues(ev: dict) -> set[int]:
@@ -2647,9 +2639,10 @@ def _changed_old_lines(root: Path, parent: str, fix: str) -> list[tuple[str, int
         if not status.startswith("A"):  # an added file has no old lines
             pairs.append((parts[i + 1], parts[i + 1]))
         i += 2
+    import check_review as _review  # noqa: PLC0415 — the one test-path rule
     got: list[tuple[str, int, int]] = []
     for old, new in pairs:
-        if _is_test_path(old):
+        if _review._is_test_path(old):
             continue
         # both paths: a path filter on one side cuts the rename off before git detects it
         diff = _git_out(root, "diff", "--unified=0", "-M", *_DIFF, parent, fix, "--",
