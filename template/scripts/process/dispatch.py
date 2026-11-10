@@ -1313,8 +1313,9 @@ def _write_record(root: Path, branch: str, rec: dict) -> None:
 # The phase history `phases/<issue>.json` outlives the records (`stop` deletes a
 # record, and the chain stops a phase before it starts the next): `phase` and
 # `branch` of the last phase (read by `start`), and per branch the issue's
-# time windows, the local worktrees and whether a phase ran on another host —
-# what the token readers need after the sessions are gone (#403).
+# time windows, the local worktrees, whether a phase ran on another host and
+# each phase start (`starts`, v2.94 E2) — what the token and cost readers need
+# after the sessions are gone (#403). A history without `starts` stays readable.
 # `phases/branches.json` is the reverse index {branch: [issue, …]}.
 BRANCH_INDEX = "branches.json"
 
@@ -1340,15 +1341,23 @@ def _is_window(w: object) -> bool:
     return isinstance(w, list) and len(w) == 2 and num(w[0]) and (w[1] is None or num(w[1]))
 
 
+def _is_start(s: object) -> bool:
+    """[phase, started] — one phase start of `starts` (v2.94 E2)."""
+    return (isinstance(s, list) and len(s) == 2 and s[0] in PHASES
+            and isinstance(s[1], (int, float)) and not isinstance(s[1], bool))
+
+
 def _branch_entry(history: dict, branch: str) -> dict:
     """The history's entry for `branch`, its fields cleaned, set in place."""
     branches = history.get("branches") if isinstance(history.get("branches"), dict) else {}
     old = branches.get(branch) if isinstance(branches.get(branch), dict) else {}
     windows = old.get("windows") if isinstance(old.get("windows"), list) else []
     worktrees = old.get("worktrees") if isinstance(old.get("worktrees"), list) else []
+    starts = old.get("starts") if isinstance(old.get("starts"), list) else []
     entry = {"windows": [w for w in windows if _is_window(w)],
              "worktrees": list(dict.fromkeys(w for w in worktrees if isinstance(w, str))),
-             "remote": old.get("remote") is True}
+             "remote": old.get("remote") is True,
+             "starts": [s for s in starts if _is_start(s)]}
     branches[branch] = entry
     history["branches"] = branches
     return entry
@@ -1356,7 +1365,9 @@ def _branch_entry(history: dict, branch: str) -> dict:
 
 def _note_phase(phases: Path, issue: int, branch: str, rec: dict) -> None:
     """A phase of `issue` started on `branch`: its window opens unless one is
-    open (the chain's next phase, a re-dispatch), its worktree joins the list,
+    open (the chain's next phase, a re-dispatch), the start joins `starts` (a
+    record written again with the same start adds none; `phase_costs` cuts the
+    windows at them), its worktree joins the list,
     `remote` stays once set, and the open windows of the branch's other issues
     close at this start. One lock per file, taken one after the other, never
     nested. `start` refused an unreadable history before the worker started;
@@ -1374,6 +1385,8 @@ def _note_phase(phases: Path, issue: int, branch: str, rec: dict) -> None:
             entry["remote"] = entry["remote"] or rec.get("remote") is True
             if not entry["windows"] or entry["windows"][-1][1] is not None:
                 entry["windows"].append([started, None])
+            if not entry["starts"] or entry["starts"][-1] != [rec["phase"], started]:
+                entry["starts"].append([rec["phase"], started])
             history.update(phase=rec["phase"], branch=branch)
             _save_json(path, history)
         with _FileLock(phases / "branches.lock"):
@@ -1518,7 +1531,12 @@ def _token_state(root: Path, issue: int | None, *, every: bool) -> tuple[str | N
     pattern = transcripts_pattern(root)
     if pattern is None:
         return "not-configured", None
-    sources = _token_sources(root, issue) if issue is not None or every else []
+    return _sources_state(pattern, _token_sources(root, issue) if issue is not None or every else [])
+
+
+def _sources_state(pattern: str, sources: list[dict]) -> tuple[str | None, tuple | None]:
+    """(reason, `_coverage` tuple or None) of the transcripts the sources name — the
+    wording `token_reason` documents, for an issue's sessions or one phase's stretch."""
     if not sources:
         return "no-record", None
     files, missing = _source_files(pattern, sources)
@@ -1890,6 +1908,53 @@ def tokens_line(root: Path, issue: int | None) -> str:
         return f"tokens: not measured ({reason})"
     line = f"tokens: {coverage[0].get('output_tokens', 0)} output over {coverage[1]} sessions"
     return f"{line} ({reason})" if reason else line
+
+
+class PhaseCost(NamedTuple):
+    phase: str  # a PHASES name, or "all" when the windows cannot be cut
+    wall_seconds: int  # wall time, waits included
+    tokens: int | None  # output tokens as `tokens_line` sums them; None: not measured
+    reason: str | None  # `token_reason`'s wording; None when fully measured
+
+
+def phase_costs(root: Path, issue: int, branch: str, now: float | None = None) -> list[PhaseCost] | None:
+    """Wall time and tokens per phase of `issue` on `branch` (v2.94 E2), one row per
+    phase in the order it first started: the phase history's windows cut at its `starts`,
+    each stretch running to the next start or the window's end (an open window: `now`
+    for the wall time, unbounded for the tokens, as `tokens_line` reads it). A window
+    whose first start is not its own start — a history an older version wrote without
+    `starts` — gives one row `all` over every window instead of a wrong split. The
+    tokens go through `_coverage`, the reason through the wording `token_reason` owns.
+    None when the branch has no phase record of the issue (no dispatch chain)."""
+    history = _load_json_dict(common_dir(root) / DISPATCH_DIR / "phases" / f"{issue}.json")
+    branches = history.get("branches") if isinstance(history.get("branches"), dict) else {}
+    if not isinstance(branches.get(branch), dict):
+        return None
+    entry = _branch_entry(dict(history, branches=dict(branches)), branch)  # cleaned, not written
+    if not entry["windows"]:
+        return None
+    now = time.time() if now is None else now
+    starts = sorted(entry["starts"], key=lambda s: s[1])
+    stretches: dict[str, list[list[float | None]]] = {}
+    for w0, w1 in entry["windows"]:
+        inside = [s for s in starts if w0 <= s[1] and (w1 is None or s[1] < w1 or s[1] == w0)]
+        if not inside or inside[0][1] != w0:
+            stretches = {"all": [list(w) for w in entry["windows"]]}
+            break
+        for i, (phase, at) in enumerate(inside):
+            stretches.setdefault(phase, []).append([at, inside[i + 1][1] if i + 1 < len(inside) else w1])
+    pattern = transcripts_pattern(root)
+    out: list[PhaseCost] = []
+    for phase, spans in stretches.items():
+        wall = sum((now if end is None else end) - start for start, end in spans)
+        if pattern is None:
+            reason, coverage = "not-configured", None
+        else:
+            reason, coverage = _sources_state(pattern, [{"worktrees": entry["worktrees"], "windows": spans,
+                                                         "remote": entry["remote"]}])
+        out.append(PhaseCost(phase, max(0, int(wall)),
+                             None if coverage is None else coverage[0].get("output_tokens", 0), reason))
+    return out
 
 
 def _proc_start(pid: int) -> str:
