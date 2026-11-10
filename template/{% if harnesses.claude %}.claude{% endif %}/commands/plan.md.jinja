@@ -220,7 +220,10 @@ non-trivial; the one narrow command that proves it (`pytest path::name`,
 interface or a tricky edit, the signature or a test skeleton. Anchors are
 measured on the plan's base (`file:line`), not recalled.
 
-**A plan is reviewed before `planned` (Tier 2+).** Commit the plan, then
+**A plan is reviewed before `planned` (Tier 2+).** Commit the plan, run the
+gates (`uv run scripts/process/gate_runner.py`) and fix in the plan what they
+turn red — the plan-review bundle runs no preflight, and a red `plan-structure`
+found after the review costs a second plan-review round. Then
 build its bundle (`uv run scripts/process/make_review_bundle.py --plan <slug> --plan-review
 -o .process-work/reviews/<slug>-plan.bundle.md`). **Tier 2:** hand the bundle
 to a fresh subagent that did not write the plan, with the plan brief of
@@ -250,7 +253,7 @@ after its pass. Where the review phase runs on another host, push the branch
 first; the steward then queues execute after the pass. Dispatch queues no
 execute for a Tier 2+ plan without a clearing plan pass.
 
-When the plan is committed, run the gates (`uv run scripts/process/gate_runner.py`) and fix in the plan what it turns red — a plan declaration a gate misses turns every execute push red, and dispatch queues no execute while they are red. Then `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line. Whoever answers marks the question too — `(answered <date>)` before its colon, or the `DECISION` line in its place: an answer below an unmarked question leaves it open, and the train refuses the branch.
+Keep the gates green on every plan commit (`uv run scripts/process/gate_runner.py`), the fixes after the review included — a plan declaration a gate misses turns every execute push red, and dispatch queues no execute while they are red. Then `uv run scripts/process/report.py planned --issue N` (`/report`) — one line to the tower. An open question for the owner goes into the plan as `DECISION NEEDED <date> <you>: <question> — options: …; recommendation: …` plus `report.py blocked`; the steward relays it and writes the answer back as a `DECISION` line. Whoever answers marks the question too — `(answered <date>)` before its colon, or the `DECISION` line in its place: an answer below an unmarked question leaves it open, and the train refuses the branch.
 
 **Open the `## Decisions` ledger in the plan** (`journal-state-plans.md`,
 Plans): one `DECISION <date> <who>: <what> — because <why>` line per choice
