@@ -340,8 +340,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if behind and behind != "0":
         tail.append((f"git rebase {default}" if local_only else
                      f"git fetch origin {default} && git rebase origin/{default}")
-                    + f"  # {behind} commit(s) behind — NOTE: a rebase voids "
-                    f"review-bundle digests; re-review if a bundle was built")
+                    + f"  # {behind} commit(s) behind — a rebase that applies cleanly "
+                    f"keeps the review (the gate compares content); a conflict resolution "
+                    f"needs a new round (`make_review_bundle.py --since <reviewed head>`)")
     tail.append("run the FULL test suite now — the whole batch pays it once "
                 "here; scoped runs during the loop were evidence, not the "
                 "verdict (docs/process/testing.md, test economy)")
@@ -504,8 +505,8 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                 print("finish: rebase stopped — resolve, `git rebase "
                       "--continue`, then re-run /finish --apply")
                 return 1
-            print("finish: rebased — NOTE: a rebase voids review-bundle "
-                  "digests; re-review if a bundle was built")
+            print("finish: rebased — a clean rebase keeps the review; the gates "
+                  "below judge whether it still covers the tip")
             blockers, _tail = check(root)
             if blockers:
                 print("finish: BLOCKED after rebase:")
@@ -582,7 +583,7 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
         return _merge_locally(root, branch, default, integration_checkout if elsewhere else None)
     if elsewhere:
         if _git("merge-base", "--is-ancestor", f"origin/{default}", "HEAD") is None:
-            print(f"finish: origin/{default} is not an ancestor of HEAD — rebase onto origin/{default}, re-review and retry", file=sys.stderr)
+            print(f"finish: origin/{default} is not an ancestor of HEAD — rebase onto origin/{default} and retry", file=sys.stderr)
             return 1
         if not _sh(root, ["git", "push", "-q", "origin", f"HEAD:{default}"], route):
             return 1
@@ -636,8 +637,8 @@ def _merge_locally(root: Path, branch: str, default: str, other: Path | None) ->
         return 1
     if other is not None:
         if _git("merge-base", "--is-ancestor", default, "HEAD") is None:
-            print(f"finish: {default} is not an ancestor of HEAD — rebase onto {default}, "
-                  f"re-review and retry", file=sys.stderr)
+            print(f"finish: {default} is not an ancestor of HEAD — rebase onto {default} "
+                  f"and retry", file=sys.stderr)
             return 1
         if not _sh(other, ["git", "merge", "--ff-only", branch]):
             print(f"finish: the fast-forward in {other} failed — nothing merged", file=sys.stderr)

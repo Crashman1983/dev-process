@@ -490,7 +490,12 @@ def test_releases_doc_carries_the_ritual(render, tmp_path):
     # a rebase moves the template baseline the acknowledgment binds (Kenni #2352);
     # a main that left the update alone carries it (#262)
     assert "acknowledge again" in text and "fingerprint" in text
-    assert "A rebase onto a newer" in text and "but not a review" in text
+    # v2.94: a clean rebase carries the review too (the gate compares content)
+    flat = " ".join(text.split())
+    assert "but not a review" not in flat
+    assert "A rebase carries the acknowledgment and the review where it applies cleanly" in flat
+    assert "a conflict resolution, or a main that touches the update's paths, needs a new round" in flat
+    assert "the reviewed head must be reachable in the clone" in flat
     assert "holds only at its own baseline" in text
     # verification's runtime needs are named, not discovered in a failing gate (#161)
     assert "uvx" in text and "PyYAML" in text and "network" in text

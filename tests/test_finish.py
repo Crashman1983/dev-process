@@ -364,6 +364,15 @@ def test_apply_red_suite_does_not_merge(render, tmp_path):
     assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "feature"
 
 
+def test_rebase_texts_name_no_digest_and_no_re_review(render, tmp_path):
+    """v2.94 A1: bundle digests are gone since v2.53, and a clean rebase keeps the review
+    (the gate compares content) — finish must not send an agent into a new round for it."""
+    out = render(tmp_path, {"project_name": "demo"})
+    text = (out / "scripts/process/finish.py").read_text().lower()
+    assert "digest" not in text
+    assert "re-review" not in text
+
+
 def test_apply_refuses_when_blocked(render, tmp_path):
     out = _repo_on_feature(render, tmp_path)
     _active_plan(out, "2026-07-04-widget.md", "# Plan\n\ntier: 2\nissue: none\n")
@@ -693,6 +702,8 @@ def test_check_without_a_remote_prints_the_local_tail(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "git push" not in r.stdout and "git fetch" not in r.stdout, r.stdout
     assert "git rebase main" in r.stdout
+    assert ("a rebase that applies cleanly keeps the review (the gate compares content); a conflict "
+            "resolution needs a new round (`make_review_bundle.py --since <reviewed head>`)") in r.stdout
     assert "git checkout main && git merge --ff-only feature && git branch -d feature" in r.stdout
 
 
@@ -706,7 +717,8 @@ def test_a_local_main_ahead_of_the_branch_is_rebased_in(render, tmp_path):
     _git(out, "checkout", "-q", "feature")
     r = _run_args(out, "--apply", "--tests", "true")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "finish: rebased" in r.stdout
+    assert ("finish: rebased — a clean rebase keeps the review; the gates below judge whether it "
+            "still covers the tip") in r.stdout
     assert subprocess.run(["git", "merge-base", "--is-ancestor", moved, "main"], cwd=out).returncode == 0
     assert (out / "payload.txt").is_file() and (out / "other.txt").is_file()
 

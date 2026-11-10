@@ -79,9 +79,11 @@ record, not an accident.
    and the branch takes it in, the acknowledgment carries as long as main's
    new commits touch none of the update's paths and the fingerprint still
    matches; otherwise the gate names why (`main changed <path>`,
-   `fingerprint differs`) and you acknowledge again. A rebase onto a newer
-   main carries the acknowledgment the same way, but not a review: its head
-   leaves the branch's history. A new release, or an acknowledgment without
+   `fingerprint differs`) and you acknowledge again. A rebase carries the
+   acknowledgment and the review where it applies cleanly (the review gate
+   compares content, `verification-independence.md`); a conflict resolution,
+   or a main that touches the update's paths, needs a new round; the
+   reviewed head must be reachable in the clone. A new release, or an acknowledgment without
    fingerprint (written before v2.75), holds only at its own baseline.
 5. Apply the template-update tier rules in `risk-tiers.md`: pure updates need
    gates and project tests — released gate code included — project deltas need
