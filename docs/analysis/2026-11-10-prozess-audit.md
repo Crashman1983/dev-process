@@ -578,6 +578,16 @@ Gezählt sind Checkbox-Zeilen in Plan und Aufgabenliste, über alle Phasen eines
 - Die Grenzen (zehn Aufgaben, 300 und 500 Zeilen, fünf Aufgaben für den leichten Weg) stammen aus sechs Wochen eines Projekts. Sie gehören als Projektwerte in die Konfiguration, mit diesen Zahlen als Voreinstellung.
 - Jeder Schnitt zahlt den festen Prozess noch einmal. Ob das aufgeht, zeigt der Vergleich der Runden und der Durchlaufzeit vor und nach der Einführung.
 
+## 18. Entscheidungen des Owners vom 2026-11-10
+
+| Entscheidung | Inhalt | Umsetzung |
+|---|---|---|
+| Einfrieren | Vier Wochen, bis 2026-12-08: keine neuen Regeln, Gates oder Pflichtzeilen im Template. Erlaubt sind Korrekturen, die Arbeit blockieren, und Änderungen, die Aufwand entfernen. | Eintrag in `MAINTAINING.md` durch die Optimierungs-Sitzung; offen |
+| Zweite Modellfamilie in Kenni | Bei Tier 2 keine Pflicht mehr; es gilt der Template-Wert (ab Tier 3). | In Kenni durch den Steward, nach Bestätigung beim Owner: `model-policy.local.json:44`, `review.local.md:173`, `docs/dev/process-risk-tiers.md:138`; offen |
+| Drei Maßnahmen (Abschnitt 17) | Größengrenze mit den Startwerten zehn Aufgaben, 300 und 500 Produktzeilen; Neuschnitt nach dem zweiten Block; leichter Weg für kleine Arbeiten. | Gegenprüfung durch die Optimierungs-Sitzung steht aus; danach Freigabe der Umsetzung |
+
+Die drei Maßnahmen fallen unter die Ausnahme des Einfrierens: 1 und 2 sind neue Grenzen, die Aufwand entfernen sollen; 3 nimmt Pflichten weg. Ob sie während der vier Wochen ausgeliefert werden oder am Ende gebündelt, ist mit der Freigabe zu entscheiden.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
