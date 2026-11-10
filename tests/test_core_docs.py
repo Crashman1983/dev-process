@@ -1190,6 +1190,20 @@ def test_the_rule_budget_asks_for_yield_and_eight_covered_weeks(render, tmp_path
         assert phrase in rule, phrase
 
 
+def test_maintaining_carries_the_freeze_until_december():
+    """v2.94 A3, owner 2026-11-10 (PR #407): no new rules, gates or mandatory lines until
+    2026-12-08 — only fixes that unblock work, removed effort and tool-written measurements."""
+    from pathlib import Path
+    maintaining = " ".join((Path(__file__).resolve().parents[1] / "MAINTAINING.md").read_text().split())
+    limits = maintaining.split("## Grenzen", 1)[1].split("## ", 1)[0]
+    assert "**Einfrieren bis 2026-12-08.**" in limits
+    assert "keine neuen Regeln, Gates oder Pflichtzeilen im Template" in limits
+    for phrase in ("Korrekturen, die Arbeit blockieren", "Änderungen, die Aufwand entfernen",
+                   "Messwerte, die Werkzeuge schreiben, ohne neue Zeile für Agenten",
+                   "Owner-Entscheidung vom 2026-11-10", "PR #407"):
+        assert phrase in limits, phrase
+
+
 def test_every_template_change_is_reviewed_with_a_regression_lens():
     from pathlib import Path
     """Owner, 2026-10-31: a change to the process template must not open an old hole while it
