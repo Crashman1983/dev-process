@@ -588,6 +588,37 @@ Gezählt sind Checkbox-Zeilen in Plan und Aufgabenliste, über alle Phasen eines
 
 Die drei Maßnahmen fallen unter die Ausnahme des Einfrierens: 1 und 2 sind neue Grenzen, die Aufwand entfernen sollen; 3 nimmt Pflichten weg. Ob sie während der vier Wochen ausgeliefert werden oder am Ende gebündelt, ist mit der Freigabe zu entscheiden.
 
+## 19. Was die zweite Modellfamilie bei Tier 2 fand
+
+Gezählt aus den `FINDING`-Zeilen der Kenni-Review-Reports von Tier-2-Arbeiten, Feld `by=` (wer den Befund fand). Eigene Familie: Claude-Modelle. Zweite Familie: Codex und DeepSeek.
+
+**Code-Reviews, Tier 2** (722 Befunde, 523 mit `by=`, aus 47 Arbeiten)
+
+| Gefunden von | Blocker | Major | Minor | Nit |
+|---|---:|---:|---:|---:|
+| eigene Familie | 22 | 6 | 205 | 178 |
+| zweite Familie | 12 | 26 | 59 | 15 |
+
+- 38 von 66 schweren Befunden (58 %) stammen von der zweiten Familie. 34 davon tragen `action=fix`.
+- Art: je 16 Testlücken und Implementierungsfehler, 3 fehlende Prozessnachweise, 3 sonstige.
+- In 28 von 42 Reports mit einem schweren Befund hatte nur die zweite Familie einen.
+- Verteilung: Die 38 Befunde liegen in 10 Arbeiten, 26 davon in dreien (#2717, #2702, #2712). In 7 Arbeiten fand nur die zweite Familie etwas Schweres, in 6 nur die eigene, in 3 beide.
+- Die betroffenen Arbeiten sind nicht die großen: #2712 hat 177 Produktzeilen, #2718 164, #2723 128.
+- Beispiele für Implementierungsfehler: #2718 (`ooxml.py` liest `show=" true "` als falsch und meldet eine sichtbare Folie als versteckt), #2723 (Zustandsfehler nach fehlgeschlagenem Abruf), #2821 (offener Dateideskriptor bei abgebrochenem Wächter).
+
+**Plan-Reviews, Tier 2** (360 Befunde, 267 mit `by=`): 28 schwere Befunde von der zweiten Familie, 42 von der eigenen.
+
+**Kosten**
+
+Von 185 Tier-2-Review-Runden liefen 111 mit zweiter Familie. Blockiert wurden davon 39 %, von den 74 Runden ohne zweite Familie 28 %.
+
+**Einordnung**
+
+- Die zweite Familie ist bei Tier 2 nicht redundant. Sie fand in sechs Wochen in 7 von 47 ausgewerteten Arbeiten schwere Befunde, die die eigene Familie nicht meldete.
+- Rund die Hälfte davon sind Testlücken: ein Akzeptanzkriterium ohne Test, der rot werden kann. Die andere Hälfte sind Fehler im Code.
+- Grenzen der Zählung: 28 % der Befunde tragen kein `by=`. Wer zuerst liest, bekommt den Befund zugeschrieben; ob die eigene Familie ihn allein auch gefunden hätte, zeigt die Zählung nicht.
+- Die Entscheidung des Owners vom 2026-11-10, die Pflicht bei Tier 2 zu streichen, wurde vor dieser Zählung getroffen.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
