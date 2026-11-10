@@ -483,6 +483,41 @@ Die Näherung taugt nicht als Qualitätsmaß. Sie zeigt aber: Mehr Review-Runden
 - Daneben führt Kenni `docs/dev/process-risk-tiers.md` mit 2.833 Wörtern als eigenes Dokument, kein Overlay.
 - Von den 16 Gates sind neun Produktprüfungen, die den Gate-Runner als Startpunkt nutzen (Lint für Backend und Web, OpenAPI- und Schema-Drift, Theme-Tokens, iOS-Guards, SBOM, Bild-Duplikate, ein Design-Board-Test). Zwei rufen Skripte des Templates auf (`inventory`, `baseline-duplicates`). Fünf sind eigene Prozessprüfungen (`owner-bypass`, `plan-branch-tests`, `kit-tokens`, `plan-retention`, `token-growth`), dazu ein eigenes `check_feature_registry.py`.
 
+## 16. Was die späten Review-Runden finden
+
+Gezählt aus den `REVIEW`-Zeilen (250 Issues mit Code-Reviews) und den `FINDING`-Zeilen der Review-Reports, die eine Rundennummer tragen (2.566 Befunde). Herkunft nach dem Feld `origin`: `draft` und `late` stammen aus dem ersten Entwurf, `fix` aus einer Reparaturrunde.
+
+**Verteilung der Runden**
+
+| Runde | Review-Läufe | Blocks |
+|---|---:|---:|
+| 1 | 386 | 120 |
+| 2 | 152 | 52 |
+| 3 | 72 | 32 |
+| 4 und später | 104 | 53 |
+
+23 von 250 Issues (9 %) liefen bis Runde 4 oder weiter. Sie tragen 148 von 257 Blocks (58 %). 22 der 23 endeten mit einem Pass; bei 9 gab es Owner-Ausnahmen.
+
+**Blocker und Majors nach Runde und Herkunft** (nur Befunde mit gesetztem Feld)
+
+| Runde | Blocker und Majors | aus Reparatur | aus dem ersten Entwurf |
+|---|---:|---:|---:|
+| 1 | 211 | 2 % | 98 % |
+| 2 | 73 | 51 % | 49 % |
+| 3 | 52 | 50 % | 50 % |
+| 4 und später | 41 | 61 % | 39 % |
+
+- Ab Runde 2 stammt etwa die Hälfte der schweren Befunde aus der Reparatur davor, ab Runde 4 sind es 61 %. Das bestätigt die v2.77-Analyse (47 % ab Runde 2).
+- Die späten Runden sind kein Leerlauf: Runde 4 und später fanden 9 Blocker und 32 Majors, davon rund 13 echte Fehler aus dem ersten Entwurf.
+- Von 337 Befunden ab Runde 4 sind 296 `minor` oder `nit`.
+- Einschränkung: Die 41 schweren Befunde ab Runde 4 stammen aus 25 Reports zu 11 der 23 langen Issues; die übrigen Reports tragen keine Rundennummer oder keine Befundzeilen.
+
+**Folgerung für einen frühen Halt**
+
+- Ein Halt, der „mit Restpunkten mergen“ bedeutet, wäre riskant: Auch nach Runde 3 liegen echte Fehler im Entwurf.
+- Ein Halt, der „nicht weiter reparieren, sondern neu schneiden“ bedeutet, ist gestützt: Die Mehrheit dessen, was späte Runden finden, hat die Reparatur erst erzeugt, und ein Neubau in kleineren Teilen erzeugt es nicht.
+- Die Regel dafür gibt es schon (`REPLAN … rebuild` ab der zweiten blockierten Runde). Sie wird in Kenni an 13 % der geschuldeten Stellen geschrieben und hat keine Folge, wenn `increment` gewählt wird. Wirksam wäre: Nach dem zweiten Block ist `increment` nur noch mit Owner-Entscheidung möglich; der Normalfall ist der Neuschnitt.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
