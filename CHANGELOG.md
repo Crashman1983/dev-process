@@ -10,6 +10,61 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.94.0 — Less repetition in the run; measurements the tools write · 2026-11-10
+
+**Why.**
+- A process audit of the template and of Kenni's history (PR #407) found that a work runs the same checks several times on unchanged content, and that texts invite review rounds the code does not require.
+  - `finish` said a rebase voids review digests, which no longer exist since v2.53; a clean rebase keeps the review.
+  - `workflow.md` archived the plan before the bundle, the other rules after the pass.
+  - The `finish` tail listed `publish_and_prune` steps for other branches' specs.
+  - Plan-review bundles ran the full gate runner although the plan reviewer reads no code.
+- Merge-only checks were hard only in the push hook. `finish` and the train found such a red only when the push was refused.
+- Decisions about the process lacked data that no tool recorded: cost per phase, size at the first review, regressions, who found a finding.
+- Owner decision 2026-11-10: the template is frozen until 2026-12-08 — no new rules, gates or required lines. This release only removes effort, corrects text and adds measurements that tools write.
+
+**What changes.**
+- **Texts.**
+  - The rebase text in `finish` (four places) and in `releases.md`: a rebase that applies cleanly keeps the review; a conflict resolution needs a new round.
+  - `workflow.md` and `commits.md`: the plan is archived after the review pass, in a commit of its own.
+  - `MAINTAINING.md` records the freeze.
+- **`finish`.**
+  - The tail lists only the branch's own specs; without a fork point it lists all, marked "range unknown".
+  - `/finish` starts with `finish.py --apply` (without a train: `--apply --tests`); the separate preview run is gone. `--apply` prints the own specs' `publish_and_prune` lines.
+  - Without a remote, the local merge reuses the gate result `check()` saw in the same process on the same HEAD, with a clean tree and the same target.
+- **Merge target for the gates.** `finish` and the train pass `PROCESS_PUSH_TARGETS` to the gate runner, so merge-only checks block there, before the push. The train passes none for its base or for a tree equal to the base, which are never pushed. A merge-only red now goes through the train's search for the culprit instead of a refused push. The merge hook still runs its gates (no memo in this release).
+- **Plan-review bundles run no preflight.** `/plan` runs the gates after the plan commit, before the bundle.
+- **`/speckit-analyze` and `/speckit-converge` are optional at every tier.** No incident and no gate stood behind them as Tier 3 steps.
+- **Measurements, written by tools or computed by readers, never by an agent:**
+  - `SIZE work=<id> round=<r> lines=<n> files=<n>`: attest writes it beside each code-review REVIEW line — the branch's changed lines without tests, bookkeeping, lock files and changelogs. The REVIEW line itself is unchanged. The bundle header prints the same number. No reader computes from it yet.
+  - `COST work=<issue> phase=<p> wall_seconds=<n> tokens=<n>|- [not-measured: <reason>]`: `finish --apply` writes one line per phase in a commit of its own, `docs: record cost — #<issue>`, directly before the archive commit. The phase history now records phase starts. No line without a dispatch record, an issue in the branch name or a fork point. `process_kpis.py cost` reads the lines.
+  - Regression suspicion in `process_kpis.py works --window`: for each fix commit, `git blame` at its parent names the merge that wrote the changed lines. A line of an earlier work's merge is a suspicion of that work's regression; review fixes, later phases of the same issue, lock files and changelogs are not. Counted apart from `Regression-of:` trailers. Nothing is written.
+  - A finding without `by=` takes the model family of its round's single REVIEW line in `rounds` and `coverage`, shown apart from `by=` in the report.
+
+**Effect.**
+- Fewer gate runs per work: none for a plan-review bundle, one fewer in `finish`, and a merge-only red is caught before the push.
+- Fewer review rounds started by stale texts.
+- The project's history starts carrying cost per phase, size per review round and a regression count, without an agent writing a line.
+
+**Changed sections.**
+- `commits.md` (Merging)
+- `journal-state-plans.md` (Journal; Retention — growth is unbounded by design)
+- `releases.md` (Updating the process template)
+- `workflow.md` (Plan; Review)
+- `speckit.md` (Setup (once per repo, after the copier render); The Tier 2+ flow)
+- `telemetry.md` (The KPI cockpit)
+- `/finish`, `/plan`
+
+**Update.**
+- Pure update. No new configuration key, no new line for agents.
+- For projects:
+  - New journal lines `SIZE` and `COST`, only with the telemetry module; compaction keeps them.
+  - An extra commit `docs: record cost — #<issue>` before the archive commit of `finish --apply`.
+  - `phases/<issue>.json` carries `starts`.
+  - Merge-only checks block in `finish` and in the train instead of at the push.
+  - `/finish` starts with `--apply`.
+
+Details: [Plan](docs/analysis/2026-11-10-v2.94.md) PR #407
+
 ## v2.93.0 — Stable acceptance ids; a design GO only with full coverage · 2026-11-09
 
 **Why.**

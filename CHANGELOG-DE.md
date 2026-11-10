@@ -9,6 +9,61 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.94.0 — Weniger Wiederholung im Durchlauf; Messwerte, die Werkzeuge schreiben · 2026-11-10
+
+**Warum.**
+- Ein Prozess-Audit von Template und Kennis Historie (PR #407) zeigte: Eine Arbeit läuft mehrmals durch dieselben Prüfungen auf unverändertem Inhalt, und Texte laden zu Review-Runden ein, die der Code nicht verlangt.
+  - `finish` sagte, ein Rebase verwerfe Review-Digests; die gibt es seit v2.53 nicht mehr, ein sauberer Rebase hält das Review.
+  - `workflow.md` archivierte den Plan vor dem Bundle, die übrigen Regeln nach dem Pass.
+  - Der `finish`-Tail nannte `publish_and_prune`-Schritte für Specs fremder Branches.
+  - Plan-Review-Bundles fuhren den vollen Gate-Runner, obwohl der Plan-Reviewer keinen Code liest.
+- Merge-Prüfungen waren nur im Push-Hook hart. `finish` und der Zug fanden ein solches Rot erst, wenn der Push abgelehnt wurde.
+- Für Entscheidungen über den Prozess fehlten Daten, die kein Werkzeug schrieb: Kosten je Phase, Größe beim ersten Review, Regressionen, wer einen Befund fand.
+- Owner-Entscheidung 2026-11-10: Das Template ist bis 2026-12-08 eingefroren, keine neuen Regeln, Gates oder Pflichtzeilen. Dieses Release entfernt nur Aufwand, korrigiert Text und ergänzt Messwerte, die Werkzeuge schreiben.
+
+**Was sich ändert.**
+- **Texte.**
+  - Der Rebase-Text in `finish` (vier Stellen) und in `releases.md`: Ein sauber anwendbarer Rebase hält das Review; eine Konfliktlösung braucht eine neue Runde.
+  - `workflow.md` und `commits.md`: Der Plan wird nach dem Review-Pass archiviert, in einem eigenen Commit.
+  - `MAINTAINING.md` hält das Einfrieren fest.
+- **`finish`.**
+  - Der Tail nennt nur die eigenen Specs; ohne Fork-Punkt alle, mit „range unknown“.
+  - `/finish` beginnt mit `finish.py --apply` (ohne Zug: `--apply --tests`); der getrennte Vorschau-Lauf entfällt. `--apply` druckt die `publish_and_prune`-Zeilen der eigenen Specs.
+  - Ohne Remote übernimmt der lokale Merge das Gate-Ergebnis, das `check()` im selben Prozess auf demselben HEAD, mit sauberem Baum und demselben Ziel sah.
+- **Merge-Ziel für die Gates.** `finish` und der Zug übergeben `PROCESS_PUSH_TARGETS` an den Gate-Runner, Merge-Prüfungen blockieren dort also vor dem Push. Für seine Basis und einen Baum gleich der Basis, die nie gepusht werden, übergibt der Zug keines. Ein Merge-Rot geht jetzt durch die Suche des Zugs nach dem Verursacher statt in einen abgelehnten Push. Der Merge-Hook fährt seine Gates weiter (kein Merker in diesem Release).
+- **Plan-Review-Bundles ohne Preflight.** `/plan` lässt die Gates nach dem Plan-Commit laufen, vor dem Bundle.
+- **`/speckit-analyze` und `/speckit-converge` sind auf jedem Tier optional.** Hinter ihnen als Tier-3-Schritten stand kein Vorfall und keine Prüfung.
+- **Messwerte, die Werkzeuge schreiben oder Leser berechnen, nie ein Agent:**
+  - `SIZE work=<id> round=<r> lines=<n> files=<n>`: attest schreibt sie neben jede REVIEW-Zeile eines Code-Reviews, die geänderten Zeilen des Branches ohne Tests, Buchhaltung, Lockfiles und Changelogs. Die REVIEW-Zeile selbst bleibt unverändert. Der Kopf des Bundles zeigt dieselbe Zahl. Noch rechnet kein Leser damit.
+  - `COST work=<issue> phase=<p> wall_seconds=<n> tokens=<n>|- [not-measured: <reason>]`: `finish --apply` schreibt je Phase eine Zeile in einem eigenen Commit, `docs: record cost — #<issue>`, direkt vor dem Archiv-Commit. Der Phasen-Verlauf hält jetzt die Phasenstarts. Keine Zeile ohne Dispatch-Record, ohne Issue im Branch-Namen oder ohne Fork-Punkt. `process_kpis.py cost` liest die Zeilen.
+  - Verdacht auf Regression in `process_kpis.py works --window`: Für jeden Fix-Commit nennt `git blame` am Elternteil den Merge, der die geänderten Zeilen schrieb. Eine Zeile aus dem Merge einer früheren Arbeit ist ein Verdacht auf deren Regression; Review-Fixes, spätere Phasen desselben Issues, Lockfiles und Changelogs nicht. Getrennt von `Regression-of:`-Trailern gezählt. Es wird nichts geschrieben.
+  - Ein Befund ohne `by=` übernimmt in `rounds` und `coverage` die Modell-Familie der einzigen REVIEW-Zeile seiner Runde, getrennt von `by=` aus dem Report ausgewiesen.
+
+**Wirkung.**
+- Weniger Gate-Läufe je Arbeit: keiner für ein Plan-Review-Bundle, einer weniger in `finish`, und ein Merge-Rot fällt vor dem Push auf.
+- Weniger Review-Runden durch veraltete Texte.
+- Die Historie des Projekts trägt ab jetzt Kosten je Phase, Größe je Review-Runde und eine Regressionszählung, ohne dass ein Agent eine Zeile schreibt.
+
+**Geänderte Abschnitte.**
+- `commits.md` (Merging)
+- `journal-state-plans.md` (Journal; Retention — growth is unbounded by design)
+- `releases.md` (Updating the process template)
+- `workflow.md` (Plan; Review)
+- `speckit.md` (Setup (once per repo, after the copier render); The Tier 2+ flow)
+- `telemetry.md` (The KPI cockpit)
+- `/finish`, `/plan`
+
+**Update.**
+- Reines Update. Kein neuer Konfigurationsschlüssel, keine neue Zeile für Agenten.
+- Für Projekte:
+  - Neue Journal-Zeilen `SIZE` und `COST`, nur mit dem Modul `telemetry`; die Kompaktierung behält sie.
+  - Ein zusätzlicher Commit `docs: record cost — #<issue>` vor dem Archiv-Commit von `finish --apply`.
+  - `phases/<issue>.json` trägt `starts`.
+  - Merge-Prüfungen blockieren in `finish` und im Zug statt erst am Push.
+  - `/finish` beginnt mit `--apply`.
+
+Details: [Plan](docs/analysis/2026-11-10-v2.94.md) PR #407
+
 ## v2.93.0 — Stabile AC-Kennungen; ein Design-GO nur mit voller Abdeckung · 2026-11-09
 
 **Warum.**
