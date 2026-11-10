@@ -144,8 +144,9 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     review_lines,
 )
 
-# TELEMETRY_MODULE (check_review): the SIZE line is a measure its readers count, so a
-# project without the module gets none (human_digest reads it so)
+# TELEMETRY_MODULE (check_review): the SIZE line is a measure kept for later evaluation (no
+# reader computes from it yet; one per work and round counts), so a project without the
+# module gets none (human_digest reads it so)
 
 def size_line(root: Path, record: dict, *, plan_review: bool) -> str | None:
     """`SIZE work=<id> round=<r> lines=<n> files=<n>`, written next to a code review's

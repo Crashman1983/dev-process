@@ -8,7 +8,7 @@ gate. Reasoning older than a few weeks is history: git has the
 full text, and nobody resumes a session from it. What must survive is the
 machine-read record: `REVIEW` attestations (the review gate clears archived
 plans against them), `SIZE` lines (attest writes them next to a code review's
-REVIEW line where the telemetry module is rendered; its readers count them),
+REVIEW line where the telemetry module is rendered, kept for later evaluation),
 `COST` lines (`finish --apply` writes a work's cost per phase there, read by
 `process_kpis cost`) and `GRADE` lines (retired telemetry records, kept as
 history). Everything else in an old shard is prose that costs tokens on every

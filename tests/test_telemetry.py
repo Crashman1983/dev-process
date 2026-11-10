@@ -2677,6 +2677,33 @@ def _shape(s: dict) -> tuple:
             s["repairs"], s["no_lines"])
 
 
+def test_a_lockfile_or_changelog_fix_is_no_regression_suspicion(render, tmp_path):
+    """Refute v2.94: E1 counts what a review counts as product (`_fix_pass_counted`) — a
+    dependency bump in a lock file and a changelog line are no regression of the work that
+    added them."""
+    out = _merges_repo(render, tmp_path)
+    _train_merge(out, "7-alpha", [("feat: alpha (#7)", {"src/a.py": _lines(10, "a"), "uv.lock": _lines(10, "l"),
+                                                         "CHANGELOG.md": _lines(5, "c")}, _at(3))],
+                 "train: merge 7-alpha\n\nCloses #7", _at(4, 12))
+    _train_merge(out, "8-bump", [("fix: bump a dependency (#8)",
+                                  {"uv.lock": _edit(_lines(10, "l"), 3),
+                                   "CHANGELOG.md": _edit(_lines(5, "c"), 1)}, _at(5))],
+                 "train: merge 8-bump\n\nCloses #8", _at(6, 12))
+    s = _suspicion(out)
+    assert s["suspected"] == [], s
+
+
+def test_a_follow_up_branch_closing_the_same_issue_repairs_its_own_work(render, tmp_path):
+    """Refute v2.94: a train event's own issues are its branch issue and the issues its message
+    closes — a follow-up branch without a number that closes #7 repairs #7, never regresses it."""
+    out = _merges_repo(render, tmp_path)
+    _alpha(out)
+    _train_merge(out, "alpha-followup", [("fix: alpha edge (#7)", {"src/a.py": _edit(_lines(10, "a"), 3)}, _at(5))],
+                 "train: merge alpha-followup\n\nCloses #7", _at(6, 12))
+    s = _suspicion(out)
+    assert s["suspected"] == [] and s["repairs"] == 1, s
+
+
 def test_a_fix_of_an_earlier_works_line_is_suspected_as_its_regression(render, tmp_path):
     """E1: a fix merged later changes a line #7's merge wrote — "suspected regression of #7",
     computed from `git blame` at the fix's parent; the `Regression-of:` trailer is counted
@@ -2938,12 +2965,12 @@ def test_rounds_and_coverage_keep_the_two_sources_apart(render, tmp_path):
 
 
 def test_the_test_path_rule_has_one_owner(render, tmp_path):
-    """E1 reads tests as the bundle does: through `check_review._is_test_path` (E3), with no
-    copy of the rule of its own."""
+    """E1 reads product paths as the review does: through `check_review._fix_pass_counted`,
+    whose test rule is `check_review._is_test_path` (E3), with no copy of either of its own."""
     out = _render(render, tmp_path)
     m = _flow_module(out)
     source = (out / "scripts/process/process_kpis.py").read_text(encoding="utf-8")
     assert not hasattr(m, "_is_test_path") and not hasattr(m, "_TEST_NAME"), "a copy of the rule"
-    assert "_review._is_test_path(" in source
+    assert "_review._fix_pass_counted(" in source
     bundle = (out / "scripts/process/make_review_bundle.py").read_text(encoding="utf-8")
     assert "def _is_test_path" not in bundle
