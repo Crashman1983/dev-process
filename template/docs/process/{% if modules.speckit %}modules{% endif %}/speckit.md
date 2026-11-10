@@ -35,8 +35,8 @@ the network or the CLI:
 directory left out of git means every fresh clone, worktree and cloud
 session has no `/speckit-*` command and would need the CLI again — which a
 sandbox may refuse. The flow uses `speckit-specify`, `-clarify`, `-plan` and
-`-tasks`; `-analyze` and `-converge` as "The Tier 2+ flow" below says;
-`-checklist` on demand. An integration that writes its skills elsewhere
+`-tasks`; `-analyze`, `-converge` and `-checklist` are optional, on demand
+("The Tier 2+ flow" below). An integration that writes its skills elsewhere
 adds its directory to the loop; the gate names any dropped skill still there
 and any skill not yet committed.
 Keeping them per user breaks "nothing needs the CLI at runtime"; the gate's
@@ -82,12 +82,11 @@ unchanged, forever if needed.
    constraints.
 2. `/plan` → `/speckit-plan` + `/speckit-tasks`; add `tier: N` and
    `issue: <ref>` lines to `specs/<feature>/plan.md` (the review and issue
-   gates key on them). Run `/speckit-analyze` at plan exit for **Tier 3, or
-   when the spec was substantially iterated** — for a clean, single-pass
-   Tier 2 cycle the templates already enforce structurally what analyze
-   would re-derive, and the independent review sees spec + plan + tasks in
-   the bundle anyway (token economy: one LLM pass saved per normal feature;
-   LLM judgment is review input, never a gate).
+   gates key on them). `/speckit-analyze` is optional, on demand, like
+   `-checklist`, at every tier — the templates already enforce structurally
+   what analyze would re-derive, and the independent review sees spec +
+   plan + tasks in the bundle anyway (token economy: one LLM pass saved per
+   feature; LLM judgment is review input, never a gate).
 3. Execute through the normal execute flow, consuming `tasks.md`: checkboxes
    in the file are the canonical progress state, story checkpoints validate
    each slice, TDD inside each task, which
@@ -95,9 +94,9 @@ unchanged, forever if needed.
    commits). Completeness at review time is deterministic first: the
    `speckit` gate reports unchecked tasks in an active `tasks.md` as a
    visible note (zero tokens), and the review judges them. `/speckit-converge`
-   (a full LLM pass over spec/plan/tasks/codebase) is reserved for **Tier 3**,
-   where semantic divergence — built ≠ specified despite ticked boxes —
-   justifies the cost.
+   (a full LLM pass over spec/plan/tasks/codebase) is optional, on demand,
+   like `-checklist` — for a suspected semantic divergence (built ≠
+   specified despite ticked boxes), at no tier a required step.
 4. Review + merge as always (bundle, REVIEW attestation, DoD). The merge
    ritual then runs `python scripts/process/publish_and_prune.py <feature>`:
    SC accounting first (every SC-ID evidenced / tracked as follow-up /
