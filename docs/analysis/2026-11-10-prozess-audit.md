@@ -462,6 +462,21 @@ Näherung: Ein Fix-Commit einer anderen Arbeit ändert innerhalb von sieben Tage
 
 Die Näherung taugt nicht als Qualitätsmaß. Sie zeigt aber: Mehr Review-Runden gehen nicht mit weniger Folgekorrekturen einher. Größe steckt in beidem.
 
+**Arbeiten ohne Produktcode, aufgeschlüsselt**
+
+74 Arbeiten mit zusammen 57 Code-Blocks, eingeordnet nach dem Bereich mit den meisten geänderten Zeilen (Buchhaltung unter `.process-work/`, `specs/` und `news/` nicht mitgezählt):
+
+| Überwiegend geändert | Arbeiten | Blocks | Ø Blocks | davon Tier 3 |
+|---|---:|---:|---:|---:|
+| Tests | 37 | 25 | 0,68 | 11 |
+| Prozess-Maschinerie (`scripts/process/`, `docs/process/`, Hooks, CI, Befehle) | 21 | 22 | 1,05 | 15 |
+| Design (`docs/design/`) | 5 | 7 | 1,40 | 1 |
+| Sonstiges, Projekt-Werkzeug, Doku | 11 | 3 | 0,27 | 1 |
+
+- Über alle 200 Arbeiten gerechnet überwiegt die Prozess-Maschinerie bei 22 Arbeiten (11 %) mit 26 Blocks (12 %). Die Vermutung, ein Viertel der Review-Last hänge am Prozess selbst, ist damit nicht gedeckt; es ist etwa ein Achtel.
+- Diese Last ist stark konzentriert: Vier Template-Updates (#2393 mit 9 Blocks, #2416 mit 4, #2352 und #2720 mit je 2) tragen 17 der 22 Blocks. 15 der 21 Arbeiten sind Tier 3.
+- Bei den reinen Test-Arbeiten trägt eine einzige (#2717) 9 der 25 Blocks.
+
 **Kennis lokale Dateien und Gates**
 
 - Von den 17 Dateien `*.local.*` sind 11 Konfiguration (JSON) und 6 Text. Alle sechs Texte sind erklärte Overlays mit `overlay-of:` und `extends:` auf Abschnitte der Template-Dokumente. Sie ergänzen und verschärfen; `review.local.md` sagt das ausdrücklich. Zusammen 5.325 Wörter, davon 3.398 in `review.local.md`.
