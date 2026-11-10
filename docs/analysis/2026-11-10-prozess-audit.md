@@ -770,6 +770,20 @@ Anlass: Der Owner prüft, die Testlast vom Server in die Cloud zu verlegen und d
 - Für Playwright sind zwei Dinge nötig. `E2E_LANE=a` muss in der Umgebung stehen; ohne die Variable bricht `make e2e-backend` an `scripts/e2e_lane.sh` ab. Und das Projekt nutzt Playwright 1.61, der vorinstallierte Chromium gehört zu einer anderen Version; der Probelauf lief über eine temporäre Konfiguration mit dem vorinstallierten Browser als `executablePath`. Für einen Dauerbetrieb gehört der passende Browser ins Setup-Skript.
 - Gelaufen sind zwei von 166 Specs in einem von drei Projekten. Die ganze E2E-Suite ist nicht gemessen.
 
+**Aufteilung in vier Teile (Nachtrag)**
+
+Die Backend-Tests wurden nach gemessener Testzeit in vier überschneidungsfreie Teile geschnitten (`2026-11-10-kenni-suite/shard1.txt` bis `shard4.txt`) und nacheinander einzeln gefahren, jeder allein auf einer Maschine mit vier Prozessen, ohne Coverage:
+
+| Teil | Dauer | Ergebnis |
+|---|---:|---|
+| 1 | 300 s | grün |
+| 2 | 283 s | rot, bekannte Fälle |
+| 3 | 303 s | rot, bekannte Fälle |
+| 4 | 272 s | rot, bekannte Fälle |
+
+- Die roten Fälle sind die aus dem Nachlauf bekannten: Dokument-Toolset, Operator- und Lane-Tests.
+- Auf vier Maschinen parallel dauert der volle Backend-Lauf damit rund 5 Minuten zuzüglich Aufbau eines frischen Workers. Die Aufbauzeit und die Rückmeldung eines Workers sind nicht gemessen; der Start eigener Worker aus der Audit-Sitzung wurde von einer Sicherheitsprüfung angehalten.
+
 **Folgerungen**
 
 - Die Backend-Suite lässt sich in der Cloud fahren. Im Setup-Skript fehlen `bubblewrap` und das Dokument-Toolset; ein kleiner, benennbarer Rest braucht den Server.
