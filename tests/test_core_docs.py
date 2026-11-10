@@ -466,6 +466,18 @@ def test_bound_review_and_fresh_checkout_contracts_render(render, tmp_path):
     assert "base=<git-sha> head=<git-sha>\n" in journal
     assert "final rebase" in workflow
     assert "the bundle's reviewed range" in workflow
+    # v2.94 A2: the plan archives after the pass, in a commit of its own — as attest and
+    # finish do; bookkeeping after the bundle costs no new round
+    flat = " ".join(workflow.split())
+    assert ("**final rebase → finalize the plan → build the bundle → independent review (REVIEW "
+            "line to the journal with the bundle's reviewed range, written by `attest.py`) → "
+            "archive the plan in a commit of its own → integrate**") in flat
+    assert "finalize and archive the plan" not in flat
+    assert ("Changing code or the reviewed diff after the bundle loops back to a new bundle and "
+            "review; bookkeeping under `.process-work/`") in flat
+    commits = " ".join((out / "docs/process/commits.md").read_text().split())
+    assert ("**Local:** **archive the plan** → fetch → rebase → gate → `merge --ff-only` → push"
+            in commits)
     assert "fresh checkout" in testing
     assert ".venv" in testing and "node_modules" in testing
     assert "reproducible bootstrap" in testing
