@@ -868,7 +868,7 @@ Die Struktur ist schon dort nutzbar, wo das Template eine Auswahl heute erlaubt:
 
 1. Die Karte Quelldatei → Testdateien regelmäßig aus einem vollen Lauf mit Coverage je Test erzeugen und als Datei ablegen.
 2. Die 235 pfadgebundenen Testdateien ihren Gegenständen zuordnen: 134 aus der Textsuche als Vorschlag, 101 von Hand. Das Template hat dafür `pins`.
-3. Die Auswahl beim Branch-Push auf die gemessene Karte umstellen (`select`-Befehl des Stacks), mit Regel 4 als Rückfall auf den vollen Lauf.
+3. Die Auswahl beim Branch-Push auf die gemessene Karte umstellen (`select`-Befehl des Stacks). Korrektur nach dem Plan des Stewards (#2954): In den Fällen der Regel 4 fährt der Push nicht die ganze Suite. Kenni überlässt das heute dem Zug (ADR-0086, #2289), und dabei bleibt es, solange jeder Merge voll läuft; ein voller Lauf am Push würde die Lane rund 20 Minuten belegen.
 
 Der Merge fährt dabei unverändert die ganze Suite. Ob und wie die Auswahl später auch dort gilt, ist eine eigene Entscheidung.
 
