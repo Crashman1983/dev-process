@@ -131,6 +131,19 @@ def test_a_local_selector_adds_targets_and_its_failure_is_no_empty_answer(repo):
     assert r.returncode == 2 and "selector failed (3)" in r.stderr, r.stderr
 
 
+def test_a_stack_that_selects_through_select_reports_no_skip(repo):
+    """v2.94 (Kenni #2954): a source file no map entry reaches, in a stack with a `select`
+    command, is the selector's to judge — never reported as "skipped here"."""
+    _write(repo, "sel.py", "print('backend/tests/api')\n")
+    _config(repo, select=[sys.executable, "sel.py"], map=[])
+    _change(repo, "backend/src/app/core/db.py")
+    r = _sel(repo, "run")
+    assert r.returncode == 0, r.stderr
+    out = r.stdout + r.stderr
+    assert "skipped here" not in out, out
+    assert "the stack's select command chose its targets" in out, out
+
+
 def test_check_names_stale_pins_and_map_targets(repo):
     assert _sel(repo, "check").returncode == 0
     _config(repo, pins={"gone/": ["backend/tests/audit/test_missing.py"]},

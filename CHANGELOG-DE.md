@@ -26,6 +26,7 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
   - Der Rebase-Text in `finish` (vier Stellen) und in `releases.md`: Ein sauber anwendbarer Rebase hält das Review; eine Konfliktlösung braucht eine neue Runde.
   - `workflow.md` und `commits.md`: Der Plan wird nach dem Review-Pass archiviert, in einem eigenen Commit.
   - `MAINTAINING.md` hält das Einfrieren fest.
+  - `test_select`: Ein Stack, der über seinen `select`-Befehl auswählt, meldet Quelldateien ohne `map`-Eintrag nicht mehr als „skipped here“ (Kenni #2954).
 - **`finish`.**
   - Der Tail nennt nur die eigenen Specs; ohne Fork-Punkt alle, mit „range unknown“.
   - `/finish` beginnt mit `finish.py --apply` (ohne Zug: `--apply --tests`); der getrennte Vorschau-Lauf entfällt. `--apply` druckt die `publish_and_prune`-Zeilen der eigenen Specs.
