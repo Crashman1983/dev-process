@@ -518,6 +518,66 @@ Gezählt aus den `REVIEW`-Zeilen (250 Issues mit Code-Reviews) und den `FINDING`
 - Ein Halt, der „nicht weiter reparieren, sondern neu schneiden“ bedeutet, ist gestützt: Die Mehrheit dessen, was späte Runden finden, hat die Reparatur erst erzeugt, und ein Neubau in kleineren Teilen erzeugt es nicht.
 - Die Regel dafür gibt es schon (`REPLAN … rebuild` ab der zweiten blockierten Runde). Sie wird in Kenni an 13 % der geschuldeten Stellen geschrieben und hat keine Folge, wenn `increment` gewählt wird. Wirksam wäre: Nach dem zweiten Block ist `increment` nur noch mit Owner-Entscheidung möglich; der Normalfall ist der Neuschnitt.
 
+## 17. Vorschlag: drei Maßnahmen gegen die entgleisenden Arbeiten
+
+Der Owner ist mit den Maßnahmen 2 und 3 einverstanden; zu 1 war die Grenze offen. Grundlage sind die Zählungen aus den Abschnitten 14 bis 16 und die folgende Verfeinerung.
+
+**Wo die Grenze liegt**
+
+Produktzeilen sind geänderte Codezeilen ohne Tests, gemessen am gemergten Diff. Sie stehen erst fest, wenn gebaut ist.
+
+| Produktzeilen | Arbeiten | Ø Blocks | mit ≥ 1 Block |
+|---|---:|---:|---:|
+| 1 bis 99 | 49 | 0,20 | 14 % |
+| 100 bis 199 | 15 | 0,67 | 26 % |
+| 200 bis 299 | 12 | 0,50 | 8 % |
+| 300 bis 499 | 14 | 1,21 | 57 % |
+| 500 bis 799 | 10 | 2,30 | 60 % |
+| 800 bis 1.499 | 8 | 1,75 | 50 % |
+| ab 1.500 | 18 | 3,56 | 100 % |
+
+Der Sprung liegt bei 300 Zeilen, nicht bei 500. Ab 300 Zeilen: 25 % der Arbeiten, 58 % der Blocks.
+
+Vor dem Bau ist die Zahl der Aufgaben im Plan der beste Anzeiger. Sie hängt enger mit den Blocks zusammen (Rangkorrelation 0,46) als die Produktzeilen selbst (0,28):
+
+| Aufgaben im Plan | Arbeiten | Ø Blocks | mit ≥ 2 Blocks | Produktzeilen, Median | Anteil an den Blocks |
+|---|---:|---:|---:|---:|---:|
+| bis 5 | 110 | 0,35 | 6 % | 23 | 19 % |
+| 6 bis 10 | 53 | 1,26 | 24 % | 138 | 34 % |
+| 11 bis 20 | 15 | 2,73 | 40 % | 950 | 20 % |
+| über 20 | 11 | 4,55 | 63 % | 5.076 | 25 % |
+
+Gezählt sind Checkbox-Zeilen in Plan und Aufgabenliste, über alle Phasen eines Issues summiert (189 Arbeiten mit auffindbarem Plan). Die Zahl der Akzeptanzkriterien und der im Plan genannten Dateien sagt deutlich weniger aus.
+
+**Maßnahme 1: Größengrenze an zwei Stellen**
+
+- Beim Plan: Ein Plan mit mehr als zehn Aufgaben oder mit Produktcode in mehr als einem Stack wird vor dem Plan-Review in gestapelte Pläne geschnitten. Das `plan-structure`-Gate zählt die Aufgaben; es liest die Pläne schon.
+- Beim ersten Review-Bundle als Rückhalt: Es warnt ab 300 Produktzeilen und verweigert ab 500. So lässt sich die Plangrenze nicht durch größere Aufgaben umgehen.
+- Ausnahme in beiden Fällen: eine begründete `DECISION`-Zeile des Owners im Plan.
+- Welche Pfade Produktcode sind, kommt aus den Stacks in `testing.local.json`, ohne deren Testpfade.
+
+**Maßnahme 2: Neuschnitt als Normalfall nach dem zweiten Block**
+
+- Nach dem zweiten blockierten Code-Review einer Arbeit nimmt `attest.py` keine weitere Runde an, solange der Plan nicht `REPLAN … rebuild` trägt oder eine `DECISION` des Owners, die das Weiterreparieren erlaubt.
+- `rebuild` heißt: Der offene Rest wird in kleinere Pläne geschnitten, jeder mit eigenem Plan-Review. Heute ist `increment` frei wählbar, und der Owner wird erst nach dem dritten Block gefragt.
+- Kein Merge mit Restpunkten als Ausweg: Abschnitt 16 zeigt echte schwere Fehler auch in späten Runden.
+
+**Maßnahme 3: Leichter Weg für kleine Arbeiten, auch bei Tier 3**
+
+- Bedingung: höchstens fünf Aufgaben im Plan, ein Stack, und kein Pfad aus einer Risikokarte, die das Projekt festlegt (Zugriffsschutz, Migrationen, Gate-Code).
+- Dann entfallen die Tier-3-Zusätze: eigener Refute-Lauf, zweite Modellfamilie, `analyze` und `converge`. Es bleiben Plan-Review und ein unabhängiges Review.
+- Beleg: Tier-3-Arbeiten unter 200 Produktzeilen haben 0,06 Blocks im Mittel (18 Arbeiten). Was diese Zusätze dort verhindern, ist nicht gemessen. Deshalb als Versuch mit festen Kriterien: Blocks, Durchlaufzeit, Korrekturen innerhalb von sieben Tagen, mindestens 20 Arbeiten.
+- Das Bundle prüft die Bedingung am Diff nach: Wächst die Arbeit über 200 Produktzeilen oder berührt sie die Risikokarte, gilt wieder der volle Weg.
+
+**In Kenni, ohne Template-Änderung**
+
+- `cross_model_from_tier` steht auf 2; das Template sieht 3 vor. Ob Tier 2 die zweite Modellfamilie braucht, ist eine Entscheidung des Owners in `model-policy.local.json`.
+
+**Offen**
+
+- Die Grenzen (zehn Aufgaben, 300 und 500 Zeilen, fünf Aufgaben für den leichten Weg) stammen aus sechs Wochen eines Projekts. Sie gehören als Projektwerte in die Konfiguration, mit diesen Zahlen als Voreinstellung.
+- Jeder Schnitt zahlt den festen Prozess noch einmal. Ob das aufgeht, zeigt der Vergleich der Runden und der Durchlaufzeit vor und nach der Einführung.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
