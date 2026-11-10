@@ -27,6 +27,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
   - The rebase text in `finish` (four places) and in `releases.md`: a rebase that applies cleanly keeps the review; a conflict resolution needs a new round.
   - `workflow.md` and `commits.md`: the plan is archived after the review pass, in a commit of its own.
   - `MAINTAINING.md` records the freeze.
+  - `test_select`: a stack that selects through its `select` command no longer reports every source file without a map entry as "skipped here" (Kenni #2954).
 - **`finish`.**
   - The tail lists only the branch's own specs; without a fork point it lists all, marked "range unknown".
   - `/finish` starts with `finish.py --apply` (without a train: `--apply --tests`); the separate preview run is gone. `--apply` prints the own specs' `publish_and_prune` lines.

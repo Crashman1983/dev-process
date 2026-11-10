@@ -210,7 +210,7 @@ def plan(root: Path, cfg: dict, changed: set[str], klass: str,
             action = "none"
         result.append({"name": stack["name"], "action": action, "targets": targets,
                        "fallbacks": fallbacks, "unmapped": unmapped, "pins": pinned,
-                       "missing_pins": missing_pins})
+                       "missing_pins": missing_pins, "selector": bool(stack["select"])})
     return result
 
 
@@ -354,8 +354,14 @@ def _report(steps: list[dict]) -> None:
             print(f"test_select: {s['name']}: fallback {note}")
         if s["unmapped"]:
             shown = ", ".join(s["unmapped"][:5]) + (" …" if len(s["unmapped"]) > 5 else "")
-            what = "the stack's full command runs" if s["action"] == "full" else \
-                "skipped here — the train's full suite runs them"
+            if s["action"] == "full":
+                what = "the stack's full command runs"
+            elif s.get("selector"):
+                # a stack that selects through `select` needs no map entry (v2.94: the
+                # message read as "skipped" for every source file such a stack has)
+                what = "the stack's select command chose its targets"
+            else:
+                what = "skipped here — the train's full suite runs them"
             print(f"test_select: {s['name']}: no map reaches {shown}; {what}")
         for pin in s["missing_pins"]:
             print(f"test_select: {s['name']}: pinned target {pin} does not exist (`test_select.py check`)")
