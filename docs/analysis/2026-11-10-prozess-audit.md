@@ -412,7 +412,7 @@ Tier-2-Arbeiten seit 2026-10-10 mit Plan-Review: 79, im Mittel 0,44 Code-Blocks;
 **Kenni ist strenger als das Template**
 
 - `cross_model_from_tier` steht in Kenni auf 2 (Template: 3). 177 von 280 Tier-2-Review-Zeilen tragen `cross-model`. Jede Tier-2-Arbeit zahlt damit eine zweite Modellfamilie.
-- 16 projekteigene Gates, 17 lokale Regeldateien, 195 `REVIEW-EXCEPTION`-Zeilen, 111 von 455 Plänen mit `spec-waived`.
+- 16 Einträge in `gates.local.json`, 17 Dateien `*.local.*` (Aufschlüsselung in Abschnitt 15), 195 `REVIEW-EXCEPTION`-Zeilen, 111 von 455 Plänen mit `spec-waived`.
 - Kenni führt ein eigenes Tier-Dokument mit 2.833 Wörtern neben dem des Templates (908 Wörter).
 
 **Was die Zahlen für die Varianten bedeuten**
@@ -422,6 +422,51 @@ Tier-2-Arbeiten seit 2026-10-10 mit Plan-Review: 79, im Mittel 0,44 Code-Blocks;
 - **Die Last ist stark konzentriert.** Eine Regel für die wenigen entgleisenden Arbeiten (früher Abbruch, Neuschnitt) trifft 59 % der Blocks, ohne die 61 % zu berühren, die glatt durchgehen.
 - **Die Nebenlast der kleinen Befunde ist neu:** 1.412 bearbeitete `minor`- und `nit`-Befunde.
 - **Warum eine Arbeit Tier 3 ist, lässt sich nicht auszählen.** Die Pläne tragen dafür kein Feld; `mutation:` steht bei der Hälfte auf `runtime`, bei einem Drittel fehlt es.
+
+## 15. Größe, Zeit und Korrekturen aus Kennis Historie
+
+Nachgeladen: 6.738 Commits seit 2026-09-25. Gezählt sind 314 Train-Merges zu 269 Issues; 200 davon lassen sich mit den Review-Zeilen verbinden. Produktzeilen sind geänderte Zeilen in Code unter `backend/`, `frontend-react/` und `ios/` ohne Tests; die Einordnung der Pfade ist meine und eine Näherung.
+
+**Blocks nach Größe**
+
+| Produktzeilen | Arbeiten | Ø Blocks | mit ≥ 1 Block | Anteil an allen Blocks |
+|---|---:|---:|---:|---:|
+| 0 | 74 (37 %) | 0,77 | 33 % | 28 % |
+| unter 200 | 64 (32 %) | 0,31 | 17 % | 9 % |
+| 200 bis 500 | 26 (13 %) | 0,88 | 34 % | 11 % |
+| 500 bis 1.500 | 18 (9 %) | 2,06 | 55 % | 18 % |
+| über 1.500 | 18 (9 %) | 3,56 | 100 % | 31 % |
+
+- Arbeiten über 500 Produktzeilen sind 18 % der Arbeiten und tragen 49 % der Blocks.
+- Bei Tier 3 unter 200 Zeilen: 0,06 Blocks im Mittel (18 Arbeiten). Bei Tier 3 über 1.500 Zeilen: 4,14 (14 Arbeiten). Die Größe erklärt die Runden besser als das Tier.
+- Zwei Stacks: 3,11 Blocks im Mittel (19 Arbeiten); ein Stack: 0,77 (104).
+- Arbeiten ohne Produktcode (Prozess, Doku, Specs, Tests, Design-Runden) sind 37 % der Arbeiten und tragen 28 % der Blocks.
+
+**Zeit und Prozessanteil**
+
+| Tier | Arbeiten | Durchlauf Median | p90 | Commits Median | davon nur Prozesspfade | Prozesszeilen je Produktzeile |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | 16 | 2,6 h | 17,6 h | 5 | 64 % | 31,3 |
+| 2 | 94 | 5,5 h | 57,6 h | 11,5 | 60 % | 4,2 |
+| 3 | 90 | 7,9 h | 90,2 h | 20 | 57 % | 1,6 |
+
+- Durchlauf vom ersten Commit bis zum letzten Merge. Ohne Block: Median 3,5 h. Mit einem Block: 11,9 h. Mit zwei oder mehr: 29,8 h.
+- Über alle Train-Merges: 177.000 geänderte Produktzeilen, 320.000 Testzeilen, 310.000 Prozesszeilen.
+
+**Korrekturen innerhalb von sieben Tagen**
+
+Näherung: Ein Fix-Commit einer anderen Arbeit ändert innerhalb von sieben Tagen eine Produktdatei, die die Arbeit geändert hat. Das überzählt bei Dateien, die viele Arbeiten berühren.
+
+- Tier 2: 31 von 52 (59 %). Tier 3: 39 von 57 (68 %).
+- Arbeiten ohne Block: 57 %. Arbeiten mit mindestens einem Block: 73 %.
+
+Die Näherung taugt nicht als Qualitätsmaß. Sie zeigt aber: Mehr Review-Runden gehen nicht mit weniger Folgekorrekturen einher. Größe steckt in beidem.
+
+**Kennis lokale Dateien und Gates**
+
+- Von den 17 Dateien `*.local.*` sind 11 Konfiguration (JSON) und 6 Text. Vier der Texte sind erklärte Overlays mit `overlay-of:` und `extends:` auf Abschnitte der Template-Dokumente. Sie ergänzen und verschärfen; `review.local.md` sagt das ausdrücklich. Zusammen 5.325 Wörter, davon 3.398 in `review.local.md`.
+- Daneben führt Kenni `docs/dev/process-risk-tiers.md` mit 2.833 Wörtern als eigenes Dokument, kein Overlay.
+- Von den 16 Gates sind neun Produktprüfungen, die den Gate-Runner als Startpunkt nutzen (Lint für Backend und Web, OpenAPI- und Schema-Drift, Theme-Tokens, iOS-Guards, SBOM, Bild-Duplikate, ein Design-Board-Test). Zwei rufen Skripte des Templates auf (`inventory`, `baseline-duplicates`). Fünf sind eigene Prozessprüfungen (`owner-bypass`, `plan-branch-tests`, `kit-tokens`, `plan-retention`, `token-growth`), dazu ein eigenes `check_feature_registry.py`.
 
 ## Anhang: Befunde außerhalb des Fokus
 
