@@ -200,7 +200,7 @@ Die Wartezeit von 7,9 Stunden folgt zum großen Teil aus dem roten Pfad: Züge f
 
 Fünf dieser Gates sind Prüfungen des Baums, die das Projekt selbst eingetragen hat (`web-lint`, `theme-tokens`, `backend-lint`, `inventory`, `openapi-drift`). Sie machen zusammen 40.905 s aus, die Hälfte der gesamten Gate-Zeit, und haben in 30 Tagen drei oder weniger Blocks gemeldet.
 
-- Projekt-Gates können heute schon auf Pfade begrenzt werden (`paths` und `areas` in `gates.local.json`, `gate_runner.py.jinja:568-591`). Ein `web-lint`, der nur läuft, wenn ein Web-Pfad im Flug ist, braucht keine Änderung am Template. Ob Kenni das gesetzt hat, ist hier nicht sichtbar.
+- Projekt-Gates können heute schon auf Pfade begrenzt werden (`paths` und `areas` in `gates.local.json`, `gate_runner.py.jinja:568-591`). Ein `web-lint`, der nur läuft, wenn ein Web-Pfad im Flug ist, braucht keine Änderung am Template. **Korrigiert (Abschnitt 12):** Laut Steward sind diese Gates in Kenni bereits pfadbegrenzt; die Kosten entstehen, wenn sie laufen.
 - Ihr Ergebnis hängt nur vom Baum ab. Sie sind damit die ersten Kandidaten für den Gate-Merker (Maßnahme 1).
 - Das `review`-Gate ist mit 19 % das teuerste Gate des Templates; das stützt Maßnahme 6.
 
@@ -273,6 +273,35 @@ Die Optimierungs-Sitzung hat den Bericht am 2026-11-10 gegen v2.93.0 und gegen K
 3. **In Kenni, kein Template-Paket:** Körnung des Retry-Skripts; Projekt-Gates auf Pfade begrenzen; die beiden Zählungen aus 9.5 (warum 163 von 327 Arbeiten Tier 3 sind, welcher Anteil der Blocks hält).
 4. **B, Gate-Merker**, mit dem Schlüssel und den Ausnahmen von oben. Reines Update, solange Projekt-Gates unverändert laufen.
 5. **D, Tier 0/1.** Migration oder ein Schalter, der standardmäßig aus ist: Die Pfade, die Gate-Code kennzeichnen, sind fest verdrahtet und kennen projekteigene Gate-Skripte nicht; eine `inert`-Voreinstellung trifft Projekte, deren Tests Doku lesen.
+
+## 12. Abgestimmtes Ergebnis (Stand 2026-11-10)
+
+Abgestimmt mit der Optimierungs-Sitzung über den PR #407 und mit dem Steward von Kenni. Die Angaben des Stewards stammen aus seinem Checkout und sind hier nicht nachgeprüft. Umgesetzt ist nichts; die Entscheidung liegt beim Owner.
+
+**Korrektur aus Kenni:** Die teuren Projekt-Gates (`web-lint`, `backend-lint`, `openapi-drift`, `theme-tokens`) sind dort bereits pfadbegrenzt. Die Empfehlung, sie zu begrenzen, entfällt. Ungebunden sind `review`, `plan-structure`, `design-contracts`, `inventory` und `feature-registry`; nur `inventory` ist ein Kandidat, und erst nach einer Analyse dessen, was es liest.
+
+**Zentral im Template:**
+
+| Release | Inhalt | Art |
+|---|---|---|
+| 1 | Rebase-Text an allen drei Stellen, Archiv-Reihenfolge, `finish`-Tail. Dazu die drei sicheren Teile aus dem Gate-Paket: Train und `finish` übergeben das Merge-Ziel an die Gates; kein Gate-Lauf für Plan-Review-Bundles; `finish --apply` verwendet das Prüfergebnis desselben Laufs wieder, wenn der Baum unverändert ist. | reines Update |
+| 2 | Roter Pfad. Zuerst 17: Ein Abbruch durch Last oder Timeout ist kein Befund über einen Passagier. Das Signal ist eine Marker-Datei, deren Pfad der Zug der Suite vorgibt und vor jedem Lauf löscht; ein Exit-Code geht in `make` und unter xdist verloren. Danach 16: rote Tests je Passagier, aufgebaut auf der Vorab-Prüfung. | reines Update |
+| 3 | Teillauf im Bisect (#378 wieder geöffnet), getrennt von Release 2. Erst nach der Messung mit `red_ids` aus Kenni. Abnahmekriterien sind die Blocker der vier Runden, dazu: Ein Baum, den nur eine verengte Probe grün sah, fährt vor jedem Merge die ganze Suite. | nach Messung |
+| 4 | Der eigentliche Gate-Merker, erst nach einer Rechnung, was er je Lauf spart. Parallele Gates nur als Opt-in. | reines Update |
+| 5 | Tier 0/1 im Zug als Schalter, der aus ist. Gate-Pfade aus `gates.local.json`; ein nicht auflösbarer Pfad gilt als Gate-Code. Keine `inert`-Voreinstellung im Template. | Schalter oder Migration |
+
+Bedingungen für das Marker-Signal in Release 2, je mit Negativtest: Ein solcher Abbruch führt nie zu einem Merge und nie zu einer Schuldzuweisung; nach einer begrenzten Zahl von Wiederholungen endet die Runde mit „Umgebung“; ein Test, der auch ohne Marker rot ist, bleibt rot; der Zug liest den Marker nur an dem Pfad, den er selbst gesetzt hat.
+
+**In Kenni (Steward):**
+
+| Schritt | Inhalt | Art |
+|---|---|---|
+| a | `inert` für reine Doku-Pfade und `red_ids` in `testing.local.json` setzen. `red_ids` liefert nur Daten für Backend-Tests; die vitest-Stage bleibt ohne. | Konfiguration |
+| b | Der Watchdog schreibt die Marker-Datei aus Release 2. Laut Steward der größte Hebel. | Tier 3, nach Release 2 |
+| c | Körnung des Retry-Skripts. Es wiederholt mit Absicht ganze Stages (#2469), weil der Retry auch nachholen muss, was nicht lief. Erst nach den Daten aus a. | Tier 3 |
+| d | Zählungen: warum 163 von 327 Arbeiten Tier 3 sind, welcher Anteil der Blocks hält. | Messung |
+
+**Offen:** Wo die Marker-Datei liegt. Die Optimierungs-Sitzung schlägt einen Pfad im Worktree vor, den der Zug per Umgebungsvariable vorgibt; der Steward das git-dir. Das entscheidet der Plan für Release 2.
 
 ## Anhang: Befunde außerhalb des Fokus
 
