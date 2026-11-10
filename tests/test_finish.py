@@ -834,12 +834,41 @@ def test_a_red_merge_gate_stops_the_local_merge(render, tmp_path, elsewhere):
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: widget with pass")
     main_before = _git(out, "rev-parse", "main").stdout
+    head_before = _git(out, "rev-parse", "HEAD").stdout
+    # v2.94 C1: check() runs the gates with the merge target — the open task blocks there,
+    # before the archive commit, and the preview says so too
+    # (check() names the last lines of the gate run: the red gate, not the finding)
+    r = _run(out)
+    assert r.returncode == 1 and "FAILED gates: plan-structure" in r.stdout, r.stdout + r.stderr
     r = _run_args(out, "--apply", "--tests", "true")
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "open task at the merge" in r.stdout, r.stdout
+    assert "gate suite red" in r.stdout and "FAILED gates: plan-structure" in r.stdout, r.stdout
+    assert "nothing applied" in r.stdout, r.stdout
+    assert _git(out, "rev-parse", "HEAD").stdout == head_before  # no archive commit
+    assert (out / PLANS / "2026-07-04-widget.md").is_file()
     assert _git(out, "rev-parse", "main").stdout == main_before  # nothing merged
     assert _git(out, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "feature"
     assert not [e for e in _reports(out) if e["state"] == "done"]
+
+
+def test_with_the_merge_target_low_tiers_and_the_train_archive_step_stay_green(render, tmp_path):
+    """Guard (v2.94 C1): the merge target in check() hardens merge findings only — a Tier 0
+    branch, a Tier 1 plan and the train route's archive step (`--apply` without `--tests`)
+    stay green, with a remote and without one."""
+    tier0 = _repo_on_feature(render, tmp_path / "t0")
+    (tier0 / "payload.txt").write_text("done\n", encoding="utf-8")
+    _git(tier0, "add", "-A")
+    _git(tier0, "commit", "-q", "-m", "feat: payload")
+    r = _run(tier0)
+    assert r.returncode == 0 and "finish: ready" in r.stdout, r.stdout + r.stderr
+    remote, _bare = _repo_with_origin(render, tmp_path / "t1")  # a Tier 1 plan, pushed
+    local = _repo_without_remote(render, tmp_path / "t1-local")
+    for out in (remote, local):
+        r = _run(out)
+        assert r.returncode == 0, r.stdout + r.stderr
+        r = _run_args(out, "--apply")
+        assert r.returncode == 0 and "stopped before the merge" in r.stdout, r.stdout + r.stderr
+        assert "archive plan(s) on merge" in _git(out, "log", "-1", "--format=%s").stdout
 
 
 def test_without_a_remote_the_checkout_holding_main_is_advanced(render, tmp_path):
