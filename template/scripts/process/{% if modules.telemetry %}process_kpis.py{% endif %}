@@ -33,7 +33,8 @@ difference. See "honest ceiling" in the module doc.
   process_kpis.py baseline      [--window S:U]… [--json]
                                                 # per window: medians per merged work, escapes per tier
   process_kpis.py works         [--window S:U] [--json]
-                                                # per merged work: rounds, lead, sessions, product lines
+                                                # per merged work: rounds, lead, sessions, product lines;
+                                                # with --window the regression suspicion (git blame)
   process_kpis.py load          [--weeks N] [--json]
                                                 # process vs product lines per merge, week by week
   process_kpis.py size          [--window S:U] [--json]
@@ -2359,6 +2360,9 @@ def _event(root: Path, table: dict[str, dict], c: dict, earlier: list[str], kind
             own = None  # no earlier event is an ancestor: unknown, as the first finish
         strays, base = [], sha
     ev["issues"], ev["claim"] = sorted(issues), claim if issues else "none"
+    # the event's own commits, also for a range without a bound: the regression suspicion (v2.94
+    # E1) maps a blamed commit to its event and judges an unbounded one as open, not as no event
+    ev["commits"] = list(own or [])
     if own is None or strays is None or base is None:
         ev["bounded"] = False
         return ev
@@ -2472,7 +2476,8 @@ def merge_events(root: Path, ref: str | None = None) -> dict:
     walk(list(reversed(chain.split())), None)
     # a shallow clone's boundary commit has no parents: what lies behind it is not here
     shallow = (_git_out(root, "rev-parse", "--is-shallow-repository") or "").strip() == "true"
-    got = {"ref": ref, "events": events, "shallow": shallow, "why": None, "octopus": octopus}
+    got = {"ref": ref, "events": events, "shallow": shallow, "why": None, "octopus": octopus,
+           "table": table}  # the commits read once: subjects and parents for the regression suspicion
     _EVENTS_READ[key] = got
     return got
 
@@ -2517,6 +2522,171 @@ def merged_works(root: Path, ref: str | None = None) -> dict:
     events = got["events"] or []
     return {**got, "works": works, "unclaimed": sum(1 for e in events if not e["issues"]),
             "mixed": sum(1 for e in events if e["mixed"])}
+
+
+# --- regression suspicion, computed at read time (v2.94 E1) ---------------------------------
+# A fix commit inside a merge event changes lines; `git blame` at the fix's parent names the
+# commits that wrote them, and the merge events own those commits. A line another work wrote is
+# a suspicion of that work's regression — computed here, never written: no trailer, no reference
+# on an old issue. Review fixes and later phases of the same work repair their own work.
+# The bundle's test-path rule (`make_review_bundle._is_test_path`; v2.94 E3 gives it its home in
+# check_review, and this copy then imports it — a test pins the two equal until then).
+_TEST_DIRS = frozenset({"test", "tests", "spec", "specs", "__tests__"})
+_TEST_NAME = re.compile(r"^(?:test_.+\..+|.+_test\..+|.+\.spec\..+|.+\.(?:vi)?test\..+|conftest\.py)$")
+_OLD_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+")
+_BLAME_HEAD = re.compile(r"^([0-9a-f]{40}|[0-9a-f]{64}) \d+ \d+(?: \d+)?$")
+
+
+def _is_test_path(rel: str) -> bool:
+    """A test file by path: a test directory segment or a test file name."""
+    *dirs, name = rel.split("/")
+    return any(d in _TEST_DIRS for d in dirs) or bool(_TEST_NAME.match(name))
+
+
+def _own_issues(ev: dict) -> set[int]:
+    """The issues a merge event is the work of: a train merge's branch issue
+    (`check_review.branch_issue`), a finish range's archived plans' issues — never a `Refs #N`,
+    or works under one epic would hide each other (plan review, round 3)."""
+    if ev["kind"] != "train":
+        return set(ev["issues"])
+    import check_review as _review  # noqa: PLC0415
+    n = _review.branch_issue(ev["branch"] or "")
+    return {int(n)} if n else set()
+
+
+def _changed_old_lines(root: Path, parent: str, fix: str) -> list[tuple[str, int, int]] | None:
+    """(old path, first line, count) of every hunk with which `fix` changes or deletes lines of a
+    file outside the tests, against `parent`; a renamed file by its old path (`-M`). None when
+    git fails or runs past its time."""
+    names = _git_out(root, "diff", "--name-status", "-z", "-M", *_DIFF, parent, fix)
+    if names is None:
+        return None
+    pairs: list[tuple[str, str]] = []
+    parts, i = names.split("\0"), 0
+    while i < len(parts) and parts[i]:
+        status = parts[i]
+        if status.startswith(("R", "C")):
+            if status.startswith("R"):  # a copy leaves its source as it was
+                pairs.append((parts[i + 1], parts[i + 2]))
+            i += 3
+            continue
+        if not status.startswith("A"):  # an added file has no old lines
+            pairs.append((parts[i + 1], parts[i + 1]))
+        i += 2
+    got: list[tuple[str, int, int]] = []
+    for old, new in pairs:
+        if _is_test_path(old):
+            continue
+        # both paths: a path filter on one side cuts the rename off before git detects it
+        diff = _git_out(root, "diff", "--unified=0", "-M", *_DIFF, parent, fix, "--",
+                        *dict.fromkeys((old, new)))
+        if diff is None:
+            return None
+        for m in map(_OLD_HUNK.match, diff.splitlines()):
+            count = 0 if m is None else 1 if m.group(2) is None else int(m.group(2))
+            if count:  # a hunk that only adds touches no old line
+                got.append((old, int(m.group(1)), count))
+    return got
+
+
+def _blamed(root: Path, parent: str, path: str, first: int, count: int) -> set[str] | None:
+    """The commits that last wrote lines first..first+count-1 of `path` at `parent`; None when
+    git fails or runs past its time."""
+    out = _git_out(root, "blame", "--porcelain", "-L", f"{first},+{count}", parent, "--", path)
+    if out is None:
+        return None
+    return {m.group(1) for m in map(_BLAME_HEAD.match, out.splitlines()) if m}
+
+
+def _judge_fix(root: Path, fix: dict, ev: dict, owner: dict[str, dict]) -> tuple[str, dict | str | None]:
+    """("no-lines" | "repair" | "suspected" | "open", the origin event or why it is open)."""
+    if len(fix["parents"]) != 1:
+        return "no-lines", None
+    parent = fix["parents"][0]
+    hunks = _changed_old_lines(root, parent, fix["sha"])
+    if hunks is None:
+        return "open", "git"
+    if not hunks:
+        return "no-lines", None
+    if ev["mixed"] or not ev["bounded"]:
+        return "open", "mixed-fix"  # whose work the fix is cannot be told: no repair either
+    origins: dict[str, dict] = {}
+    for path, first, count in hunks:
+        shas = _blamed(root, parent, path, first, count)
+        if shas is None:
+            return "open", "git"
+        for s in shas:
+            e = owner.get(s)
+            if e is None:
+                return "open", "no-event"  # a stray commit, a range without a bound, the onboarding
+            origins[e["sha"]] = e
+    if any(e["mixed"] or not e["bounded"] for e in origins.values()):
+        return "open", "mixed-origin"
+    mine = _own_issues(ev)
+    foreign = [e for e in origins.values() if e is not ev and not (_own_issues(e) & mine)]
+    if not foreign:
+        return "repair", None  # a review fix, a later phase of the same issue
+    if len(origins) > 1:
+        return "open", "several-origins"
+    if len(_own_issues(foreign[0])) != 1:
+        return "open", "origin-issues"
+    return "suspected", foreign[0]
+
+
+def regression_suspicion(root: Path, lo: datetime, hi: datetime, ref: str | None = None) -> dict:
+    """Over the fix commits (`_commit_kind` → `fix`) of the merge events in [lo, hi): which
+    suspect a regression of an earlier work (`suspected`: fix, subject, issue, origin event),
+    which stay open for want of a clear origin (`open`: fix, subject, why), which repair their
+    own work and which change no line outside the tests. `Regression-of:` trailers on the same
+    fixes are counted apart (`trailers`), never folded in. Reads git only; writes nothing."""
+    from process_git import regression_refs  # noqa: PLC0415 — the trailer grammar's owner
+    got = merge_events(root, ref)
+    out: dict = {"evaluated": 0, "suspected": [], "open": [], "repairs": 0, "no_lines": 0, "trailers": 0,
+                 "why": got["why"]}
+    events, table = got["events"], got.get("table")
+    if events is None or table is None:
+        return out
+    owner: dict[str, dict] = {}
+    for ev in events:
+        for s in (ev["sha"], *ev.get("commits", ())):
+            owner.setdefault(s, ev)
+    for ev in events:
+        if not lo <= ev["when"] < hi:
+            continue
+        for sha in ev.get("commits", ()):
+            c = table.get(sha)
+            subject = (c["message"].splitlines() or [""])[0] if c else ""
+            if c is None or _commit_kind(subject) != "fix":
+                continue
+            out["evaluated"] += 1
+            out["trailers"] += bool(regression_refs(c["message"]))
+            verdict, what = _judge_fix(root, c, ev, owner)
+            if verdict == "suspected":
+                (n,) = _own_issues(what)
+                out["suspected"].append({"fix": sha, "subject": subject, "issue": n, "origin": what["sha"]})
+            elif verdict == "open":
+                out["open"].append({"fix": sha, "subject": subject, "why": what})
+            elif verdict == "repair":
+                out["repairs"] += 1
+            else:
+                out["no_lines"] += 1
+    return out
+
+
+def _suspicion_lines(s: dict) -> list[str]:
+    head = "  regression suspicion (git blame at each fix's parent, computed here and never written)"
+    if s["why"]:
+        return [f"{head}: not read ({s['why']})"]
+    whys: dict[str, int] = {}
+    for o in s["open"]:
+        whys[o["why"]] = whys.get(o["why"], 0) + 1
+    lines = [f"{head}:",
+             f"    fix commits evaluated {s['evaluated']} · suspected {len(s['suspected'])} · open {len(s['open'])}"
+             + (f" ({', '.join(f'{k} {v}' for k, v in sorted(whys.items()))})" if whys else "")
+             + f" · repairs of own work {s['repairs']} · no changed line outside tests {s['no_lines']}"
+             + f" · Regression-of: trailers {s['trailers']} (counted apart)"]
+    lines += [f"    {p['fix'][:12]} {p['subject']} → #{p['issue']}" for p in s["suspected"]]
+    return lines
 
 
 def _first_deploy(rows: list[dict], branches: set[str], when: datetime) -> datetime | None:
@@ -3006,6 +3176,8 @@ def works(root: Path | None = None, window: tuple[datetime, datetime] | None = N
     import json  # noqa: PLC0415
     root = root or Path.cwd()
     t = works_table(root, *(window or _ALL_TIME))
+    if window:  # only in a window: without one every fix of the whole history would be blamed
+        t["regression_suspicion"] = regression_suspicion(root, *window)
     if as_json:
         print(json.dumps(t, default=str, sort_keys=True))
         return 0
@@ -3013,6 +3185,8 @@ def works(root: Path | None = None, window: tuple[datetime, datetime] | None = N
     print(_population_text(t["population"]))
     if not t["rows"]:
         print("  no merged work in the window — works skipped")
+        for line in _suspicion_lines(t["regression_suspicion"]) if window else ():
+            print(line)
         return 0
     print(f"  {'issue':<7} {'tier':<4} {'kind':<15} {'plan':>4} {'code':>4} {'lead':>9} {'work':>8}  "
           f"{'sessions':<20} {'lines':>7}")
@@ -3039,6 +3213,8 @@ def works(root: Path | None = None, window: tuple[datetime, datetime] | None = N
               f"{round(100 * sum(r['code_rounds'] for r in heavy) / sum(rounds))} % of the rounds"
               + (f", {round(100 * sum(r['product_lines'] or 0 for r in heavy) / lines)} % of the product lines"
                  if lines else ""))
+    for line in _suspicion_lines(t["regression_suspicion"]) if window else ():
+        print(line)
     n = len(t["rows"])
     lvl = _level(n, True, False, _N_THRESHOLD)
     print(f"  {confidence(n, proxy=True)} · {action(lvl, 'compare a tier or kind with its own past: a tier whose rounds and lead keep rising is where the flow costs more than it buys', thin='keep merging through the train or finish; judge after ~20 works per tier')}")
