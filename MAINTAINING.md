@@ -76,6 +76,11 @@ auch wenn kein Projekt einen Fehler meldet.
 - **Was nur der Owner entscheidet:** Qualitätsuntergrenzen senken,
   Befugnisse erweitern, Budgets erhöhen, Produkt- oder Kompatibilitätszusagen
   ändern, ein Release freigeben.
+- **Einfrieren bis 2026-12-08.** Bis dahin keine neuen Regeln, Gates oder
+  Pflichtzeilen im Template. Erlaubt sind Korrekturen, die Arbeit blockieren,
+  Änderungen, die Aufwand entfernen, und Messwerte, die Werkzeuge schreiben,
+  ohne neue Zeile für Agenten. Owner-Entscheidung vom 2026-11-10 (Prozess-Audit,
+  PR #407).
 
 ## Zusammenarbeit mit dem Steward eines Projekts
 
