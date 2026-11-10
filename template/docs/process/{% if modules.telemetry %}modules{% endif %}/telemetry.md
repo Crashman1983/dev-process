@@ -34,7 +34,9 @@ fresh clone counts what the host counts. Events reached that way are named in
 the header; octopus merges are counted, not walked. A *merge event* is a train merge (`train: merge <branch>`, two
 parents; its commits are `merge^1..merge^2`) or a `finish` merge (its archive
 commit `docs: archive plan(s) on merge — <names>`; `finish` fast-forwards, so
-its commits are the range from the events before it to the archive commit).
+its commits are the range from the events before it to the archive commit —
+the cost commit right before it, `docs: record cost — #<issue>`, included: its
+`COST` lines are that event's process lines, never the next one's).
 Every range stops at *all* earlier events, on any path, so no commit is counted
 in two events. An
 event's issues are its claims: a train merge's `Closes #N` (the grammar of
@@ -91,11 +93,30 @@ that path instead of `~/.claude`. `{worktree}` stays the path itself, for a
 harness that keeps its transcripts under the worktree. An issue's sum covers
 its sessions on every branch it was dispatched on, from its first phase start
 to the merge, across stopped and restarted phases (the phase history
-`phases/<issue>.json` keeps the windows, worktrees and remote phases).
+`phases/<issue>.json` keeps the windows, worktrees and remote phases, and since
+v2.94 each phase start, `starts`).
+
+**Cost per phase, recorded at the merge** (v2.94). `finish.py --apply` writes a
+work's cost into the journal, in the run that writes its archive commit and in a
+commit of its own directly before it (`docs: record cost — #<issue>`, journal
+only; the archive commit stays the branch's last): one line per phase,
+`COST work=<issue> phase=<p> wall_seconds=<n> tokens=<n>|- [not-measured: <reason>]`
+(`dispatch.phase_costs`). `wall_seconds` is the phase's stretch of the dispatch
+window — from its start to the next phase's start or the merge — waits included,
+not working time; `tokens` is the output-token sum `tokens_line` gives, over that
+stretch, with `token_reason`'s wording where it is not, or only partly, measured
+— `-` and the reason, never 0. A history from before v2.94 (no `starts`, or a
+window whose first start it lacks) gives one line `phase=all` over the whole
+window instead of a split. A work without a dispatch record or without an issue
+in its branch name gets no line, and a branch whose range already carries the
+issue's `COST` lines (a run that stopped before its archive commit) gets no
+second set. Only finish writes them; the train route goes through
+`finish --apply` too. `cost` prints them beside its live count, the last set per
+work (a second branch of the issue).
 
 | family | measures | action (threshold → act) |
 |---|---|---|
-| `cost` | `--transcripts DIR` token medians per session (a message counts once, read through dispatch's transcript reader — v2.81) (harness-specific, `~approx`); `--issue N` one issue's output tokens from the policy's `transcripts` glob (`finish.py` prints the same line), else `not measured (<reason>)` | a work item far above the median → look at its rounds (`rounds`) before its model |
+| `cost` | `--transcripts DIR` token medians per session (a message counts once, read through dispatch's transcript reader — v2.81) (harness-specific, `~approx`); `--issue N` one issue's output tokens from the policy's `transcripts` glob (`finish.py` prints the same line), else `not measured (<reason>)`; beside it the journal's recorded `COST` lines per work and phase (v2.94, the last set per work; all works, or the one of `--issue`) — wall time including waits | a work item far above the median → look at its rounds (`rounds`) before its model |
 | `cfr` | DORA change failure rate: `feat:` with a corrective `fix:` ≤7 d sharing a code file (proxy) | trend over ≥3 windows only; rising despite catch>0 → tighten the test/review gate |
 | `clusters` | rule 6 across sessions: `fix:` commits (14 d) sharing a subject token — each session sees its fix as a first attempt; git sees the series | a cluster ≥3 → stop path-patching, write the invariant record (Type: invariant) with its table test (`workflow.md`, Debug) |
 | `rounds` | per work item: **compliance** (v2.81): ROOT-CAUSE for every blocked code round and REPLAN for every blocked round after a work's first, both from v2.77, and `kind=` on blockers from v2.70 (a doc duty no gate checks) — written against owed, from the template version at the head the review saw (a version that is no release tag is `unknown`, never old), `sites: none` and reasoned skips fulfilling, REPLAN variants named `unparsed`, and the rounds after a `rebuild`; **coverage** apart: the share of blocker/major findings carrying `origin=`, `at=`, `class=` (and `kind=` on majors), Codex against the others — optional or gate-enforced fields, never a duty here; **reviewer of a finding without `by=`** (v2.94): the model family of the one journal `REVIEW` line of the report's work and round — the family by the model policy's `ranks` and `families` (a class prefix's first word, `gpt-` → `gpt`; `reviewer=` is a process id, never read), the work through its ids (`check_review.expand_work`: a plan's slug and its issue are one work), plan reviews against `<work>-plan` lines only, a report naming its reviewed head against lines at that head; no line, several lines, `model=same` or a model the policy cannot place leave it unattributed, and a report's own `by=` wins — kept apart in the output (`blockers by reviewer` is the report's `by=`, `blockers without by=, by (review line)` the computed family; in coverage `<family> (review line)` beside `codex` and `others`), computed at read time and never written; tier, rounds to the first pass and blocked rounds (journal `REVIEW` lines); blockers per `FINDING`, by `origin=draft\|fix\|late` where the reports carry it, and by `kind=` (plan reviews — header `phase: plan` — apart from code reviews; `kind=` is the finding's sort, not the `cause:*` label of `outcomes`) — read through `check_issues.py` when the `github-issues` module is installed, else "not read"; a reader that is installed but cannot import (PyYAML missing — `uv run` resolves the script's header) is named as such; **old-code blocks** (#311): the `sev=blocker` findings of code reviews in round ≥ 2 whose `at=` lines stand as they did at a head of round 1 (a tree comparison: a rebase changes nothing while round 1's head exists), as unchanged/measured with the share, per round and per work, and what was not measured by reason (`no-at`, `no-place`, `no-line`, `not-code`, `no-round1`, `no-head`, `missing-commit`, `outside`, `git-failed`, `unreadable-report`) — measured only for findings that carry `at=` (v2.78), and a work whose round-1 head the repository no longer has is unmeasurable; **by round** (#318): per round 1, 2, 3 and ≥ 4, code reviews apart from plan reviews (`<work>-plan` REVIEW lines, `phase: plan` reports) — the median blockers per work and round, the works whose round blocked of all works reviewed, the share of those blocks on lines unchanged since round 1 (code reviews only; plan reviews `n/a`) and the round's median cost in tokens where a review run stated its usage (`report.py --usage`, phase `review`; the n-th such run of an issue is read as its round n — an estimate; plan rounds carry none) — a round without a stated cost is `unknown`, never free | proxy; within one tier over time: `fix` blockers dominate → regression tests and a re-check of the fixed class (`verification-independence.md`, "What each round judges"); `late` dominates → a more complete round 1 |
