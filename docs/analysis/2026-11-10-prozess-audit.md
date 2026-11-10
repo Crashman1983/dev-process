@@ -727,6 +727,41 @@ Der Hauptbefund bleibt: Die Blocks liegen bei wenigen Arbeiten, und Größe und 
 4. Maßnahme 2 in der berichtigten Form und Maßnahme 1 mit Aufgabenform und Pflichtnachweis: nach dem Einfrieren, oder früher mit ausdrücklicher Ausnahme des Owners.
 5. Maßnahme 3 über `analyze` und `converge` hinaus: zurückgestellt.
 
+## 22. Kennis Backend-Suite in der Cloud (Probelauf vom 2026-11-10)
+
+Anlass: Der Owner prüft, die Testlast vom Server in die Cloud zu verlegen und die Suite selbst zu hinterfragen. Die Backend-Suite lief in einer Cloud-Sitzung auf einem frischen Klon (Stand `f0f03360ef`), `pytest tests/ -n 4 -m 'not network'`, ohne Coverage-Messung. Die Frontend-Stufe ist nicht gelaufen.
+
+**Ergebnis**
+
+| Lauf | Testfälle | rot | Dauer |
+|---|---:|---:|---|
+| Erster Lauf, Umgebung unverändert | 23.065 | 455 (2,0 %) | 44 min; die ersten 95 % in 19 min |
+| Nachlauf der roten Dateien mit installiertem `bubblewrap` | 1.757 | 97 | 4 min |
+
+- Rund 250 der 455 roten Tests meldeten „bwrap is not installed“. Nach `apt-get install bubblewrap` arbeitet die Sandbox im Cloud-Container, auch mit `--unshare-all`.
+- Die 44 Minuten des ersten Laufs entstanden, weil Sandbox-Tests je 120 s auf ein fehlendes Werkzeug warteten; ein Test wurde vom Watchdog nach 300 s beendet.
+- Von den verbleibenden 97 (0,4 % aller Testfälle) brauchen rund 58 das Dokument-Toolset (LibreOffice, pandoc, poppler). Dafür gibt es `scripts/bootstrap_document_toolset.py`; `docs/dev/claude-agent-document-toolset.md` nennt ein in der Cloud bereits geprüftes Image.
+- Rund 35 betreffen Operator- und Zertifizierungstests. Dieselbe Doku nennt dafür zwei Grenzen der Cloud: Eine Kernel-Schnittstelle fehlt, und das mitgelieferte Claude-CLI hat dort kein angemeldetes Konto. Diese Tests bleiben auf dem Server.
+- Einzelne Tests prüfen Lanes und Verzeichnisse des Hosts.
+
+**Wohin die Zeit geht** (22.610 grüne Tests, zusammen 3.301 s Testzeit)
+
+- Median je Test 18 ms; 21 Tests über 10 s, 388 über 1 s.
+- Die 100 langsamsten Tests machen 22 % der Zeit aus, die 1.000 langsamsten 48 %. Die Zeit ist breit verteilt.
+- Größte Bereiche: `services/documents` 16 %, `api/v1` 13 %, `services/claude_agent` 6 %, `services/learning` 5 %. `tests/scripts` zusammen 8 %.
+- Ein Dutzend WebSocket-Tests braucht je 14,1 bis 14,2 s; das deutet auf eine feste Wartezeit.
+
+**Was die Suite prüft** (Mustersuche in den Testdateien, Größenordnung)
+
+- 58 % der Testfunktionen liegen in Dateien, die die Feature-Registry als Beleg nennt.
+- Außerhalb davon: rund 890 Tests für Prozess-Skripte, rund 610 Text-Pins auf Doku und Pläne, rund 2.580 Tests in Dateien, die Quelltext durchsuchen statt ihn auszuführen. Die Gruppen überschneiden sich.
+
+**Folgerungen**
+
+- Die Backend-Suite lässt sich in der Cloud fahren. Im Setup-Skript fehlen `bubblewrap` und das Dokument-Toolset; ein kleiner, benennbarer Rest braucht den Server.
+- Bei breiter Zeitverteilung bringt es wenig, einzelne langsame Tests zu beschleunigen. Wirksam sind zwei Dinge: steuern, welche Tests bei welcher Änderung laufen, und die Suite auf mehrere Maschinen verteilen. Bei vier Maschinen wären aus 19 Minuten rechnerisch rund 5; gemessen ist das nicht.
+- Ob Tests redundant sind, zeigt erst ein Lauf mit Coverage je Test.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
