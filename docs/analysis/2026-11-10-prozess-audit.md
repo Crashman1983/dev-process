@@ -53,7 +53,7 @@ Was einen einzelnen Lauf teuer macht:
 
 | Was | Wie oft | Beleg | Kann entfallen? |
 |---|---|---|---|
-| Suche nach Verbrauchern eines geänderten Werts | viermal: Plan, Plan-Review, Execute, Code-Review | `refute.md:138-140`, `execute.md:13`, `review-checklist.md:64-67` | Ja, drei davon: ein Skript führt die Befehle aus `## Consumers` am Kopf neu aus und zeigt die Differenz |
+| Suche nach Verbrauchern eines geänderten Werts | dreimal: Plan, Plan-Review, Code-Review (korrigiert: Execute vergleicht nur den Diff) | `refute.md:138-140`, `execute.md:13`, `review-checklist.md:64-67` | Ja, zwei davon: ein Skript führt die Befehle aus `## Consumers` am Kopf neu aus und zeigt die Differenz |
 | Zuordnung Kriterium → Test | dreimal von Hand: Plan, Review-Report, Registry | `journal-state-plans.md:75-80`, `review.md:53-63` | Ja, zwei davon: Bundle füllt aus dem Plan vor, Registry wird erzeugt |
 | Eigentümer-Prüfung (Regel 4) bei Tier 3 | viermal: Plan-Review, Execute, Refute, Review | `refute.md:44,133`, `execute.md:24-26`, `review-checklist.md:208` | Teilweise; erst zählen, welche Stufe die Befunde bringt |
 | Tier neu berechnen | zweimal: Plan-Review und Code-Review | `review-checklist.md:24,36` | Ja, wenn sich die berührten Pfade seit dem Plan nicht geändert haben |
@@ -109,8 +109,8 @@ Gezählt sind wieder volle Läufe des Gate-Runners für ein Paket ohne Beanstand
 
 | Tier | Weg | Lokale Gate-Läufe | Davon auf unverändertem Stand | Tests | LLM-Prüfläufe |
 |---|---|---:|---|---|---:|
-| 0 | `finish.py` | 2 bis 4 | `finish`-Prüfung und Merge-Hook sehen denselben Commit | volle Merge-Suite, außer das Projekt hat den Pfad als `inert` eingetragen | 0 |
-| 1 | `finish.py` | 2 bis 4 | wie Tier 0 | Auswahl beim Push, danach volle Merge-Suite | 0 |
+| 0 | `finish.py` | 3 bis 5 (korrigiert) | `finish`-Prüfung und Merge-Hook sehen denselben Commit | volle Merge-Suite, außer das Projekt hat den Pfad als `inert` eingetragen | 0 |
+| 1 | `finish.py` | 3 bis 5 (korrigiert) | wie Tier 0 | Auswahl beim Push, danach volle Merge-Suite | 0 |
 | 0/1 | Dispatch und Train | 4 | Bundle und Push; Train und Hook | Auswahl beim Push, Suite einmal je Train | 0, aber Bundle und `REVIEW`-Zeile mit `reviewer self` |
 | 2 | Dispatch und Train | 8 | siehe Abschnitt 2 | wie oben | 2 |
 | 3 | Dispatch und Train | 8 bis 10 | wie Tier 2 | wie oben | 5 |
@@ -171,18 +171,18 @@ Der Ablauf nach einem roten Lauf (`train.py:2172-2330`):
 3. Jede Bisect-Probe baut den Baum neu und fährt die Gates und die **ganze** Suite (`attempt(aboard[:mid], kind="probe")`, `train.py:2289`). Das sind rund 33 Minuten je Probe und bei acht Passagieren drei Proben.
 4. Der Verursacher wird abgesetzt. Der Rest ist eine neue Kombination: wieder Gates, ganze Suite und ein eigener Wiederholungslauf.
 
-Der Zug kennt die roten Tests bereits. Seit v2.88 liest er sie aus der `lastfailed`-Datei und schreibt sie in die Messung (`red_tests`, `train.py:1571-1614`). Er nutzt sie nicht, um den Verursacher zu finden.
+Der Zug kann die roten Tests seit v2.88 aus der `lastfailed`-Datei lesen und in die Messung schreiben (`red_tests`, `train.py:1571-1614`); er nutzt sie nicht, um den Verursacher zu finden. **Korrigiert (Abschnitt 11):** Das gilt nur, wenn das Projekt `red_ids` gesetzt hat. Kenni hat es nicht gesetzt.
 
-Ein Zeitlimit zählt wie ein roter Test (`_sh`, `train.py:1063-1067`). Ein Last-Timeout, der auch den einen Wiederholungslauf trifft, führt deshalb in den Bisect und setzt einen Passagier ab, der nichts dafür kann.
+Ein Timeout unter Last sieht für den Zug aus wie ein roter Test und führt, wenn er auch den Wiederholungslauf trifft, in den Bisect. **Korrigiert (Abschnitt 11):** Der Zug selbst gibt der Suite kein Zeitlimit; die Timeouts kommen aus der Suite (Wartezeit auf eine Lane mit Exit 75, Kennis Watchdog je Test) und enden als gewöhnlicher roter Exit.
 
 ### 9.3 Maßnahmen für den roten Pfad
 
 | # | Maßnahme | Wirkung | Risiko für die Qualität |
 |---|---|---|---|
-| 15 | Bisect-Proben fahren nur die roten Tests statt der ganzen Suite. Sind die Test-IDs nicht lesbar oder zu viele, bleibt es bei der ganzen Suite. | Eine Probe sinkt von rund 33 Minuten auf wenige Minuten. | Keins für main: Die Kombination, die gemergt wird, fährt weiterhin Gates und ganze Suite. Ein Fehler, der nur in der ganzen Suite auftritt, kann den Falschen absetzen; das kostet eine Verzögerung, keinen falschen Merge. |
+| 15 | Bisect-Proben fahren nur die roten Tests statt der ganzen Suite. Sind die Test-IDs nicht lesbar oder zu viele, bleibt es bei der ganzen Suite. | Eine Probe sinkt von rund 33 Minuten auf wenige Minuten. | **Korrigiert (Abschnitt 11):** Nicht ohne Zusatzregel. Eine grüne Probe speist heute den Merge: Sie trägt den Baum in `green_here` ein und schreibt ein Merge-Zertifikat (`train.py:2018-2023`), und der Rest nach dem Absetzen fährt die Suite dann nicht mehr (`train.py:2088-2094`). Eine verengte Probe darf nichts davon schreiben. Der Vorschlag wurde als #378 schon in vier Plan-Runden blockiert. |
 | 16 | Vor dem Bisect: Die roten Tests laufen einzeln auf Basis plus je einem Passagier, wie die Vorab-Prüfung aus v2.89. | Der Verursacher steht nach wenigen kurzen Läufen fest, wenn nur ein Passagier den Fehler bringt. | Wie 15. Ein Fehler, der nur in Kombination auftritt, geht weiter in den Bisect. |
 | 17 | Ein Zeitlimit oder ein Abbruch durch Last ist kein Befund über einen Passagier. Der Zug wiederholt das Fehlgeschlagene dann ein zweites Mal, seriell oder nach gesunkener Last, bevor er sucht. | Der Fall von Zug 0519: Minuten statt knapp drei Stunden. | Gering. Ein echter Fehler bleibt beim zweiten Mal rot und geht in die Suche. Die Zahl der Wiederholungen ist begrenzt. |
-| 18 | Prüfen, ob Kenni `--retry` gesetzt hat. Ein Retry von 50 Minuten spricht dafür, dass die ganze Suite wiederholt wurde. | Der erste Wiederholungslauf sinkt auf Minuten. | Keins; reine Konfiguration. Die Zähler `retry_failed` und `retry_full` in `train-phases` zeigen es. |
+| 18 | **Korrigiert (Abschnitt 11):** Kenni setzt `--retry`; sein Retry-Skript wiederholt ganze rote Stages statt einzelner Tests. Der Hebel ist die Körnung dieses Skripts. | Der erste Wiederholungslauf sinkt auf Minuten. | Keins; eine Änderung in Kenni, nicht im Template. |
 
 Die Wartezeit von 7,9 Stunden folgt zum großen Teil aus dem roten Pfad: Züge fahren nacheinander, und ein roter Zug hält die Strecke bis zu drei Stunden. Die Maßnahmen 15 bis 18 sind deshalb auch die Maßnahmen gegen die Wartezeit. Offen ist ein zweiter Grund: Der Zug fährt nicht ab, solange auf dem Klon ein Gate rot ist oder eine volle Lane belegt ist (`departure`, `train.py:659-682`). Wie oft das die Abfahrt verhindert hat, steht nicht in der Messung.
 
@@ -244,9 +244,38 @@ Fragen:
 4. Schnitt: ein Release je Paket, alles reine Updates? Was davon ist Migration?
 5. Aufteilung: Plan-Review und Refute laufen wie in `MAINTAINING.md` in frischen Sitzungen. Die Audit-Sitzung prüft, ob der Plan die Befunde trifft und keine Prüfung schwächer wird. Passt das?
 
+## 11. Korrekturen nach Gegenprüfung durch die Optimierungs-Sitzung
+
+Die Optimierungs-Sitzung hat den Bericht am 2026-11-10 gegen v2.93.0 und gegen Kennis Checkout geprüft (Kommentar im PR #407). Die folgenden Punkte habe ich an den genannten Stellen nachgelesen und übernommen; die betroffenen Stellen oben sind als korrigiert markiert.
+
+**Was ich falsch oder unvollständig hatte:**
+- **Maßnahme 15 ist als #378 schon gescheitert.** Vier Plan-Runden haben den Teillauf blockiert; der Owner entschied am 2026-11-04 „Erst messen“ (`docs/analysis/2026-11-04-v2.88.md:8-10,231`). v2.88 lieferte nur die Messung. Das habe ich übersehen.
+- **Mein Sicherheitsargument zu 15 hielt nicht.** Eine grüne Probe speist den Merge (`green_here`, Merge-Zertifikat). War der Verursacher der letzte Passagier, ist der Rest genau der zuletzt grün geprobte Baum, und seine Suite läuft nicht noch einmal. Mit Proben, die nur rote Tests fahren, würde so ein Baum gemergt, dessen ganze Suite nie grün war. Das war der Blocker in Runde 3 von #378.
+- **Weitere Einwände gegen 15:** Bringt der Verursacher seinen roten Test selbst mit, kennen frühere Präfixe die ID nicht und werden fälschlich rot. Eine kleine Testmenge verteilt sich unter xdist anders. Die Merge-Suite ist eine Shell-Zeile ohne Vertrag für Test-IDs. Die `lastfailed`-Datei liegt im Worktree, den der Zug bei jedem Versuch neu baut.
+- **Maßnahme 18** betrifft Kennis Retry-Skript, nicht das Template.
+- **Lauf 8 ist keine reine Wiederholung.** Nur beim Merge-Push blockieren die Prüfungen, die am Merge hängen; Train und `finish` fahren die Gates ohne Push-Ziel, dort sind dieselben Befunde Hinweise (`check_review.py:1462-1476`). Lauf 8 entfällt erst, wenn Train und `finish` das Ziel übergeben.
+- **`finish` zählt drei bis fünf Läufe für Tier 0/1**, weil `finish.py` und `finish.py --apply` beide prüfen (`finish.py:456`).
+- **Die Verbraucher-Suche läuft dreimal**, nicht viermal.
+- **Der Rebase-Text steht an drei Stellen**, nicht an einer: zweimal in `finish.py`, einmal in `releases.md`.
+- **„Fünf von sechs Blocks sind Fehlalarme“ (Abschnitt 4) war zu weit geschlossen.** Die Messung betrifft Befunde, nicht Blocks; `/review` filtert blockierende Befunde bereits über einen Scorer.
+- **Der veraltete Hook-Pfad (Abschnitt 8) kommt nicht aus dem Template.** `install_hooks.py` setzt `core.hooksPath` nicht; die Ursache ist ein im Projekt gesetzter absoluter Pfad.
+- **Der Widerspruch zur Spec-Pflicht bei Tier 2 besteht nicht**; der Anhang ist bereinigt.
+
+**Was der Gate-Merker (Maßnahme 1) zusätzlich braucht:**
+- Der Schlüssel kann nicht der Baum-Hash des Testzertifikats sein: Der lässt `.process-work/` aus, das mehrere Gates lesen.
+- Nie aus dem Merker: `review` (liest alle Refs und kann das Netz brauchen), `github-issues` (Netz) und Projekt-Gates, solange das Projekt nicht zustimmt.
+- Gates, die am Fork-Punkt hängen (`plan-structure`, `ui-check`, `feature-registry`, `design-contracts`), nur mit HEAD und den Ref-SHAs im Schlüssel.
+- Parallele Gates (Maßnahme 4) erhöhen die Last, und Last ist eine Ursache roter Züge. Also als Opt-in oder nach CPU-Zahl begrenzt.
+
+**Neue Reihenfolge, abgestimmt:**
+1. **C, Texte und Tail.** Reines Update, billig: alle drei Stellen des Rebase-Texts, die Archiv-Reihenfolge, der `finish`-Tail.
+2. **A, roter Pfad, in dieser Folge:** erst 17 (Timeout und Lastabbruch sind kein Befund über einen Passagier), dann 16 auf der Vorab-Prüfung aus v2.89 aufgebaut. 15 nur, wenn Kenni `red_ids` setzt und die Messung genug geeignete Runden zeigt, und nur mit der Regel, dass eine verengte Probe nichts schreibt, was einen Merge stützt. Der Plan baut auf #378 auf.
+3. **In Kenni, kein Template-Paket:** Körnung des Retry-Skripts; Projekt-Gates auf Pfade begrenzen; die beiden Zählungen aus 9.5 (warum 163 von 327 Arbeiten Tier 3 sind, welcher Anteil der Blocks hält).
+4. **B, Gate-Merker**, mit dem Schlüssel und den Ausnahmen von oben. Reines Update, solange Projekt-Gates unverändert laufen.
+5. **D, Tier 0/1.** Migration oder ein Schalter, der standardmäßig aus ist: Die Pfade, die Gate-Code kennzeichnen, sind fest verdrahtet und kennen projekteigene Gate-Skripte nicht; eine `inert`-Voreinstellung trifft Projekte, deren Tests Doku lesen.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
 - `optimize.active()` hat im Template keinen Aufrufer; seit Einführung der Optimierungsschleife (v2.67/v2.68) nennt der CHANGELOG keine Prüfung, die aufgrund von Messwerten entfernt oder abgeschwächt wurde. Ob Projekte eigene Records haben, ist hier nicht sichtbar.
-- Widerspruch zur Spec-Pflicht bei Tier 2: nein laut Kernel und `risk-tiers.md`, ja laut `journal-state-plans.md:177-180` (hartes Gate, außer mit `spec-waived`).
-- `process_context.py --cost` zählt die Befehlsdateien, aber keines der Dokumente, auf die eine Phase verweist (`process_context.py:255-281`).
+- `process_context.py --cost` führt die Prozess-Dokumente nur als Summe „available“; die Kosten je Phase weist es nicht aus (`process_context.py:255-281`).
