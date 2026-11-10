@@ -2899,14 +2899,13 @@ def test_rounds_and_coverage_keep_the_two_sources_apart(render, tmp_path):
     assert "origin= alpha (review line) 1/1, codex 1/1" in text, text
 
 
-def test_the_test_path_rule_is_the_bundles(render, tmp_path):
-    """E1 reads tests as the bundle does (`_is_test_path`, which E3 moves to check_review):
-    one rule, pinned here until the import replaces the copy."""
+def test_the_test_path_rule_has_one_owner(render, tmp_path):
+    """E1 reads tests as the bundle does: through `check_review._is_test_path` (E3), with no
+    copy of the rule of its own."""
     out = _render(render, tmp_path)
     m = _flow_module(out)
-    import check_review
-    import make_review_bundle
-    theirs = getattr(check_review, "_is_test_path", None) or make_review_bundle._is_test_path
-    for rel in ("tests/test_a.py", "src/a.py", "src/a_test.go", "web/__tests__/x.ts", "spec/x.rb",
-                "src/conftest.py", "src/x.spec.ts", "src/x.vitest.ts", "src/testing.py", "a/specs/b.md"):
-        assert m._is_test_path(rel) == theirs(rel), rel
+    source = (out / "scripts/process/process_kpis.py").read_text(encoding="utf-8")
+    assert not hasattr(m, "_is_test_path") and not hasattr(m, "_TEST_NAME"), "a copy of the rule"
+    assert "_review._is_test_path(" in source
+    bundle = (out / "scripts/process/make_review_bundle.py").read_text(encoding="utf-8")
+    assert "def _is_test_path" not in bundle
