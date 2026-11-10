@@ -1180,6 +1180,30 @@ def test_a_second_apply_after_an_abort_writes_no_second_cost_commit(render, tmp_
     assert subjects.count(COST_SUBJECT) == 1
 
 
+def test_a_quoted_cost_line_in_the_journal_does_not_count_as_recorded(render, tmp_path):
+    """v2.94 code review: a COST line inside a fenced block is a quotation, as for every record
+    reader — it neither suppresses the real cost commit nor counts as a measurement."""
+    import datetime as dt
+    out = _costed_repo(render, tmp_path)
+    shard = out / f".process-work/journal/issue-7/{dt.date.today().isoformat()}.md"
+    shard.parent.mkdir(parents=True, exist_ok=True)
+    shard.write_text("# notes\n\n```\nCOST work=7 phase=plan wall_seconds=1 tokens=1\n```\n",
+                     encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: journal note")
+    r = _run_args(out, "--apply")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "already recorded" not in r.stdout, r.stdout
+    assert COST_SUBJECT in _subjects(out), _subjects(out)
+    (kpis,), shared = _modules(out, "process_kpis")
+    try:
+        phases = [c["phase"] for c in kpis.recorded_costs(out)[7]]
+        assert phases == ["plan", "execute"], phases  # the real set, not the quoted line
+        assert all(c["wall_seconds"] != 1 for c in kpis.recorded_costs(out)[7])
+    finally:
+        _drop_modules(out, shared)
+
+
 @pytest.mark.parametrize("case", ["no-record", "no-issue", "no-telemetry", "no-plan"])
 def test_no_cost_commit_without_a_phase_record_an_issue_the_module_or_an_archive(render, tmp_path, case):
     """No dispatch chain, no issue in the branch name, no telemetry module, or no plan to

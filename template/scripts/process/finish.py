@@ -87,6 +87,7 @@ from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     PUSH_TARGETS_ENV,
     TELEMETRY_MODULE,
     cost_line,
+    fenced_lines,
     integration_targets,
     PLANS_ARCHIVE,
     SPECS_DIR,
@@ -728,10 +729,18 @@ def _cost_recorded(root: Path, issue: int) -> bool | None:
         return None
     if base is None:
         return None
-    diff = _git("diff", "--no-color", "--no-ext-diff", base, "HEAD", "--", JOURNAL_DIR)
-    if diff is None:
+    names = _git("diff", "--name-only", "--no-renames", base, "HEAD", "--", JOURNAL_DIR)
+    if names is None:
         return None
-    return any(ln.startswith(f"+COST work={issue} ") for ln in diff.splitlines())
+    want = f"COST work={issue} "
+
+    def costs(text: str | None) -> int:
+        # a fenced block is a quotation, as for every record reader (v2.94 code review)
+        return sum(1 for _i, ln in fenced_lines(text or "")[0] if ln.strip().startswith(want))
+    for rel in filter(None, names.splitlines()):
+        if costs(_git("show", f"HEAD:{rel}")) > costs(_git("show", f"{base}:{rel}")):
+            return True
+    return False
 
 
 def _restore(root: Path, shard: Path, rel: str, old: bytes | None) -> None:

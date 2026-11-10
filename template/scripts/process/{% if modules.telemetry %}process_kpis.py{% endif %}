@@ -197,11 +197,12 @@ def recorded_costs(root: Path) -> dict[int, list[dict]]:
     got: dict[int, list[dict]] = {}
     for f in sorted(jdir.glob("**/*.md"), key=order):
         try:
-            lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+            text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         run: tuple[int, list[dict]] | None = None  # the set the previous line belongs to
-        for line in lines:
+        # a fenced block is a quotation, as for every record reader (v2.94 code review)
+        for _lineno, line in _review.fenced_lines(text)[0]:
             m = _review.COST_LINE.match(line.strip())
             if m is None:
                 run = None
