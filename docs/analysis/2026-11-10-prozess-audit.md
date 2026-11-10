@@ -464,7 +464,7 @@ Die Näherung taugt nicht als Qualitätsmaß. Sie zeigt aber: Mehr Review-Runden
 
 **Kennis lokale Dateien und Gates**
 
-- Von den 17 Dateien `*.local.*` sind 11 Konfiguration (JSON) und 6 Text. Vier der Texte sind erklärte Overlays mit `overlay-of:` und `extends:` auf Abschnitte der Template-Dokumente. Sie ergänzen und verschärfen; `review.local.md` sagt das ausdrücklich. Zusammen 5.325 Wörter, davon 3.398 in `review.local.md`.
+- Von den 17 Dateien `*.local.*` sind 11 Konfiguration (JSON) und 6 Text. Alle sechs Texte sind erklärte Overlays mit `overlay-of:` und `extends:` auf Abschnitte der Template-Dokumente. Sie ergänzen und verschärfen; `review.local.md` sagt das ausdrücklich. Zusammen 5.325 Wörter, davon 3.398 in `review.local.md`.
 - Daneben führt Kenni `docs/dev/process-risk-tiers.md` mit 2.833 Wörtern als eigenes Dokument, kein Overlay.
 - Von den 16 Gates sind neun Produktprüfungen, die den Gate-Runner als Startpunkt nutzen (Lint für Backend und Web, OpenAPI- und Schema-Drift, Theme-Tokens, iOS-Guards, SBOM, Bild-Duplikate, ein Design-Board-Test). Zwei rufen Skripte des Templates auf (`inventory`, `baseline-duplicates`). Fünf sind eigene Prozessprüfungen (`owner-bypass`, `plan-branch-tests`, `kit-tokens`, `plan-retention`, `token-growth`), dazu ein eigenes `check_feature_registry.py`.
 
