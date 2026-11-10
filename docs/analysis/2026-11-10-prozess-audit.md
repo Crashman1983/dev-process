@@ -1,166 +1,107 @@
-# Audit des Dev-Prozesses: Effizienz ohne Qualitätsverlust
+# Audit des Dev-Prozesses: Wiederholungen im Durchlauf
 
 Datum: 2026-11-10 · Stand: v2.93.0 · Art: Analyse, kein Plan und kein Beschluss
 
-Auftrag des Owners: unnötige, doppelte und unangemessen aufwändige Arbeitsschritte finden, Verbesserungspotenziale nennen. Ziel ist mehr Tempo bei gleicher Qualität des Outputs.
+Auftrag des Owners: Der Umfang des Prozesses ist in Ordnung, solange er korrekt ist und gebraucht wird. Störend ist, was er in der Anwendung kostet: dass ein Arbeitspaket mehrfach durch dieselbe Prüfung läuft. Dieser Bericht zählt diese Wiederholungen und nennt je Wiederholung, ob sie entfallen kann, ohne dass eine Prüfung schwächer wird.
 
-Methode: Die Regeln, Befehle und Skripte unter `template/` wurden gelesen, nichts ausgeführt. Die Zahlen zur Historie stammen aus `git log` dieses Repositories. Zahlen zum Referenzprojekt stammen aus den Plänen und dem CHANGELOG dieses Repositories, nicht aus eigener Messung. Wortzahlen sind `wc -w` auf den ungerenderten Vorlagen (rund ±5 %). Was nicht geprüft ist, steht als Annahme da.
+Methode: Code und Regeln unter `template/` gelesen, nichts ausgeführt. Die Zählungen folgen aus den Aufrufstellen im Code. Laufzeiten in Sekunden sind hier nicht messbar; Abschnitt 5 nennt, welche Zahlen im Projekt zu ziehen sind. Was nicht geprüft ist, steht als Annahme da.
 
-## 1. Befund in einem Absatz
+## 1. Ergebnis
 
-Der Prozess hat keinen einzelnen überflüssigen Schritt, der alles erklärt. Er ist durch Anlagerung teuer geworden: Seit dem Abbau zu v2.0.0 (2026-08-06) kamen im Template 57.164 Zeilen dazu und 15.166 gingen weg. Die Abbauliste von damals wollte die Review-Maschinerie und die Telemetrie eindampfen; beide sind heute rund sechsmal so groß. Im Referenzprojekt stieg der Anteil reiner Prozess-Commits in acht Wochen von 25–39 % auf 60–68 %, je Merge im Median 8 Prozessdateien auf 1 Produktdatei (`docs/analysis/2026-10-28-v2.80.md`). Die Antwort darauf waren vier neue Messfamilien und Hinweise, kein Abbau. Die größten Hebel liegen in vier Bereichen: mehrfach laufende Gates, kalte Sitzungen mit großem Lesepensum, mehrfach geführte Buchhaltung und eine Selbstoptimierung, die bisher nichts entfernt hat.
+Ein Tier-2-Paket, das ohne Beanstandung durchgeht, läuft achtmal lokal durch den vollen Gate-Runner und, wenn ein PR offen ist, dreimal in der CI. Jede weitere Review-Runde kostet drei lokale Läufe und zwei CI-Läufe mehr; bei drei Runden sind es 14 lokale. Auf vier Ständen läuft der Runner zwei- bis dreimal, ohne dass sich am geprüften Inhalt etwas geändert hat. Für Tests gibt es dagegen ein Zertifikat; sie werden je Stand einmal bezahlt.
 
-| Stand | Doku im Template (Wörter) | Skripte (Zeilen) | Tests (Zeilen) |
-|---|---:|---:|---:|
-| v2.0.0, 2026-08-06 | 24.123 | 5.006 | 7.009 |
-| v2.38.0, 2026-09-30 | 39.590 | 13.147 | 14.480 |
-| v2.69.0, 2026-10-13 | 58.622 | 23.858 | 26.438 |
-| v2.93.0, 2026-11-09 | 82.881 | 40.971 | 48.715 |
+Rund die Hälfte der lokalen Gate-Läufe kann entfallen, ohne dass eine Prüfung wegfällt: Derselbe Runner hat denselben Stand bereits grün gesehen.
 
-## 2. Doppelte Arbeit
+## 2. Gate-Läufe eines Tier-2-Pakets
 
-### 2.1 Die Gates laufen je Branch sieben- bis neunmal, mindestens dreimal auf identischem Stand
+Jeder Lauf startet alle aktiven Gates nacheinander, je Gate einen eigenen Interpreter: acht Kern-Gates und bis zu sieben Modul-Gates (`gate_runner.py.jinja:549,618`).
 
-Tests werden einmal bezahlt; Zertifikat und Stempel decken ihre Wiederholungen ab. Für die Gates gibt es nichts Vergleichbares. Ein Tier-2-Branch durchläuft den vollen Gate-Runner an diesen Stellen:
-
-| Stelle | Stand | Beleg |
-|---|---|---|
-| Push des Branches | Kopf H | `pre_push.py:230-240` |
-| CI auf dem PR | H | `process-gates.yml.jinja:11-14` |
-| Bau des Review-Bundles („Preflight“) | H | `make_review_bundle.py:1350` |
-| Push des Attest-Commits | H + Buchhaltung | `pre_push.py:229` |
-| CI auf dem PR, zweiter Lauf | wie oben | |
-| `finish.py`, nach Rebase erneut | | `finish.py:318-322,510` |
-| Train auf dem kombinierten Baum | Merge-Baum M | `train.py:2082,2230` |
-| Push-Hook beim Merge | M | `pre_push.py:225-232` |
-| CI auf main | M | `process-gates.yml.jinja:12-13` |
-
-Dazu kommt: Der Runner startet die Gates nacheinander, je Gate einen eigenen Interpreter (`gate_runner.py.jinja:549,618`). Das `review`-Gate liest bei jedem Lauf die letzten 2.000 Commit-Nachrichten und alle archivierten Pläne (`check_review.py:2823-2827,3295`); der Bundle-Code nennt den Preflight selbst „takes minutes“ (`make_review_bundle.py:1341`). Die Planphase lässt die Gates vor `planned` laufen, die Dispatch-Kette danach auf demselben HEAD noch einmal (`dispatch.py:1249-1251,3375`).
-
-Empfehlung:
-- Ein Gate-Merker analog zum Testzertifikat. Gates, die nur den Baum lesen (`kernel`, `decision-records`, `product-frame`, `overlays`, `doc-drift`, `arch`, `sbom`, `feature-registry`), werden über den Baum-Hash gemerkt; die übrigen über HEAD und Push-Ziel. Bundle-Preflight, `finish` und Train lesen den Merker. CI bleibt ohne Merker, als unabhängige Instanz.
-- Der Train lässt seine Gates mit dem Merge-Ziel laufen und stempelt, damit der Hook danach ein Treffer ist.
-- Gates im Runner parallel starten. Sie sind unabhängige Subprozesse; die Ausgabe muss sortiert bleiben.
-- Das Qualitätsrisiko ist gering, solange ein unsauberer Arbeitsbaum nie trifft. Vorher messen: `process_kpis.py nodes --json`, Läufe je Gate und Eingabestand mal `cost_s`.
-
-### 2.2 Dieselbe Tatsache wird drei- bis fünfmal geschrieben
-
-| Tatsache | Kopien |
-|---|---|
-| Stand der Arbeit | `report.py`-Zeile, Status-Label und Claim-/Heartbeat-Kommentare am Issue, Plan-Checkboxen, Kanal-Einzeiler, Dispatch-Record |
-| Review-Urteil | `REVIEW`-Zeile im Journal, Report-Datei, Kopie als GitHub-Issue (hart geprüft), `report.py review-pass` |
-| Akzeptanzkriterium → Test | Plan (`AC-id: path::test`), Review-Report je Kriterium, Registry-Story, `sc-evidenced:` |
-| Was sich geändert hat | Commit, News-Fragment, wöchentliches `NEWS.md` als eigener Branch durch den Train, Digest |
-| Modell | `--model` an jedem Report, `plan-session model:` im Plan, `REVIEW model=` |
-
-Mehreres davon liest kein Skript: Claim- und Heartbeat-Kommentare (die Ansichten dazu wurden im August gestrichen, die Pflicht blieb), der Inhalt der State-Datei, die Journal-Prosa außerhalb der `REVIEW`- und `ROOT-CAUSE`-Zeilen.
-
-Empfehlung:
-- Eine Tabelle Kriterium → Test im Plan. `attest.py` prüft sie am Kopf, das Bundle füllt sie vor, der Review-Report nennt nur Abweichungen, der Registry-Eintrag wird daraus erzeugt. Die Reviewer-Frage „würde der Test rot, wenn man das Verhalten entfernt?“ bleibt.
-- Wo Dispatch läuft, entfallen Claim, Heartbeat und Status-Labels; der Train schließt Issues ohnehin über `Closes #N`.
-- Die Veröffentlichung der Review-Reports als Issue wird Opt-in. Das spart je Review einen Netzschritt und einen Rückschreib-Commit.
-- Die letzten beiden Punkte hängen an einer Frage an dich: Liest du Labels und Report-Issues auf GitHub?
-
-### 2.3 Dieselbe Regel steht an bis zu acht Stellen
-
-Die REPLAN-Regel steht in acht Dateien, das Verbraucher-Inventar in sieben Abschnitten, „was blockiert“ in vier, die Plan-Review-Prozedur in fünf. Die Folge sind Widersprüche, die Runden kosten:
-
-- Braucht Tier 2 eine Spec? Nein laut Kernel, `workflow.md` und `risk-tiers.md`. Ja laut `/brainstorm`, `speckit.md` und `journal-state-plans.md:177-180` (hartes Gate, außer mit `spec-waived`).
-- Wann wird der Plan archiviert? Vor dem Bundle (`workflow.md.jinja:53`) oder nach dem Pass (`commits.md:77`, `attest.py:66-68`).
-- `finish.py:508-509` meldet nach einem Rebase noch „a rebase voids review-bundle digests; re-review if a bundle was built“. Die Digests gibt es seit v2.53 nicht mehr, ein sauberer Rebase hält das Review. Der Text lädt zu einer unnötigen Review-Runde ein, der teuersten Einheit im Prozess.
-- Tier-2-Report: „encouraged“ (`verification-independence.md:327`) gegen „Every Tier 2+ review writes“ (`review.md:46`).
-- Reviewer nur mit Bundle oder mit Lesezugriff? `verification-independence.md:95-97` schreibt Werkzeuge aus vor; dieselbe Datei misst ab `:128`, dass ohne Lesezugriff etwa einer von sechs Befunden hält, mit Lesezugriff neun von zehn.
-
-Empfehlung: ein Eigentümer je Regel (das ist Regel 4, auf die Doku angewendet); Befehle tragen nur den Imperativ und den Verweis. Die drei falschen Texte oben sind sofort korrigierbar, ohne Risiko.
-
-### 2.4 Dieselbe Prüfung durch mehrere Instanzen
-
-- Die Suche nach Verbrauchern läuft viermal: Der Plan zitiert sie, der Plan-Reviewer führt sie aus, Execute vergleicht, der Code-Reviewer führt sie erneut aus. Ein Skript, das die Befehle aus `## Consumers` am Kopf neu ausführt und die Differenz zeigt, ersetzt drei davon.
-- Tier 3 stapelt fünf LLM-Prüfungen: `/speckit-analyze`, Plan-Review, Refute, Code-Review, `/speckit-converge`. `analyze` und Plan-Review lesen dieselben Artefakte; `converge` deckt sich mit dem Abschnitt Completeness der Checkliste. Annahme: Die Überschneidung der Befunde ist nicht gemessen. Vor einer Zusammenlegung zählen, wie viele Befunde der letzten Tier-3-Arbeiten nur `analyze` oder nur `converge` fand.
-- Der Refuter führt jedes Szenario zweimal aus, gegen die Änderung und gegen den Integrationsbranch (`refute.md:113`). Es genügt, bestätigte Szenarien gegenzuprüfen.
-- Je blockierendem Befund startet ein eigener Scorer-Subagent (`review.md:26-31`); einer je Runde reicht.
-
-## 3. Unangemessen aufwändig
-
-### 3.1 Kalte Sitzungen mit großem Lesepensum
-
-Tier 2 braucht mindestens drei kalte Sitzungen plus Subagenten, Tier 3 sechs bis sieben. Jede blockierte Runde kostet zwei weitere. Eine Review-Sitzung wird auf Kernel, Regeln, Workflow, Risikostufen, Checkliste und `verification-independence.md` verwiesen: rund 11.000 Wörter bei engem Lesen, rund 26.000, wenn sie die Dateien ganz liest. Jede Claude-Sitzung lädt vorab rund 6.700 Wörter (`CLAUDE.md.jinja:38-41`). Alle Befehle sagen „re-read the kernel“, obwohl der Kernel in der Startdatei steht und `rehydrate.py` ihn nach jeder Kürzung einspielt. `process_context.py --cost` misst das nicht: Es zählt die Befehlsdateien, aber keine der Phasen-Dokumente (`process_context.py:255-281`).
-
-Ein erheblicher Teil dieser Texte ist für den Agenten nicht handlungsleitend: Interna der Gates (`verification-independence.md:243-297`, rund 600 Wörter, deren Inhalt in einen Satz passt), Hinweise auf abgeschaffte Funktionen und 45–55 Absätze, die je einen Vorfall nacherzählen.
-
-Empfehlung:
-- Je Phase eine Karte mit höchstens rund 1.500 Wörtern: was zu tun ist, in welcher Reihenfolge, mit welchem Befehl. Gate-Interna und Vorfallsgeschichte wandern in eine Referenz, die nur bei Bedarf gelesen wird.
-- Fix-Runden setzen die Execute-Sitzung fort, Delta-Runden die Reviewer-Sitzung. Die Unabhängigkeit bleibt, denn der Reviewer hat weiterhin nicht implementiert. Kalt bleiben Refute und die erste Tier-3-Runde.
-- Risiko: Ein fortgesetzter Reviewer ankert auf seiner ersten Sicht. Das gehört als Versuch nach `optimization.md` gemessen: Blocker je Runde, Anteil spät gefundener Befunde, Durchrutscher, mindestens 20 Arbeiten.
-
-### 3.2 Tier 2 zahlt die volle Spec-Stufe
-
-`risk-tiers.md` nennt als Tier-2-Beispiel eine Zehn-Zeilen-Weiterleitung. Im Standardset kostet sie Spec, Plan, Aufgaben und zwei Reviews. Die eigene Messung zeigt, dass kleine Arbeiten selten entgleisen: unter 200 Produktzeilen brauchen 10 % drei oder mehr Runden, über 1.500 Zeilen 53 %.
-
-Empfehlung: Für kleine Tier-2-Arbeit in einem Stack sind Akzeptanzkriterien im Plan der Normalweg, wie es DoR R2 bereits sagt, statt einer Ausnahme mit `spec-waived`. Der Preis ist ein kürzeres Einflussfenster des Owners vor dem Bau. Entscheidungsgrundlage: `process_kpis.py size`, Runden und Durchrutscher für Tier 2 mit und ohne Spec.
-
-### 3.3 Der Steward-Tick
-
-`/loop 30m /steward` lädt bis zu 48-mal am Tag einen Befehl von 2.162 Wörtern, von dem etwa die Hälfte tägliche, wöchentliche und monatliche Pflichten beschreibt, dazu die volle Lage. Eine Tick-Karte mit `tower --section` und eine getrennte Tagesdatei sparen das meiste davon.
-
-### 3.4 Die Pflege dieses Repositories
-
-- 74 Release-Tags seit Anfang Oktober (61 im Oktober, 13 bis zum 9. November), zuletzt sechs an einem Tag (2026-11-04, v2.86 bis v2.91). Jedes Release ist ein eigener Durchlauf aus Plan, Plan-Review, Umsetzung, Review, zweisprachigem CHANGELOG und zweisprachigen NEWS. Projekte aktualisieren laut `OVERVIEW.md` alle zwei bis vier Wochen. Ein wöchentlicher Release-Zug mit gebündeltem CHANGELOG spart den Fixaufwand je Release, ohne dass ein Projekt später beliefert wird.
-- Die letzten 13 Releases brauchten zusammen 26 Plan-Review-Runden, v2.93 allein fünf (gezählt an den Commit-Betreffs „plan review“). Die Befunde dort sind überwiegend Randfälle der Gate-Semantik. Das ist dieselbe Dynamik, die im Projekt die Runden treibt: Jede neue harte Regel braucht Ausnahmen, und jede Ausnahme ist wieder Gate-Code auf Tier 3.
-- `MAINTAINING.md` verlangt für jeden Satz Regeltext Plan-Review und Review. Für Text, der eine Pflicht abschwächt oder entfernt, ist das begründet. Für eine reine Kürzung ohne Bedeutungsänderung macht es Abbau so teuer wie Aufbau; damit kann die Doku praktisch nur wachsen.
-
-## 4. Unnötig oder ohne belegten Nutzen
-
-### 4.1 Die Selbstoptimierung hat bisher nichts entfernt
-
-Rund 6.700 Zeilen (`optimize.py`, `gate_modes.py`, `process_kpis.py`, `graph.py`, `plan_drift.py`, `due_measurements.py`, `human_digest.py`), dazu tägliche Sentinel-Läufe, eine wöchentliche und eine monatliche Sitzung.
-
-- Alle Streichungen von Prüfungen im CHANGELOG liegen vor der Einführung der Schleife (v2.67/v2.68) und waren Entscheidungen von Hand. In den 26 Releases danach steht keine Abschwächung und keine Entfernung aufgrund von Messwerten.
-- `optimize.active()`, die Abfrage für Versuche hinter einem Flag, hat im Template keinen Aufrufer.
-- Das Cockpit meldete bis v2.80 auf jedem Klon `works 0`; die Kenni-Analyse lief von Hand.
-- Die Untergrenzen des Beispiel-Mandats nehmen Gates, Tiers, Review-Unabhängigkeit und DoD von Versuchen aus. Das sind die teuren Teile. Die Schleife kann damit fast nur hinzufügen.
-- Eine Prüfung wird erst nach acht triagierten Wochen Kandidat. Bei drei bis fünf Triage-Zeilen je Woche ist das kaum erreichbar.
-
-Nicht geprüft: Die Projekte können eigene Records und Abschwächungen haben; dieses Repository enthält keine.
-
-Empfehlung: Die Schleife ruht, bis es einen Versuch gibt. Sentinel und `optimize check` laufen nur, wenn ein Record im Pilot oder eine Gate-Änderung existiert; die wöchentliche Sitzung geht in der monatlichen auf. Der erste echte Versuch ist 3.1 (warme Fix- und Delta-Runden). Wenn die wöchentlichen Reports im Projekt in den letzten vier Wochen eine Entscheidung ausgelöst haben, spricht das dagegen; das lässt sich dort zählen.
-
-### 4.2 Mechanismen für einen Vorfall oder einen seltenen Fall
-
-Zu prüfen gegen dein tatsächliches Setup, zusammen etwa 500–800 Zeilen plus Tests:
-- Mehr-Host-Betrieb (`refs/process/reports/<host>`, `--remote`, Übergabe), dessen Ref-Push Cloud-Umgebungen laut `tower.md:345` ablehnen.
-- Eingabe in eine tmux-Oberfläche (`dispatch.py:2543-2706`), obwohl der Standard-Runner `detached` ist.
-- Nachbau der Whitespace-Klasse von Claude Code, um `model:` in einer Befehlsdatei abzulehnen (`dispatch.py:416-600`).
-- Nachbau der pytest-Sammlung per AST (`attest_evidence.py:1279-1412`), wo `red_evidence.py` dasselbe durch Ausführen zeigt.
-- MAKEFLAGS-Parser (`certificate.py:157-232`), Queue-Migration (`dispatch.py:2808-2821`).
-- Die Zweige ohne Spec Kit in `/plan` und `/brainstorm`, deren Streichung die Abbauliste (#11) schon beschlossen hat, während `start-here.md` sagt, es gebe keinen Modulschalter.
-
-### 4.3 Pflichten, die sich pro forma erfüllen lassen
-
-`ui-check: n/a — <Grund>`, `ROOT-CAUSE … sites: none — <Grund>`, `REPLAN`, `Execution: delegate | retain-context` je Paket, `plan-session model:`. Im Referenzprojekt tragen laut `docs/analysis/2026-11-02-v2.81.md` nur 13 % der geschuldeten Stellen ein REPLAN und 60 % ein ROOT-CAUSE. Eine Pflicht, die so oft fehlt und trotzdem nicht blockiert, kostet Lesezeit und liefert keine verlässlichen Daten. Jede davon gehört entweder mechanisch abgeleitet (Modell und Ausführungsart aus den Dispatch-Logs) oder gestrichen.
-
-## 5. Reihenfolge
-
-| # | Maßnahme | Ersparnis | Qualitätsrisiko |
+| # | Auslöser | Stand | Beleg |
 |---|---|---|---|
-| 1 | Falsche Texte korrigieren: Rebase-Hinweis in `finish.py`, Archiv-Reihenfolge, Spec-Pflicht Tier 2, Report-Pflicht | vermiedene Review-Runden | keins |
-| 2 | Gate-Merker, Train stempelt, Gates parallel, kein Preflight für Plan-Bundles | 4–6 von 7–9 Gate-Läufen je Branch | gering |
-| 3 | Eine Tabelle Kriterium → Test; Verbraucher-Suche als Skript | drei Abschriften und drei Suchläufe je Arbeit | gering |
-| 4 | Phasenkarten, ein Eigentümer je Regel, `--cost` korrigieren | geschätzt 40–50 % der Wörter je Phaseneintritt | mittel: eine Regel wird übersehen |
-| 5 | Reviewer mit Lesezugriff als Standard | weniger Fehlblocks und Scorer-Läufe | gering, bereits gemessen |
-| 6 | Warme Fix- und Delta-Runden als Versuch | zwei Kaltstarts je blockierter Runde | mittel, deshalb als Versuch |
-| 7 | Tier 2 klein ohne Spec-Stufe | eine Phase auf dem häufigsten geprüften Tier | mittel, Owner-Entscheidung |
-| 8 | Selbstoptimierung ruhen lassen, Steward-Tick teilen | tägliche und wöchentliche Sitzungen | gering |
-| 9 | Wöchentlicher Release-Zug; Kürzungen ohne Bedeutungsänderung mit leichtem Weg | Fixaufwand je Release | gering |
-| 10 | Tier 3: `analyze`/`converge` zusammenlegen, Refute einfach | zwei LLM-Läufe | erst nach Zählung der Einzelbefunde |
-| 11 | Selten genutzte Mechanismen streichen (4.2), Pro-forma-Pflichten ableiten oder streichen (4.3) | Pflegeaufwand, kürzere Doku | je nach Setup |
+| 1 | `/plan` nach dem Plan-Commit | Plan-Commit P | `plan.md.jinja:253` |
+| 2 | Bundle für das Plan-Review („Preflight“) | P | `make_review_bundle.py:1350` |
+| 3 | Dispatch-Kette vor dem Start von Execute | P | `dispatch.py:3378,3506` |
+| 4 | Push des Branches | Kopf H | `pre_push.py:230-232` |
+| 5 | Bundle für das Code-Review | H | `make_review_bundle.py:1350` |
+| 6 | Push des Attest-Commits | H plus Journalzeile | `pre_push.py:229-237` |
+| 7 | Train auf dem kombinierten Baum, oder `finish.py` | Merge-Baum M | `train.py:2082`, `finish.py:318` |
+| 8 | Push-Hook beim Merge | M | `pre_push.py:225-232` |
+| CI | PR nach Lauf 4 und nach Lauf 6, danach main | H, H plus Journalzeile, M | `process-gates.yml.jinja:11-14` |
 
-Die Punkte 1 bis 3 und 5 senken keine Prüfung ab und brauchen keine Owner-Entscheidung über Qualitätsuntergrenzen. Die Punkte 6, 7 und 10 ändern, wie geprüft wird, und gehören vor der Umsetzung gemessen.
+Je weiterer Review-Runde: Push des Fixes, Bundle, Push des Attest-Commits, dazu zwei CI-Läufe.
 
-## 6. Was bleibt, wie es ist
+Derselbe Stand, mehrfach geprüft:
+- **P:** Läufe 1, 2 und 3. Der Plan-Reviewer liest laut Code-Kommentar keinen Code (`make_review_bundle.py:1341`), das Bundle fährt die Gates trotzdem.
+- **H:** Läufe 4 und 5, dazu die CI.
+- **H plus Journalzeile:** Lauf 6 und die CI. Der Hook erkennt den Stand und lässt die Tests weg („gates only“), die Gates laufen voll.
+- **M:** Läufe 7 und 8, dazu die CI auf main. Der Train reicht das Merge-Ziel nicht an die Gates und stempelt nicht, deshalb wiederholt der Hook sie (`train.py:1115-1123`).
 
-- Testpfad mit Auswahl, Lanes und Zertifikat (`docs/analysis/2026-10-10-one-test-path.md`).
-- Inhaltsbasierte Review-Bindung: Ein sauberer Rebase hält das Review, Buchhaltung unter `.process-work/` macht es nicht ungültig.
-- Delta-Bundles, das in das Review gefaltete Tier-2-Refute, der Tier-1-Weg.
-- Provenienzprüfung für reine Template-Updates.
-- Die Kürzung von `process_context` und `rehydrate`.
+Der Push-Hook überspringt die Gates nur bei exakt demselben Commit und derselben Push-Klasse (`pre_push.py:220-225`). Bundle, `finish`, Train und Dispatch lesen diesen Stempel nicht.
+
+Auch ein per Dispatch gestartetes Tier-1-Paket baut ein Bundle, attestiert und pusht (`dispatch.py:1249-1251`): vier Gate-Läufe für eine kleine Korrektur.
+
+Was einen einzelnen Lauf teuer macht:
+- Das `review`-Gate liest bei jedem Lauf die letzten 2.000 Commit-Nachrichten und alle archivierten Pläne (`check_review.py:2823-2827,3295`). Es hat schon einmal das Zeitlimit von 600 Sekunden gerissen (`check_review.py:3142-3146`).
+- Das `github-issues`-Gate fragt bei jedem Lauf GitHub ab, mit bis zu 20 Sekunden Limit, und blockiert nie (`check_issues.py.jinja:9-12,667-669`).
+- Die Gates laufen nacheinander, obwohl sie unabhängige Prozesse sind.
+
+## 3. Weitere Wiederholungen im Durchlauf
+
+| Was | Wie oft | Beleg | Kann entfallen? |
+|---|---|---|---|
+| Suche nach Verbrauchern eines geänderten Werts | viermal: Plan, Plan-Review, Execute, Code-Review | `refute.md:138-140`, `execute.md:13`, `review-checklist.md:64-67` | Ja, drei davon: ein Skript führt die Befehle aus `## Consumers` am Kopf neu aus und zeigt die Differenz |
+| Zuordnung Kriterium → Test | dreimal von Hand: Plan, Review-Report, Registry | `journal-state-plans.md:75-80`, `review.md:53-63` | Ja, zwei davon: Bundle füllt aus dem Plan vor, Registry wird erzeugt |
+| Eigentümer-Prüfung (Regel 4) bei Tier 3 | viermal: Plan-Review, Execute, Refute, Review | `refute.md:44,133`, `execute.md:24-26`, `review-checklist.md:208` | Teilweise; erst zählen, welche Stufe die Befunde bringt |
+| Tier neu berechnen | zweimal: Plan-Review und Code-Review | `review-checklist.md:24,36` | Ja, wenn sich die berührten Pfade seit dem Plan nicht geändert haben |
+| Refute-Szenarien | jedes zweimal: gegen die Änderung und gegen den Integrationsbranch | `refute.md:113` | Ja: nur bestätigte Szenarien gegenprüfen |
+| Scorer-Subagent | einer je blockierendem Befund | `review.md:26-31` | Ja: einer je Runde |
+| Tier-3-Prüfläufe | fünf: `analyze`, Plan-Review, Refute, Review, `converge` | `speckit.md:97-99` | Offen: `analyze` und `converge` überschneiden sich mit Plan-Review und Review; Einzelbefunde vorher zählen |
+| Kaltstart je blockierter Runde | zwei neue Sitzungen, je mit vollem Lesepensum | `tower.md:309` | Als Versuch: Fix- und Delta-Runde setzen die Sitzung fort |
+| Kernel neu lesen | bei jedem Phaseneintritt, obwohl er in der Startdatei steht und `rehydrate.py` ihn einspielt | `execute.md:19`, `review.md:12` | Ja, wo der Hook installiert ist |
+| Steward-Tick | bis zu 48-mal am Tag der ganze Befehl und die volle Lage | `steward.md:44-52` | Ja: Tick-Karte mit `tower --section`, Tagespflichten getrennt |
+| Stand der Arbeit melden | bis zu fünf Stellen, darunter Label, Claim und Heartbeat am Issue | `report.md:13-17`, `github-issues.md:116-127` | Ja: Du liest GitHub selten, und kein Skript liest Claim und Heartbeat |
+| Review-Report als Issue | je Review ein Netzschritt und ein Rückschreib-Commit mit Push, der wieder durch die Gates geht | `github-issues.md:239-243` | Ja: als Opt-in |
+
+## 4. Texte, die unnötige Runden auslösen
+
+Eine Review-Runde ist die teuerste Wiederholung: zwei Sitzungen, drei Gate-Läufe, zwei CI-Läufe. Drei Stellen laden zu Runden ein, die der Code nicht verlangt:
+
+- `finish.py:508-509` meldet nach einem Rebase „a rebase voids review-bundle digests; re-review if a bundle was built“. Die Digests gibt es seit v2.53 nicht mehr; ein sauberer Rebase hält das Review.
+- Die Reihenfolge beim Archivieren des Plans: `workflow.md.jinja:53` archiviert vor dem Bundle und nennt jede spätere Änderung einen Grund für ein neues Bundle. `commits.md:77` und `attest.py:66-68` archivieren nach dem Pass. Der Code behandelt das Archivieren als Buchhaltung; der Text liest sich als neue Runde.
+- Reviewer ohne Lesezugriff: `verification-independence.md:95-97` schreibt Werkzeuge aus vor. Dieselbe Datei misst ab `:128`, dass so etwa einer von sechs Befunden hält, mit Lesezugriff neun von zehn. Fünf von sechs Blocks sind dann Fehlalarme, und jeder kostet eine Runde.
+
+Dazu kommt eine Staleness-Regel, die strenger ist als nötig: Jeder Pfad außerhalb der Buchhaltung, der nach dem geprüften Kopf geändert wird, macht das Review ungültig, auch ein Tippfehler in einer README (`check_review.py:2064-2069`). `quiet.py` kennt bereits eine enge Definition von „wirkungslos“ für die Testauswahl; das Review-Gate nutzt sie nicht.
+
+## 5. Maßnahmen nach Wirkung auf die Durchlaufzeit
+
+| # | Maßnahme | Wirkung | Risiko für die Qualität |
+|---|---|---|---|
+| 1 | Gate-Merker: Ein grüner Lauf wird je Gate mit seinem Eingabestand gemerkt. Bundle, Dispatch, `finish`, Train und Hook lesen ihn. Der Train übergibt das Merge-Ziel und stempelt. | Läufe 2, 3, 5 und 8 entfallen, je weiterer Runde einer von drei. Lauf 6 schrumpft auf die Gates, die Journal und Plan lesen. | Gering. Bedingung: Ein unsauberer Arbeitsbaum trifft nie, und Gates, die über den Baum hinaus lesen (Issue-Tracker, Rot-Liste, `train.py:1129-1131`), bleiben ohne Merker. Die CI bleibt ohne Merker. |
+| 2 | Kein Gate-Lauf für Plan-Review-Bundles. | Lauf 2 entfällt auch ohne Merker. | Keins. |
+| 3 | Die drei Texte aus Abschnitt 4 korrigieren; Reviewer mit Lesezugriff als Standard. | Vermiedene Review-Runden. | Keins bei den Texten. Beim Lesezugriff ändert sich die Bedeutung der Markierung `bundle`. |
+| 4 | Gates im Runner parallel starten. | Die Dauer eines Laufs sinkt etwa auf die des langsamsten Gates. | Gering; die Ausgabe muss sortiert bleiben. |
+| 5 | `github-issues` aus dem Push-Pfad in CI oder Digest verlegen. Review-Report als Issue wird Opt-in; Label, Claim und Heartbeat entfallen, wo Dispatch läuft. | Ein Netzzugriff je Gate-Lauf, ein Commit mit Push je Review. | Keins; das Gate blockiert heute nicht. |
+| 6 | `review`-Gate begrenzen: archivierte Pläne nur im gepushten Bereich prüfen, der volle Durchgang bleibt auf main in der CI. | Kürzerer Lauf des teuersten Gates. | Mittel: Der Archiv-Zweig ist der Rückhalt für Merges auf dem Server (`check_review.py:1473-1476`). |
+| 7 | Skript für die Verbraucher-Suche; Bundle füllt die Kriterien-Tabelle vor; ein Scorer je Runde; Refute einfach. | Weniger Reviewer-Zeit je Runde. | Gering. |
+| 8 | Wirkungslose Pfade machen ein Review nicht ungültig. | Eine Runde je spätem Tippfehler. | Mittel; auf ungeschützte `.md`-Dateien begrenzen. |
+| 9 | Fix- und Delta-Runden setzen die Sitzung fort. | Zwei Kaltstarts je blockierter Runde. | Mittel: Der Reviewer kann auf seiner ersten Sicht ankern. Deshalb als Versuch mit Messung. |
+| 10 | Tier 3: `analyze` und `converge` in Plan-Review und Review aufgehen lassen. | Zwei Prüfläufe. | Erst nach Zählung der Befunde, die nur diese Läufe fanden. |
+
+Die Maßnahmen 1 bis 5 und 7 entfernen nur Wiederholungen. 6 und 8 bis 10 ändern, was oder wie geprüft wird, und gehören vorher gemessen.
+
+Zahlen, die im Projekt vor Maßnahme 1 und 4 zu ziehen sind: `process_kpis.py nodes --json`, je Gate die Zahl der Läufe je Eingabestand und `cost_s` (Median und p90); `process_kpis.py train-phases` für `gates` gegen `push`. Daraus folgt die tatsächliche Ersparnis in Minuten je Paket.
+
+## 6. Was schon einmal bezahlt wird
+
+- Tests: Auswahl, Lanes, Zertifikat und Stempel decken Wiederholungen ab (`docs/analysis/2026-10-10-one-test-path.md`).
+- Ein sauberer Rebase und Buchhaltung unter `.process-work/` machen ein Review nicht ungültig.
+- Runde 2 und später prüfen nur das Delta.
+- Bei Tier 2 ist das Refute in das Review gefaltet.
+- Das Pre-Commit-Framework wiederholt die Gates beim Push nicht (`--unless-frame-ran`).
+
+## Anhang: Befunde außerhalb des Fokus
+
+Nicht Gegenstand der Empfehlung, aber gesehen:
+- `optimize.active()` hat im Template keinen Aufrufer; seit Einführung der Optimierungsschleife (v2.67/v2.68) nennt der CHANGELOG keine Prüfung, die aufgrund von Messwerten entfernt oder abgeschwächt wurde. Ob Projekte eigene Records haben, ist hier nicht sichtbar.
+- Widerspruch zur Spec-Pflicht bei Tier 2: nein laut Kernel und `risk-tiers.md`, ja laut `journal-state-plans.md:177-180` (hartes Gate, außer mit `spec-waived`).
+- `process_context.py --cost` zählt die Befehlsdateien, aber keines der Dokumente, auf die eine Phase verweist (`process_context.py:255-281`).
