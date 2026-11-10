@@ -35,7 +35,10 @@ active, archived or `specs/<dir>/plan.md` — never every plan in the repo.
 plan: its path) contains SLUG, archived ones included; no match is an error.
 --plan-review marks the bundle as a plan review (the report header then
 carries `phase: plan`); --plan alone also serves a code review whose plans
-detection misses.
+detection misses. A plan review runs neither the merge-conflict check nor the
+preflight gates: its reviewer reads no code, and the plan's own push runs the
+gates (plan.md runs them after the plan commit, before the bundle).
+--skip-preflight skips the preflight of a code bundle.
 
 --tier asserts the caller's tier — a floor, never a discount: where a bundled
 plan declares a higher one, that one wins. --since shows the reviewer only
@@ -1274,7 +1277,7 @@ def _design_contracts(root: Path, plans: list[Path]) -> list[str]:
 
 
 USAGE = ("usage: make_review_bundle.py [--skip-preflight] [--base REF] [--plan SLUG] "
-         "[--tier N] [--since REF] [-o FILE]")
+         "[--plan-review] [--tier N] [--since REF] [-o FILE] — --plan-review runs no preflight")
 
 
 def _opt(argv: list[str], flag: str) -> str | None:
@@ -1347,7 +1350,7 @@ def main(argv: list[str]) -> int:
             return 1
         if merge_note:
             print(f"make_review_bundle: {merge_note}", file=sys.stderr)
-    if not skip_preflight:
+    if not skip_preflight and not plan_review:  # a plan reviewer reads no code (v2.94 C3)
         ok, status, detail = _preflight(root)
         if not ok:
             print(detail, file=sys.stderr)

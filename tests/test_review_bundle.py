@@ -2191,6 +2191,27 @@ def test_a_branch_that_conflicts_with_main_is_refused_before_the_preflight(rende
     assert "conflict" not in r.stderr and "could not check" not in r.stderr
 
 
+def test_a_plan_review_bundle_runs_no_preflight(render, tmp_path):
+    # v2.94 C3: a plan reviewer reads no code — neither a red nor a missing
+    # gate runner keeps the plan bundle from being built
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _seed_repo(out)
+    marker = _marking_preflight(out)
+    r = _run(out, "--plan-review", "--base", "main")
+    assert r.returncode == 0 and "Review bundle" in r.stdout, r.stderr
+    assert not marker.exists(), "the preflight ran for a plan review"
+    (out / "scripts/process/gate_runner.py").write_text("raise SystemExit(1)\n")
+    r = _run(out, "--plan-review", "--base", "main")
+    assert r.returncode == 0 and "Review bundle" in r.stdout, r.stderr
+    (out / "scripts/process/gate_runner.py").unlink()
+    r = _run(out, "--plan-review", "--base", "main")
+    assert r.returncode == 0 and "Review bundle" in r.stdout, r.stderr
+    # guard: a code bundle still blocks on the red runner's absence
+    r = _run(out, "--base", "main")
+    assert r.returncode == 2 and "Review bundle" not in r.stdout, r.stderr
+    assert "--plan-review" in _run(out, "--help").stdout
+
+
 def test_an_unanswered_merge_check_is_named_with_its_base_never_clean(render, tmp_path):
     import os
     import shutil
