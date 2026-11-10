@@ -851,6 +851,67 @@ def test_a_red_merge_gate_stops_the_local_merge(render, tmp_path, elsewhere):
     assert not [e for e in _reports(out) if e["state"] == "done"]
 
 
+def _counting_runner(finish, tmp_path, monkeypatch) -> Path:
+    """Route finish's gate runs through a wrapper that logs each run's merge target and
+    then runs the real runner; returns the log."""
+    log = tmp_path / "gate-runs.log"
+    wrapper = tmp_path / "count_gates.py"
+    real = finish.gate_runner_argv(finish.ROOT)
+    wrapper.write_text(
+        "import os, subprocess, sys\n"
+        f"with open({str(log)!r}, 'a') as f:\n"
+        "    f.write(os.environ.get('PROCESS_PUSH_TARGETS', '-') + '\\n')\n"
+        f"sys.exit(subprocess.call({real!r}))\n", encoding="utf-8")
+    monkeypatch.setattr(finish, "gate_runner_argv", lambda root: [sys.executable, str(wrapper)])
+    return log
+
+
+def _apply_in_process(out, tmp_path, monkeypatch, *, tests):
+    finish = _finish_module(out)
+    monkeypatch.setattr(finish, "ROOT", out)
+    log = _counting_runner(finish, tmp_path, monkeypatch)
+    rc = finish.apply(out, tests=tests, tests_passed=False)
+    runs = log.read_text().splitlines() if log.is_file() else []
+    return rc, runs
+
+
+def test_apply_reuses_a_green_check_on_the_same_head(render, tmp_path, monkeypatch, capsys):
+    """v2.94 B3: without archive and rebase, check() and the local merge judge the same HEAD
+    with the same target — the gates run once."""
+    out = _repo_on_feature(render, tmp_path / "repo")
+    (out / "payload.txt").write_text("done\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: payload")
+    rc, runs = _apply_in_process(out, tmp_path, monkeypatch, tests="true")
+    printed = capsys.readouterr().out
+    assert rc == 0, printed
+    assert "merged feature into main locally" in printed, printed
+    assert runs == ["refs/heads/main"], runs
+
+
+def test_apply_runs_the_gates_again_on_the_archive_commit(render, tmp_path, monkeypatch, capsys):
+    """B3 guard: the archive commit is a new HEAD — the merge gates run there again."""
+    out = _repo_without_remote(render, tmp_path / "repo")  # a Tier 1 plan to archive
+    rc, runs = _apply_in_process(out, tmp_path, monkeypatch, tests="true")
+    printed = capsys.readouterr().out
+    assert rc == 0 and "archive plan(s)" in _git(out, "log", "-1", "--format=%s", "main").stdout, printed
+    assert runs == ["refs/heads/main", "refs/heads/main"], runs
+
+
+def test_apply_runs_the_gates_again_on_a_tree_dirtied_before_the_merge(render, tmp_path, monkeypatch,
+                                                                      capsys):
+    """B3 guard: green on a clean tree says nothing about a tree the suite left dirty."""
+    out = _repo_on_feature(render, tmp_path / "repo")
+    (out / "payload.txt").write_text("done\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: payload")
+    rc, runs = _apply_in_process(out, tmp_path, monkeypatch, tests="touch left-by-the-suite.txt")
+    printed = capsys.readouterr().out
+    assert (out / "left-by-the-suite.txt").is_file()
+    assert len(runs) == 2, (runs, printed)
+    assert rc == 0, printed
+
+
 def test_with_the_merge_target_low_tiers_and_the_train_archive_step_stay_green(render, tmp_path):
     """Guard (v2.94 C1): the merge target in check() hardens merge findings only — a Tier 0
     branch, a Tier 1 plan and the train route's archive step (`--apply` without `--tests`)
