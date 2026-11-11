@@ -215,6 +215,24 @@ def test_a_busy_lane_appends_its_line_to_the_suite_marker(tmp_path, monkeypatch)
         proc.wait()
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on this platform")
+def test_a_marker_that_is_a_fifo_never_blocks_the_exit_75(tmp_path):
+    """Refute: the marker path names a FIFO nobody reads — the open must not block, and the
+    busy lane still exits 75 at once."""
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    proc = _holder(tmp_path)
+    try:
+        started = time.monotonic()
+        r = subprocess.run([sys.executable, str(LANE), "wait", "--lane", "scoped", "--wait", "0", "--quiet"],
+                           cwd=tmp_path, env={**_env(tmp_path), "PROCESS_SUITE_ABORT": str(fifo)},
+                           capture_output=True, text=True, timeout=20)
+        assert r.returncode == 75 and time.monotonic() - started < 15, r.stderr
+    finally:
+        proc.kill()
+        proc.wait()
+
+
 def test_the_marker_line_carries_no_line_break_of_the_holder(tmp_path, monkeypatch):
     mod = _load()
     marker = tmp_path / "marker"
