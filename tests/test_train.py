@@ -4535,12 +4535,14 @@ def test_a_test_that_always_aborts_on_a_green_base_is_red_and_its_passenger_drop
     r = _aborting(render, tmp_path, monkeypatch, retry=retry, red_ids=red_ids,
                   sh=lambda sub, cmd, nth: "abort" if "b2" in sub else "green")
     assert r.rc is None and r.measure["rounds"][0]["red_path"] == "dropped:b2", r.err  # merged: the rest
-    assert _subsets(r)[:4] == [("b1", "b2"), ("b1", "b2"), (), ("b1",)]
-    assert _shape(r.measure)[0] == ("dropped:b2", {"first": 1, "retry_abort": 1, "base": 1, "probe": 1})
+    # the run, its repeat, the fresh base, the run once more (refute: a load that ended between
+    # the repeat and the base would blame an innocent), then the search
+    assert _subsets(r)[:5] == [("b1", "b2"), ("b1", "b2"), (), ("b1", "b2"), ("b1",)]
+    assert _shape(r.measure)[0] == ("dropped:b2", {"first": 1, "retry_abort": 2, "base": 1, "probe": 1})
     assert r.measure["rounds"][0]["red_tests"] == "suite-aborted"
     assert [cmd for _s, cmd in r.calls] == ["s"] * len(r.calls)  # never `make retry`
     assert "flaky" not in r.log.lower() and "FLAKY" not in r.err
-    assert _round_aborts(r) == [(_ABORT_LINE, "load"), (_ABORT_LINE, None)]
+    assert _round_aborts(r) == [(_ABORT_LINE, "load"), (_ABORT_LINE, "load"), (_ABORT_LINE, None)]
 
 
 def test_a_load_that_aborts_everything_ends_suite_aborted_and_blames_nobody(render, tmp_path, monkeypatch):
@@ -4587,8 +4589,9 @@ def test_the_guard_before_the_first_blame_repeats_without_the_memo(render, tmp_p
 @pytest.mark.parametrize("repeat, blamed, runs", [
     ("green", "b2", [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",)]),
     ("red", "b1", [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",), ("b2",)]),
-    # the repeat aborts too: a fresh base, green — the probe counts red
-    ("abort", "b1", [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",), (), ("b2",)]),
+    # the repeat aborts too: a fresh base, green — the probe runs once more, green now (the
+    # load passed): b1 is innocent, b2 the offender (refute); [b1] then merges on that green
+    ("abort", "b2", [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",), (), ("b1",)]),
 ])
 def test_a_probe_that_aborts_is_repeated(render, tmp_path, monkeypatch, repeat, blamed, runs):
     """Plan test 6: a probe aborts; its repeat green, red, or aborted on a green base."""
@@ -4596,6 +4599,41 @@ def test_a_probe_that_aborts_is_repeated(render, tmp_path, monkeypatch, repeat, 
                   sh=lambda sub, cmd, nth: {1: "red", 2: "red", 3: "green", 4: "abort", 5: repeat}.get(nth, "green"))
     assert r.rc is None and r.measure["rounds"][0]["red_path"] == f"dropped:{blamed}", r.err
     assert _subsets(r) == runs
+
+
+def test_a_probe_whose_passenger_hangs_every_time_is_still_found(render, tmp_path, monkeypatch):
+    """A probe with b1 aborts on every run: its repeat, the fresh green base, the run once
+    more — it aborts again, so it counts red and b1 is dropped."""
+    r = _aborting(render, tmp_path, monkeypatch,
+                  sh=lambda sub, cmd, nth: {1: "red", 2: "red"}.get(nth, "abort" if "b1" in sub else "green"))
+    assert r.rc is None and [x["red_path"] for x in r.measure["rounds"]] == ["dropped:b1", "green"], r.err
+    assert _subsets(r) == [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",), (), ("b1",), ("b2",)]
+    assert _shape(r.measure)[0] == ("dropped:b1", {"first": 1, "retry_full": 1, "base": 2, "probe": 1,
+                                                   "retry_abort": 2})
+
+
+def test_a_lane_held_during_the_first_two_runs_drops_nobody(render, tmp_path, monkeypatch):
+    """Refute: the lane is held during the first run and its repeat, no test is red anywhere.
+    The fresh base is green, the run once more green too — merged, nobody dropped."""
+    busy = "printf '%s\\n' 'lane-busy full held by pid 4242 — other (main) since 10:01 (3 min)' " \
+           ">> \"$PROCESS_SUITE_ABORT\"; exit 2"
+    r = _aborting(render, tmp_path, monkeypatch, sh=lambda sub, cmd, nth: busy if nth <= 2 else "green")
+    assert r.rc is None and r.raised is None and r.written == [], (r.written, r.err)
+    assert _shape(r.measure) == [("green", {"first": 1, "retry_abort": 2, "base": 1})]
+    assert _subsets(r) == [("b1", "b2"), ("b1", "b2"), (), ("b1", "b2")]
+    assert [a for a, _e in _round_aborts(r)] == [
+        "lane-busy full held by pid 4242 — other (main) since 10:01 (3 min)"] * 2
+
+
+def test_a_load_during_the_search_drops_only_the_real_offender(render, tmp_path, monkeypatch):
+    """Refute: b2 is the real offender; the load aborts the probe [b1] and its repeat. The
+    fresh base is green, the probe once more green — b2 is dropped, b1 and b3 merge."""
+    r = _aborting(render, tmp_path, monkeypatch, n=3,
+                  sh=lambda sub, cmd, nth: "abort" if nth in (5, 6) else ("red" if "b2" in sub else "green"))
+    assert r.rc is None and r.raised is None, r.err
+    assert [x["red_path"] for x in r.measure["rounds"]] == ["dropped:b2", "green"], r.err
+    assert _subsets(r) == [("b1", "b2", "b3"), ("b1", "b2", "b3"), (), ("b1", "b2"), ("b1",), ("b1",), (),
+                           ("b1",), ("b1", "b3")]
 
 
 def test_the_fresh_base_and_its_repeat_skip_this_trains_green(render, tmp_path, monkeypatch):

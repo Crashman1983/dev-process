@@ -2335,21 +2335,29 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 return "red", merged, br  # everybody conflicted: nothing to judge
             return judge(wt, kind=kind, bare_base=not subset, memo=memo, fresh=fresh), merged, br
 
-    def _note_abort(waited: float = 0.0, ended: str | None = None) -> None:
+    def _note_abort(waited: float = 0.0, ended: str | None = None) -> dict:
         """One aborted run in the round's `aborts`: its reason, the seconds waited before
-        its repeat and how the wait ended (None: nothing was repeated after it)."""
+        its repeat and how the wait ended (None: nothing was repeated after it). Returns
+        the entry, for a repeat that comes later (after the fresh base)."""
+        entry = {"reason": last_abort, "wait_s": round(waited, 1), "ended": ended}
         if rounds:
-            rounds[-1].setdefault("aborts", []).append(
-                {"reason": last_abort, "wait_s": round(waited, 1), "ended": ended})
+            rounds[-1].setdefault("aborts", []).append(entry)
+        return entry
 
-    def _repeat(subset: list[str], *, memo: bool, fresh: bool) -> tuple[str, list[str], str]:
+    def _repeat(subset: list[str], *, memo: bool, fresh: bool,
+                entry: dict | None = None) -> tuple[str, list[str], str]:
         """The repeat of an aborted run, after the load: a bare `attempt` with the
         aborted run's own features (never `run_judged`: an aborted fresh base must not
-        come back green from this train's memory, nor the guard from the memo)."""
-        log(f"a suite run aborted ({last_abort}) — waiting for the load, then once more ({_load()})")
+        come back green from this train's memory, nor the guard from the memo). `entry`:
+        the aborted run's `aborts` entry when it is noted already — its wait is filled in."""
+        reason = last_abort if entry is None else entry["reason"]
+        log(f"a suite run aborted ({reason}) — waiting for the load, then once more ({_load()})")
         waited, ended = wait_for_load(log)
         phases["abort_wait"] = phases.get("abort_wait", 0.0) + waited
-        _note_abort(waited, ended)
+        if entry is None:
+            _note_abort(waited, ended)
+        else:
+            entry.update(wait_s=round(waited, 1), ended=ended)
         log(f"waited {waited:.0f} s for the load ({ended}) — repeating the run")
         return attempt(subset, kind="retry_abort", memo=memo, fresh=fresh)
 
@@ -2357,9 +2365,11 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                    memo: bool = True, fresh: bool = False) -> tuple[str, list[str], str]:
         """The upper layer (v2.95): what a run of `subset` that aborted counts as —
         `(state, merged, br)` of the subset's last run, never "aborted". Repeated
-        ABORT_RETRIES times; aborted still, the fresh base decides: green — the run is
-        red (a test that hangs on every run); red — `BaseRed`; aborted, or no base to
-        ask (`subset` is the base, the base has no suite) — `SuiteAborted`."""
+        ABORT_RETRIES times; aborted still, the fresh base decides: green — the subset
+        runs once more, and only if that run aborts too it is red (a test that hangs on
+        every run; a load that passed meanwhile blames nobody); red — `BaseRed`;
+        aborted, or no base to ask (`subset` is the base, the base has no suite) —
+        `SuiteAborted`."""
         nonlocal base_state, base_from_memo, retried
         if state != "aborted":
             return state, merged, br
@@ -2367,7 +2377,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             state, merged, br = _repeat(subset, memo=memo, fresh=fresh)
             if state != "aborted":
                 return state, merged, br
-        _note_abort()
+        repeated = _note_abort()
         if not subset:
             raise SuiteAborted(f"the base's suite run aborted, and so did its repeat ({last_abort})")
         if base_state == "undefined":
@@ -2391,15 +2401,22 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             base_state = bstate
             raise SuiteAborted(f"a suite run aborted, and so did its repeat ({last_abort}); the base reads "
                                f"{bstate} — nothing tells a hang from the load")
-        # green on the base, aborted twice with the passengers: the run is red (a test of
-        # theirs hangs every time). Its tree is gone (the base was built over it): no red
-        # tests are read, and its repeat was the flake run
+        # green on the base, aborted twice with the passengers: the subset once more — a
+        # load or a held lane that ended between its repeat and the base blames nobody
+        # (refute). Green or red, that run stands as a run of this site
         base_state, base_from_memo = "green", False
+        log(f"aborted twice with {', '.join(subset)} aboard, green on the base — once more with them")
+        state, merged, br = _repeat(subset, memo=memo, fresh=fresh, entry=repeated)
+        if state != "aborted":
+            return state, merged, br
+        # aborted again on a green base: the run is red (a test of theirs hangs every
+        # time); its repeat was the flake run, and no red tests are read from an abort
+        _note_abort()
         if kind == "first":
             retried = True
             if red_ids:
                 rounds[-1]["red_tests"] = "suite-aborted"
-        log(f"aborted twice with {', '.join(subset)} aboard, green on the base — counted red")
+        log(f"aborted three times with {', '.join(subset)} aboard, green on the base — counted red")
         return "red", merged, br
 
     def run_judged(subset: list[str], *, kind: str, memo: bool = True,
@@ -2498,7 +2515,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 break
             if red_ids and state == "red" and "red_tests" not in rounds[-1]:
                 # read only, before any other run rebuilds the worktree: the board tree is this
-                # one (after an abort, the repeat's; "suite-aborted" when the base was built over it)
+                # one (after an abort, the last run's with the passengers; "suite-aborted" when
+                # that run aborted too)
                 rounds[-1]["red_tests"] = "gates-red" if red_in == "gates" else \
                     red_tests(last_wt, base, red_ids, red_cache)
             if state == "undefined":
