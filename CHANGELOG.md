@@ -21,14 +21,14 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 - **A marker the train sets and reads.** For every suite run the train creates an empty file under `<git-common-dir>/process-train/suite-abort/` and passes its path as `PROCESS_SUITE_ABORT`, only to suite runs and preboard probes, never to gates, preflight, deploy or push. A tool that aborts a run for load or a time limit appends one line. `lane.py` does so when a lane stays busy.
 - **A run that aborts blames nobody.** A non-zero exit with a marker line, or an exit 75 at the top level, is an abort.
   - The train waits until the load drops below the CPU count (at most 600 s) and repeats the run once on a rebuilt tree.
-  - If the repeat aborts too, a fresh base run decides. A green base means the run counts red, so a test that hangs every time is still found and its passenger dropped. A red base ends as `base-red`. An aborted base ends the round as `suite-aborted`, result `environment`: nobody blamed, nothing merged.
+  - If the repeat aborts too, a fresh base run decides. After a green base the run goes once more: its green or red stands, so a load that passed meanwhile blames nobody. Only if it aborts again it counts red, so a test that hangs every time is still found and its passenger dropped. A red base ends as `base-red`. An aborted base ends the round as `suite-aborted`, result `environment`: nobody blamed, nothing merged.
   - An aborted run never feeds the green memo, a merge certificate or the tree cache. A preboard probe that aborts boards unchecked.
-- **Reporting.** Passengers dropped earlier in the same train are reported on every environment stop and on a red base.
-- **Telemetry.** `red_path="suite-aborted"`, run kind `retry_abort`, `rounds[].aborts` with reason, wait and how the wait ended. `train-phases` names suite aborts apart from a red preflight and counts consecutive trains that stopped on the same line.
+- **Reporting.** Passengers dropped earlier in the same train for a real red are reported on every environment stop and on a red base; a passenger that only conflicted is not.
+- **Telemetry.** `red_path="suite-aborted"`, run kind `retry_abort`, `rounds[].aborts` with reason, wait and how the wait ended. `train-phases` names suite aborts apart from a red preflight and counts consecutive trains that stopped on the same kind and subject (the line's first two words).
 - **Unchanged:** without a marker and without an exit 75 at the top level, the train decides as before. A green run stays green.
 
 **Effect.**
-- A load spike or a busy lane costs one repeat and at most a fresh base, instead of a search over all passengers and a wrong drop.
+- A load spike or a busy lane costs one repeat and at most a fresh base and one more run, instead of a search over all passengers and a wrong drop.
 
 **Changed sections.**
 - `train.md` (The run; Red, undefined, aborted (new))

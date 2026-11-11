@@ -350,17 +350,20 @@ green base, and the search for its "offender" took almost three hours.
 first run, retries, base, probes, `--retry`, preboard probes — the train
 makes a fresh, empty file and names it in `PROCESS_SUITE_ABORT`:
 `<git-common-dir>/process-train/suite-abort/<stamp>-<pid>.<n>`, one per run,
-removed after it. A tool that stops the run for a reason outside the tree
-appends one line:
-- `<kind> <details>`, e.g. `lane-busy <lane> <holder>` (what `lane.py`
-  writes when its wait runs out), `watchdog <nodeid> <timeout> <load>`,
-  `nested-timeout <nodeid> <budget>`;
-- in one write, opened append-only **without** creating the file
-  (`O_APPEND`, no `O_CREAT`): a writer that outlives its run marks nothing;
+removed after it (a killed train's markers go with the next train's cleanup
+once they are a day old). A tool that stops the run for a reason outside the
+tree appends one line:
+- `<kind> <subject> <details>`, e.g. `lane-busy <lane> <holder>` (what
+  `lane.py` writes when its wait runs out), `watchdog <nodeid> <timeout>
+  <load>`, `nested-timeout <nodeid> <budget>`;
+- in one write, opened append-only **without** creating the file and
+  without blocking (`O_APPEND`, no `O_CREAT`, `O_NONBLOCK`): a writer that
+  outlives its run marks nothing;
 - the run still exits non-zero.
 
 The train reads only that path, without following a link, at most 64 KiB
-and 50 lines; the first line is the reason. Without a marker, exit 75
+and 50 lines; a line is cut at 500 characters and its control characters
+become spaces; the first line is the reason. Without a marker, exit 75
 (`EX_TEMPFAIL`) of the suite command itself is an abort too. Under make a
 recipe's 75 becomes make's 2, and only the marker tells. The variable
 reaches suite runs only: gates, preflight, deploy, git and the push never
@@ -384,19 +387,24 @@ repeat aborts too:
   the load;
 - otherwise the base runs **fresh** (neither this train's greens nor the
   memo), repeated the same way once:
-  - green: the aborted run counts **red** — a passenger's test hangs every
-    time, and the search goes on. At the first run the repeat was the flake
-    run: no second retry, and `--retry` never runs on the base's tree;
+  - green: the aborted run runs **once more**, after the wait. Green or red,
+    that run stands as the run of this place — a load or a held lane that
+    ended between the repeat and the base blames nobody. Only if it aborts
+    again it counts **red** — a passenger's test hangs every time, and the
+    search goes on. At the first run the repeat was then the flake run: no
+    second retry, and `--retry` never runs on the base's tree;
   - red: main is red — `base-red`, nobody blamed;
   - aborted: `suite-aborted`.
 
 `suite-aborted` ends the run as `environment`: nobody blamed, nothing
 merged. Passengers dropped for a real red in earlier rounds of the same
-train are reported, as on every environment stop. A repeat after `gates`
+train are reported, as on every environment stop and a red base; one that
+only conflicted is not. A repeat after `gates`
 or `--retry` rebuilds the tree and runs the whole suite; a green there after
 red gates is still a gate flake. A preboard probe that aborts is not
 repeated: it boards, not pre-checked, and is never dropped. One place costs
-at most a repeat, a fresh base and its repeat, and twice the wait.
+at most a repeat, a fresh base and its repeat, the run once more, and three
+times the wait.
 
 The wait is the phase `abort_wait`. Each round's `aborts` lists every aborted
 run: `reason` (the marker's first line), `wait_s` (the wait before its
@@ -404,7 +412,9 @@ repeat) and `ended` (`load`, `budget`, `unread`, or null when nothing was
 repeated after it); a round that ends green keeps them. `train-phases`
 counts `suite-aborted` apart from the preflight and names the line the
 latest one stopped on, with the number of trains in a row that ended on
-that same line — a test or a lane that aborts every train shows there.
+the same kind and subject (its first two words: `lane-busy full`,
+`watchdog <nodeid>`; pids, times and loads vary) — a test or a lane that
+aborts every train shows there.
 
 ## Who pushes to main — the merge route
 
