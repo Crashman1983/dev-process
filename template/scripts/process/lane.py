@@ -167,13 +167,15 @@ def _mark(where: Path, lane: str) -> str:
 def _note_suite_abort(lane: str, who: str) -> None:
     """Append `lane-busy <lane> <holder>` to the train's abort marker, when the variable
     is set: one `os.write`, append only, never creating the file (a marker the train has
-    removed stays gone). A failure to write changes nothing — the exit stays 75."""
+    removed stays gone), never blocking (a FIFO nobody reads). A failure to write
+    changes nothing — the exit stays 75."""
     path = os.environ.get(SUITE_ABORT_ENV)
     if not path:
         return
     line = f"lane-busy {lane} {' '.join(who.splitlines())}\n".encode("utf-8", "replace")
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+                     | getattr(os, "O_NONBLOCK", 0))
     except (OSError, ValueError):
         return
     try:
