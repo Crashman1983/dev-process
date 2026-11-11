@@ -20,14 +20,14 @@ English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 - **Ein Marker, den der Zug setzt und liest.** Für jeden Suite-Lauf legt der Zug unter `<git-common-dir>/process-train/suite-abort/` eine leere Datei an und gibt ihren Pfad als `PROCESS_SUITE_ABORT` weiter, nur an Suite-Läufe und Proben der Vorab-Prüfung, nie an Gates, Preflight, Deploy oder Push. Ein Werkzeug, das einen Lauf wegen Last oder Zeitlimit abbricht, hängt eine Zeile an. `lane.py` tut das, wenn eine Lane belegt bleibt.
 - **Ein abgebrochener Lauf beschuldigt niemanden.** Ein Exit ≠ 0 mit Marker-Zeile oder ein Exit 75 ganz oben ist ein Abbruch.
   - Der Zug wartet, bis die Last unter der Zahl der CPUs liegt (höchstens 600 s), und wiederholt den Lauf einmal auf einem neu gebauten Baum.
-  - Bricht auch die Wiederholung ab, entscheidet ein frischer Basis-Lauf. Bei grüner Basis zählt der Lauf als rot; ein Test, der bei jedem Lauf hängt, wird so gefunden und sein Passagier abgesetzt. Bei roter Basis endet die Runde als `base-red`. Bricht auch die Basis ab, endet die Runde als `suite-aborted`, Ergebnis `environment`: niemand beschuldigt, nichts gemergt.
+  - Bricht auch die Wiederholung ab, entscheidet ein frischer Basis-Lauf. Nach grüner Basis läuft der Lauf noch einmal: Sein Grün oder Rot gilt, eine inzwischen vorbeigezogene Last beschuldigt also niemanden. Erst wenn er wieder abbricht, zählt er als rot; ein Test, der bei jedem Lauf hängt, wird so gefunden und sein Passagier abgesetzt. Bei roter Basis endet die Runde als `base-red`. Bricht auch die Basis ab, endet die Runde als `suite-aborted`, Ergebnis `environment`: niemand beschuldigt, nichts gemergt.
   - Ein abgebrochener Lauf füttert nie den Merker für grüne Läufe, ein Merge-Zertifikat oder den Baum-Cache. Eine Probe der Vorab-Prüfung, die abbricht, steigt ungeprüft ein.
-- **Meldungen.** Passagiere, die früher im selben Zug abgesetzt wurden, werden bei jedem Stopp wegen der Umgebung und bei roter Basis gemeldet.
-- **Telemetrie.** `red_path="suite-aborted"`, Lauf-Art `retry_abort`, `rounds[].aborts` mit Grund, Wartezeit und wie das Warten endete. `train-phases` nennt Suite-Abbrüche getrennt vom roten Preflight und zählt Züge in Folge, die an derselben Zeile stoppten.
+- **Meldungen.** Passagiere, die früher im selben Zug wegen echtem Rot abgesetzt wurden, werden bei jedem Stopp wegen der Umgebung und bei roter Basis gemeldet; ein Passagier, der nur einen Konflikt hatte, nicht.
+- **Telemetrie.** `red_path="suite-aborted"`, Lauf-Art `retry_abort`, `rounds[].aborts` mit Grund, Wartezeit und wie das Warten endete. `train-phases` nennt Suite-Abbrüche getrennt vom roten Preflight und zählt Züge in Folge, die an derselben Art und demselben Gegenstand stoppten (die ersten zwei Wörter der Zeile).
 - **Unverändert:** Ohne Marker und ohne Exit 75 ganz oben entscheidet der Zug wie bisher. Ein grüner Lauf bleibt grün.
 
 **Wirkung.**
-- Eine Lastspitze oder eine belegte Lane kostet eine Wiederholung und höchstens eine frische Basis, statt einer Suche über alle Passagiere und eines falschen Absetzens.
+- Eine Lastspitze oder eine belegte Lane kostet eine Wiederholung und höchstens eine frische Basis und einen weiteren Lauf, statt einer Suche über alle Passagiere und eines falschen Absetzens.
 
 **Geänderte Abschnitte.**
 - `train.md` (The run; Red, undefined, aborted (neu))
