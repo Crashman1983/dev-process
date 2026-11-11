@@ -20,7 +20,10 @@ file names and status record, so both share one lock on a host.
 The wait is bounded: past it, nothing runs and the exit is 75 (EX_TEMPFAIL)
 with the holder named — a hook inside an agent's tool call must not sit out
 its own timeout (downstream: a hook queued 40 minutes behind a full run, the
-tool call died at 96 %, the retry started from zero, five times). A hold
+tool call died at 96 %, the retry started from zero, five times). Inside the
+train's suite run (`PROCESS_SUITE_ABORT` set) it first appends `lane-busy
+<lane> <holder>` to that marker: the train reads the run as aborted, not red
+(`docs/process/train.md`). A hold
 inside a hold of the same lane is a pass-through (`PROCESS_LANE_HELD`): a
 hook run from a lane-held command would otherwise wait for itself.
 
@@ -48,6 +51,10 @@ import testing_config  # noqa: E402
 EX_TEMPFAIL = 75
 HELD_ENV = "PROCESS_LANE_HELD"
 DIR_ENV = "PROCESS_LANE_DIR"
+# the abort marker of the train's suite run (train.py, `docs/process/train.md`): a lane
+# that stays held there marks the run aborted, not red — also under `make -k`, which
+# turns this exit 75 into its own 2
+SUITE_ABORT_ENV = "PROCESS_SUITE_ABORT"
 POLL_S = 2.0
 NOTE_EVERY_S = 60.0
 
@@ -157,6 +164,26 @@ def _mark(where: Path, lane: str) -> str:
     return f"{where.resolve()}\n{lane}"
 
 
+def _note_suite_abort(lane: str, who: str) -> None:
+    """Append `lane-busy <lane> <holder>` to the train's abort marker, when the variable
+    is set: one `os.write`, append only, never creating the file (a marker the train has
+    removed stays gone). A failure to write changes nothing — the exit stays 75."""
+    path = os.environ.get(SUITE_ABORT_ENV)
+    if not path:
+        return
+    line = f"lane-busy {lane} {' '.join(who.splitlines())}\n".encode("utf-8", "replace")
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0))
+    except (OSError, ValueError):
+        return
+    try:
+        os.write(fd, line)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def _write_status(where: Path, lane: str, label: str) -> None:
     _lock, status = _paths(where, lane)
     record = {"lane": lane, "label": label, "pid": os.getpid(), "started": time.time(),
@@ -202,7 +229,9 @@ def hold(lane: str, *, wait: float | None = None, label: str = "", quiet: bool =
                 pass
             now = time.monotonic()
             if now >= deadline:
-                raise LaneBusy(describe(where, lane))
+                busy = describe(where, lane)
+                _note_suite_abort(lane, busy.removeprefix(f"{lane}: "))
+                raise LaneBusy(busy)
             if not quiet and now - last_note >= NOTE_EVERY_S:
                 print(f"… lane {describe(where, lane)} — waiting, "
                       f"{int(deadline - now) // 60} min budget left", file=sys.stderr, flush=True)
