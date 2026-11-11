@@ -312,7 +312,7 @@ def test_the_memo_names_the_scope_that_ran(process, repo, monkeypatch, tmp_path)
     # a wider `stages` an earlier run left, a suite that writes none: the train clears it
     # first — no memo, no certificate (code review: the train's clear had no test)
     _stages_file(repo, "test-frontend test-boundary")
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, *a: "green")
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, *a, **kw: "green")
     with pytest.raises(SystemExit):
         train._run_batch(repo, "main", p, ["b1"], "x", tmp_path / "t.log", suite="s", deploy=None,
                          push=False, keep_branches=True, merge_scope=SCOPE_ALL)
@@ -321,7 +321,7 @@ def test_the_memo_names_the_scope_that_ran(process, repo, monkeypatch, tmp_path)
     assert certificate.find(repo, ("merge",), {"merge": "s\nscope=test-boundary test-frontend"}) is None
     for ran, kept in (("test-boundary", False), ("test-frontend test-boundary", True)):
         remembered.clear()
-        monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, *a, ran=ran: _stages_file(repo, ran) or "green")
+        monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, *a, ran=ran, **kw: _stages_file(repo, ran) or "green")
         p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
         with pytest.raises(SystemExit):  # the stub train/x cannot be fast-forwarded; the judging is done
             train._run_batch(repo, "main", p, ["b1"], "x", tmp_path / "t.log", suite="s", deploy=None,
