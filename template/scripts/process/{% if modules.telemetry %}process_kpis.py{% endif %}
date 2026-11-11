@@ -2167,18 +2167,28 @@ def _abort_line(row: dict) -> str | None:
     return reason if isinstance(reason, str) and reason else "unknown"
 
 
+def _abort_key(line: str) -> tuple[str, ...]:
+    """What two marker lines share when the same thing stopped two trains: the kind and its
+    subject, the first two words (`lane-busy full`, `watchdog <nodeid>`) — the rest varies
+    from run to run (a holder's pid, time and minutes; the load)."""
+    return tuple(line.split()[:2])
+
+
 def _suite_abort_lines(every: list[dict], window: list[dict]) -> list[str]:
     """v2.95: the latest train of the window that ended `suite-aborted`, the marker line it
     stopped on, and how many trains in a row (over all of `phases.jsonl`, up to it) ended on
-    that same line — a test or a lane that aborts every train shows as a count that grows."""
+    the same kind and subject (`_abort_key`) — a test or a lane that aborts every train
+    shows as a count that grows."""
     latest = next((row for row in reversed(window) if _abort_line(row) is not None), None)
     if latest is None:
         return []
     line = _abort_line(latest)
+    key = _abort_key(line)
     at = max(i for i, row in enumerate(every) if row is latest)
     streak = 0
     for row in reversed(every[:at + 1]):
-        if _abort_line(row) != line:
+        other = _abort_line(row)
+        if other is None or _abort_key(other) != key:
             break
         streak += 1
     return [f'  suite aborted on "{line}" — {streak} train{"" if streak == 1 else "s"} in a row'
