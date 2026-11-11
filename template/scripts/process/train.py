@@ -62,6 +62,9 @@ ONCE on the combined tree. If they fail, the base itself is checked once
 (a red main blames nobody; the suite is skipped on a tree an earlier train
 saw green), then a bisection over boarding-order prefixes
 names the first offender, drops it, and the rest is rebuilt.
+A suite run that marks itself aborted (a line in `$PROCESS_SUITE_ABORT`, or
+exit 75 of the command) measured nothing: it is repeated once after the load
+falls, and an abort alone never blames a passenger (v2.95, train.md).
 Every tree of a run — first, retry, base, probe, rebuild, preboard — is
 the SHAs boarding judged on the base's SHA, from one snapshot (#391): a
 commit after boarding rides a later train, a fetch moves no run. After
@@ -77,7 +80,7 @@ since boarding merged at its boarded SHA and stays: no delete, no `done`,
 its dispatch records kept — its new commits need their own review. The combination
 is new — that is why the batch, not the branch, earns the full run
 (`docs/process/testing.md`). Each run logs its phase times (plan, preflight,
-gates, suite, retry, bisect, push, deploy) and appends them, with the
+gates, suite, retry, bisect, push, deploy, abort_wait) and appends them, with the
 branches that landed, whether the deploy ran green and when the run ended,
 to `<git-common-dir>/process-train/phases.jsonl` (`process_kpis.py
 train-phases`, `flow`). Every run names who stays behind and why, as `plan`
@@ -93,6 +96,7 @@ import argparse
 from collections import Counter
 import contextlib
 import datetime as _dt
+import itertools
 import json
 import os
 import posixpath
@@ -137,7 +141,12 @@ TRAIN_DIR = "process-train"
 # into every git call.
 MERGE_ROUTE_ENV = "PROCESS_MERGE_ROUTE"
 MERGE_ROUTE = "train"
-_GIT_ENV = {**{k: v for k, v in os.environ.items() if k != MERGE_ROUTE_ENV},
+# The abort marker of one suite run (v2.95, `docs/process/train.md`): the path of a fresh,
+# empty file the train makes for that run alone. A project's tool that stops the run for a
+# reason outside the tree (a held lane, a watchdog under load) appends one line to it. Set
+# for suite runs only (`_sh`), never inherited — not by git, the push or its hook either.
+SUITE_ABORT_ENV = "PROCESS_SUITE_ABORT"
+_GIT_ENV = {**{k: v for k, v in os.environ.items() if k not in (MERGE_ROUTE_ENV, SUITE_ABORT_ENV)},
             "GIT_TERMINAL_PROMPT": "0"}
 
 
@@ -729,6 +738,12 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 # This reads text: a test printing make's exact stop line, or a nested make
 # with MAKELEVEL cleared, can read undefined; the train then aborts or excuses
 # a prefix, it never merges on it.
+# "aborted" (v2.95) — the run said itself it measured nothing: a line in its
+# abort marker (`SUITE_ABORT_ENV`) with a non-zero exit, or exit 75 (EX_TEMPFAIL)
+# of the command itself. It is no verdict on the tree: the train's rule
+# (`run_judged`) turns it into green, red or a stop that blames nobody, and the
+# preboard check boards it unchecked. It is not "undefined", which can blame (a
+# passenger removed the suite).
 
 # make options that take their value as the next word
 _MAKE_VALUE_OPTS = {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile", "--include-dir",
@@ -756,13 +771,21 @@ class SuiteFacts(NamedTuple):
     missing_includes: frozenset = frozenset()  # `Makefile:N: x: No such file or directory`: make's include line
     not_found: frozenset = frozenset()         # the train's `sh: 1: w: not found`: words the shell did not find
     absent: frozenset = frozenset()            # the suite's entry file or directory, missing from the tree
+    abort: tuple[str, ...] = ()                # the lines of the run's abort marker, first line first
 
 
 def decide(f: SuiteFacts) -> tuple[str, str]:
-    """`(state, reason)`, state "green", "red" or "undefined" — the whole rule;
-    the first row that applies decides."""
+    """`(state, reason)`, state "green", "red", "undefined" or "aborted" — the
+    whole rule; the first row that applies decides."""
     if f.rc == 0:
         return "green", "exit 0"
+    # the run marked itself aborted (a held lane, a watchdog): no finding about the tree,
+    # whatever make made of the exit (`make -k` turns a recipe's 75 into 2)
+    if f.abort:
+        return "aborted", f"a run aborted: {f.abort[0]}"
+    # the suite itself refused to run (a lane called without make): not measured
+    if f.rc == 75:
+        return "aborted", "a run aborted: exit 75 (EX_TEMPFAIL), the suite refused to run"
     # any make call failing on a defined target makes the tree red, even when
     # a later call finds no rule (`make test; make -C examples test`)
     if f.recipe_failed:
@@ -973,10 +996,11 @@ def _in_tree(base: str, path: str) -> str | None:
 
 
 def read_facts(cmd: str, rc: int, lines: list[str], makelevel: str = "0",
-               exists: Callable[[str], bool] | None = None) -> SuiteFacts:
+               exists: Callable[[str], bool] | None = None, abort: tuple[str, ...] = ()) -> SuiteFacts:
     """The facts of one run from the command, its exit code, its output lines,
-    the MAKELEVEL the train runs at and the tree (`exists` answers for a path
-    relative to it; None: the tree is not asked)."""
+    the MAKELEVEL the train runs at, the tree (`exists` answers for a path
+    relative to it; None: the tree is not asked) and the lines of its abort
+    marker (`_abort_lines`)."""
     commands = _simple_commands(cmd)
     targets: set[str] = set().union(*(_make_targets(c) for _sep, c in commands))
     # the suite's own commands: the start and whatever follows `&&` — behind
@@ -1039,15 +1063,150 @@ def read_facts(cmd: str, rc: int, lines: list[str], makelevel: str = "0",
         not_found=frozenset(re.findall(
             r"(?m)^sh: (?:line )?\d+: (.+): (?:not found|command not found|No such file or directory)$", text)),
         absent=frozenset(absent),
+        abort=tuple(abort),
     )
 
 
-def _load() -> str:
+def _one_minute_load() -> float | None:
+    """The host's one-minute load average; None where it cannot be read (no
+    `os.getloadavg`, as on Windows, or an OSError)."""
+    getloadavg = getattr(os, "getloadavg", None)
+    if getloadavg is None:
+        return None
     try:
-        one, _five, _fifteen = os.getloadavg()
-    except OSError:
+        return float(getloadavg()[0])
+    except (OSError, TypeError, ValueError, IndexError):
+        return None
+
+
+def _cpus() -> int | None:
+    """The CPUs this process may run on (`sched_getaffinity`, else `cpu_count`); None
+    when neither says."""
+    affinity = getattr(os, "sched_getaffinity", None)
+    if affinity is not None:
+        try:
+            n = len(affinity(0))
+            if n > 0:
+                return n
+        except OSError:
+            pass
+    n = os.cpu_count()
+    return n if n else None
+
+
+def _load() -> str:
+    one = _one_minute_load()
+    if one is None:
         return "load unknown"
-    return f"load {one:.1f} on {os.cpu_count() or '?'} CPUs"
+    return f"load {one:.1f} on {_cpus() or '?'} CPUs"
+
+
+# --- a suite run that aborted (v2.95) ------------------------------------------------
+# The train repeats a run that aborted once, after the host's load fell below its CPUs
+# or ABORT_WAIT_S passed (constants, no configuration: nobody asked to tune them).
+ABORT_RETRIES = 1
+ABORT_WAIT_S = 600.0
+ABORT_POLL_S = 10.0
+ABORT_DIR = "suite-abort"     # under the train's directory: `<stamp>-<pid>.<n>`, one file per run
+ABORT_BYTES = 64 * 1024       # what the train reads of a marker at most
+ABORT_LINES = 50
+# what `wait_for_load` waits with; the tests replace them
+_abort_clock = time.monotonic
+_abort_sleep = time.sleep
+# `n` of the marker path: every suite run of this process counts, the preboard probes too
+_ABORT_RUNS = itertools.count(1)
+
+
+def wait_for_load(log, *, budget: float | None = None, clock: Callable[[], float] | None = None,
+                  sleep: Callable[[float], None] | None = None) -> tuple[float, str]:
+    """Wait until the one-minute load is below the CPUs, at most `budget` seconds
+    (ABORT_WAIT_S) — `(seconds waited, how it ended)`: "load", "budget", or "unread"
+    when the load or the CPU count cannot be read (then nothing waits; the log says so)."""
+    budget = ABORT_WAIT_S if budget is None else budget
+    clock = clock or _abort_clock
+    sleep = sleep or _abort_sleep
+    cpus = _cpus()
+    if cpus is None:
+        log("abort: no CPU count on this host — no wait for the load before the repeat")
+        return 0.0, "unread"
+    started = clock()
+    while True:
+        load = _one_minute_load()
+        waited = clock() - started
+        if load is None:
+            log("abort: no load average on this host — no wait for the load before the repeat")
+            return waited, "unread"
+        if load < cpus:
+            return waited, "load"
+        if waited >= budget:
+            return waited, "budget"
+        sleep(min(ABORT_POLL_S, budget - waited))
+
+
+def _abort_lines(path: Path) -> tuple[str, ...]:
+    """The non-empty lines of a run's abort marker, at most ABORT_LINES of its first
+    ABORT_BYTES — a regular file opened without following a link (`_lastfailed_ids`).
+    () when it cannot be read: an unreadable marker marks nothing."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except (OSError, ValueError):
+        return ()
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return ()
+        raw = os.read(fd, ABORT_BYTES)
+    except OSError:
+        return ()
+    finally:
+        os.close(fd)
+    lines = (ln.strip() for ln in raw.decode("utf-8", "replace").splitlines())
+    return tuple(ln for ln in lines if ln)[:ABORT_LINES]
+
+
+def _abort_marker(root: Path, stamp: str) -> Path | None:
+    """A fresh, empty marker for the next suite run of this train: its own path, so a
+    late writer of an earlier run marks nothing here. None when it cannot be made."""
+    try:
+        folder = _train_dir(root) / ABORT_DIR
+        folder.mkdir(exist_ok=True)
+        path = folder / f"{stamp}-{os.getpid()}.{next(_ABORT_RUNS)}"
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600))
+    except OSError:
+        return None
+    return path
+
+
+def _clear_aborts(root: Path, stamp: str) -> None:
+    """Remove this train's markers (`<stamp>-<pid>.*`): what a run left behind."""
+    try:
+        for f in (_train_dir(root) / ABORT_DIR).glob(f"{stamp}-{os.getpid()}.*"):
+            with contextlib.suppress(OSError):
+                f.unlink()
+    except OSError:
+        pass
+
+
+def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) -> tuple[str, str]:
+    """One suite run with its own abort marker: `_sh` with the marker, then
+    `(state, reason)` — the reason of an "aborted" run is the marker's first line
+    (or exit 75), "" otherwise. The marker is removed afterwards: a writer that keeps
+    the contract (append, never create) cannot bring it back. A marker that cannot be
+    made runs the suite without one, and says so."""
+    path = _abort_marker(root, stamp)
+    if path is None:
+        log(f"abort marker not made in {TRAIN_DIR}/{ABORT_DIR} — `{cmd}` runs without {SUITE_ABORT_ENV}")
+        return _sh(cwd, cmd, log, *args, **kw), ""
+    try:
+        state = _sh(cwd, cmd, log, *args, abort=path, **kw)
+        lines = _abort_lines(path) if state == "aborted" else ()
+    finally:
+        with contextlib.suppress(OSError):
+            path.unlink()
+    if state != "aborted":
+        return state, ""
+    return state, lines[0] if lines else "exit 75 (EX_TEMPFAIL)"
 
 
 def _echo(text: str, end: str = "\n") -> None:
@@ -1061,20 +1220,26 @@ def _echo(text: str, end: str = "\n") -> None:
 
 
 def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state: str = "red",
-        env: dict[str, str] | None = None) -> str:
-    """Run cmd, streaming its output; "green", "red" or "undefined" (the
-    command or make target does not exist on this tree) — `decide`'s verdict.
+        env: dict[str, str] | None = None, abort: Path | None = None) -> str:
+    """Run cmd, streaming its output; "green", "red", "undefined" (the
+    command or make target does not exist on this tree) or "aborted" (only
+    with `abort`, or on exit 75) — `decide`'s verdict.
     Past `timeout` seconds its whole process group is killed: `timeout_state` —
     red for the preflight, the suite and the deploy; the preboard check asks
     for "undefined" (a slow check says nothing about the candidate, #386).
-    `env` extends the inherited environment, never replaces it."""
+    `env` extends the inherited environment, never replaces it — except for
+    SUITE_ABORT_ENV, which no command inherits: it is `abort`, the marker of a
+    suite run (`_marked_sh`), and only there."""
     _echo(f"train: $ {cmd}")
     # the lines that can carry a fact, over the whole run: those that make a
     # run red whatever follows without a cap, the others the last 400
     red: dict[str, None] = {}
     kept: list[str] = []
+    child = {**{k: v for k, v in os.environ.items() if k != SUITE_ABORT_ENV}, **(env or {})}
+    if abort is not None:
+        child[SUITE_ABORT_ENV] = str(abort)
     proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, errors="replace", env=git_environment({**os.environ, **(env or {})}),
+                            text=True, errors="replace", env=git_environment(child),
                             start_new_session=timeout is not None)
     assert proc.stdout is not None
     expired = threading.Event()
@@ -1106,7 +1271,8 @@ def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state
         _echo(f"train: `{cmd}` did not finish in {timeout:g} s — killed")
         return timeout_state
     state, why = decide(read_facts(cmd, rc, [*red, *kept], os.environ.get("MAKELEVEL", "0"),
-                                   lambda p: (cwd / p).exists()))
+                                   lambda p: (cwd / p).exists(),
+                                   abort=_abort_lines(abort) if abort is not None else ()))
     log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ' — ' + why + ', ' + _load()})")
     return state
 
@@ -1400,13 +1566,25 @@ def _changed_by_run(wt: Path) -> bool:
     return r.returncode != 0 or bool(r.stdout.strip())
 
 
-PHASES = ("plan", "preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+PHASES = ("plan", "preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy",
+          "abort_wait")
 PHASES_FILE = "phases.jsonl"
 LAST_HOLD_FILE = "last-hold.txt"  # the last run that did not depart: when, why, who stayed behind
 
 
 class EnvironmentRed(Exception):
     """`--preflight` failed: the host cannot run the suite — nobody aboard is to blame."""
+
+
+class SuiteAborted(EnvironmentRed):
+    """A suite run aborted, its repeat too, and the base could not tell load from a
+    hang (it aborted as well, is the one that aborted, or has no suite): nobody is
+    blamed, nothing merges (`red_path` "suite-aborted")."""
+
+
+class BaseRed(Exception):
+    """A run aborted twice and the fresh base ran red: main is red — `_red_base`, not
+    an environment stop."""
 
 
 def stage_markers(wt: Path) -> dict[str, tuple[int, int, int] | None] | None:
@@ -1641,8 +1819,9 @@ def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str
                    log, outcome: dict | None = None, stages: dict | None = None,
                    measure: dict | None = None) -> None:
     """One log line and one JSON line per run: where the train's time went.
-    `result`: green, red, environment (a red preflight — no red train) or
-    preboard (the preboard check dropped every candidate — nothing was built).
+    `result`: green, red, environment (a red preflight, or a suite run that aborted
+    with nobody to blame — the last round's `red_path` tells them apart; no red
+    train) or preboard (the preboard check dropped every candidate — nothing was built).
     `branches` are the ones that landed, `deployed` whether the deploy ran
     green (null: no deploy ran), `ended` when the run finished (UTC) — what
     ties a deploy to an issue for `process_kpis.py flow`. `stages`: the merge-suite
@@ -1748,7 +1927,8 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
     is checked (a broken host, a red main — never a candidate's fault). A candidate red on
     base+it runs once more on a rebuilt tree; red twice, it is reported blocked and stays
     off this train. Not judgeable (undefined, past `timeout`, a conflict, a tree that
-    cannot be built) boards, and says so: the full suite still judges it (AC-2).
+    cannot be built, a run that aborted — v2.95) boards, and says so: the full suite
+    still judges it (AC-2).
     Before anybody is reported, the base is checked once more and the host by `preflight`
     on the base's tree (refute v2.89: a broken part of the host the base never exercised,
     or a host that broke mid-check, blocked candidates before the preflight ran) — the
@@ -1775,7 +1955,8 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
             _git(root, "branch", "-D", old_branch)
 
     def probe(subset: list[str]) -> str:
-        """green, red, undefined — or "conflict", "not built": not judged."""
+        """green, red, undefined — or "conflict", "not built", "aborted": not judged. A
+        probe that aborted (its marker, v2.95) is not repeated: it boards unchecked."""
         _clear_worktree(root, wt)  # a fresh tree per check: no residue of the run before counts
         try:
             built, _br, merged, _dropped = build_train(root, base, subset, probe_stamp, log, worktree=wt,
@@ -1786,7 +1967,7 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
             return "not built"
         if any(b not in merged for b in subset):
             return "conflict"  # boards: the train's own build drops it as before
-        return _sh(built, cmd, log, timeout, timeout_state="undefined")
+        return _marked_sh(root, stamp, built, cmd, log, timeout, timeout_state="undefined")[0]
 
     try:
         log(f"preboard `{cmd}` on the base")
@@ -1926,6 +2107,14 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         # a result the batch names itself (preboard: nobody left to build) stands
         result = outcome.get("result") or ("green" if rc == 0 else "red")
         return rc
+    except SuiteAborted as aborted:
+        # before the general branch: its own red path, never overwritten as "environment"
+        result = "environment"
+        _end_round(measure, "suite-aborted")
+        print(f"train: {aborted} — no finding about a passenger; nobody is blamed, nothing merged "
+              f"(see {logfile})", file=sys.stderr)
+        _cleanup(root, stamp)
+        return rc
     except EnvironmentRed as env_red:
         result = "environment"
         _end_round(measure, "environment")
@@ -1945,6 +2134,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         def _log(line: str) -> None:
             with logfile.open("a", encoding="utf-8") as fh:
                 fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
+        _clear_aborts(root, stamp)
         _record_phases(root, stamp, phases, result, aboard, _log, outcome, stages, measure)
 
 
@@ -2003,16 +2193,30 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     preflight_done = not preflight
 
     suite_before: dict[Path, str | None] = {}  # the tree each suite run started from
+    last_abort = ""  # the reason of the last suite run that aborted (its marker's first line)
 
-    def full_suite(wt: Path, key: str) -> str:
-        """The suite on `wt`, remembered and — on a tree it left as found — certified."""
+    def _suite_run(wt: Path, cmd: str, kind: str) -> str:
+        """The lower layer (v2.95): one suite run with its own abort marker. It only
+        reports — "aborted" decides nothing here; `run_judged` applies the rule."""
+        nonlocal last_abort
+        state, reason = _marked_sh(root, stamp, wt, cmd, log)
+        if state == "aborted":
+            last_abort = reason
+            log(f"{kind}: the suite run aborted ({reason}) — not measured, nothing judged on it")
+        return state
+
+    def full_suite(wt: Path, key: str, kind: str) -> str:
+        """The suite on `wt`, remembered and — on a tree it left as found — certified.
+        An aborted run is passed through untouched: no memo, no certificate, no stage times."""
         dirty = certificate.clean_tree_problem(wt)
         if dirty:
             log(f"no merge certificate for this run: {dirty} before the suite")
         before = certificate.evidence_tree(wt) if dirty is None else None
         suite_before[wt] = before
         certificate.clear_run(wt)  # the `stages` file the certificate reads is this run's
-        state = timed("suite", _sh, wt, suite, log)
+        state = timed("suite", _suite_run, wt, suite, kind)
+        if state == "aborted":
+            return state
         _collect_stage_times(wt, stages, stage_seen, log)
         if state == "green" and (noop := certificate.noop_problem()):
             # `make -n` exits 0 having run nothing: no green to merge on (#265)
@@ -2084,10 +2288,12 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         at = _out(wt, "rev-parse", f"{base}^{{commit}}")
         return f"refs/heads/{local}" if head and at and head != at else None
 
-    def judge(wt: Path, *, bare_base: bool = False, memo: bool = True) -> str:
-        """"green", "red" or "undefined" (the suite does not exist on this tree).
-        The bare base skips the suite when this train saw it green on that tree —
-        provisionally: before the first passenger is blamed it runs for real."""
+    def judge(wt: Path, *, kind: str, bare_base: bool = False, memo: bool = True, fresh: bool = False) -> str:
+        """"green", "red", "undefined" (the suite does not exist on this tree) or
+        "aborted" (passed through from the suite run). The bare base skips the suite
+        when this train saw it green on that tree — provisionally: before the first
+        passenger is blamed it runs for real. `fresh` runs the suite whatever this
+        train or an earlier one saw on the tree (the abort rule's base, v2.95)."""
         nonlocal base_from_memo, red_in, preflight_done
         if not preflight_done:
             if timed("preflight", _sh, wt, preflight, log, preflight_timeout) != "green":
@@ -2101,20 +2307,23 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         if not suite:
             return "green"
         key = _suite_key(wt, suite, merge_scope)
-        if key and key in green_here:
+        if key and key in green_here and not fresh:
             # a bisection probe went green on this very tree minutes ago; the
             # rebuild after the drop is the same tree (downstream: ~25 minutes
             # paid twice for one tree). Only this run's verdicts: an earlier
             # train's green on a passenger's tree is not trusted for a merge
             log(f"tree {key.split()[0][:12]}: suite green earlier in this train — not run again")
             return "green"
-        if bare_base and memo and _suite_seen_green(root, key):
+        if bare_base and memo and not fresh and _suite_seen_green(root, key):
             log(f"base tree {key.split()[0][:12]}: suite green on an earlier train — not run again")
             base_from_memo = True
             return "green"
-        return full_suite(wt, key)
+        return full_suite(wt, key, kind)
 
-    def attempt(subset: list[str], *, memo: bool = True, kind: str) -> tuple[str, list[str], str]:
+    def attempt(subset: list[str], *, memo: bool = True, fresh: bool = False,
+                kind: str) -> tuple[str, list[str], str]:
+        """One build and judge of `subset` — the state as `judge` reads it, "aborted"
+        included. Callers that evaluate a run use `run_judged`."""
         nonlocal last_wt
         with counted(kind):
             wt, br, merged, dropped = build_train(root, base, subset, stamp, log, shas=shas)
@@ -2124,7 +2333,81 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                     conflicted.append(d)
             if not merged and subset:
                 return "red", merged, br  # everybody conflicted: nothing to judge
-            return judge(wt, bare_base=not subset, memo=memo), merged, br
+            return judge(wt, kind=kind, bare_base=not subset, memo=memo, fresh=fresh), merged, br
+
+    def _note_abort(waited: float = 0.0, ended: str | None = None) -> None:
+        """One aborted run in the round's `aborts`: its reason, the seconds waited before
+        its repeat and how the wait ended (None: nothing was repeated after it)."""
+        if rounds:
+            rounds[-1].setdefault("aborts", []).append(
+                {"reason": last_abort, "wait_s": round(waited, 1), "ended": ended})
+
+    def _repeat(subset: list[str], *, memo: bool, fresh: bool) -> tuple[str, list[str], str]:
+        """The repeat of an aborted run, after the load: a bare `attempt` with the
+        aborted run's own features (never `run_judged`: an aborted fresh base must not
+        come back green from this train's memory, nor the guard from the memo)."""
+        log(f"a suite run aborted ({last_abort}) — waiting for the load, then once more ({_load()})")
+        waited, ended = wait_for_load(log)
+        phases["abort_wait"] = phases.get("abort_wait", 0.0) + waited
+        _note_abort(waited, ended)
+        log(f"waited {waited:.0f} s for the load ({ended}) — repeating the run")
+        return attempt(subset, kind="retry_abort", memo=memo, fresh=fresh)
+
+    def abort_rule(subset: list[str], state: str, merged: list[str], br: str, *, kind: str,
+                   memo: bool = True, fresh: bool = False) -> tuple[str, list[str], str]:
+        """The upper layer (v2.95): what a run of `subset` that aborted counts as —
+        `(state, merged, br)` of the subset's last run, never "aborted". Repeated
+        ABORT_RETRIES times; aborted still, the fresh base decides: green — the run is
+        red (a test that hangs on every run); red — `BaseRed`; aborted, or no base to
+        ask (`subset` is the base, the base has no suite) — `SuiteAborted`."""
+        nonlocal base_state, base_from_memo, retried
+        if state != "aborted":
+            return state, merged, br
+        for _ in range(ABORT_RETRIES):
+            state, merged, br = _repeat(subset, memo=memo, fresh=fresh)
+            if state != "aborted":
+                return state, merged, br
+        _note_abort()
+        if not subset:
+            raise SuiteAborted(f"the base's suite run aborted, and so did its repeat ({last_abort})")
+        if base_state == "undefined":
+            # a passenger brings the suite: nothing tells a hang from the load — nobody is blamed
+            raise SuiteAborted(f"a suite run aborted, and so did its repeat ({last_abort}); the base has "
+                               "no suite to tell a hang from the load")
+        log(f"a suite run aborted twice ({last_abort}) — the base runs fresh to tell a hang from the load")
+        bstate, _m, _b = attempt([], kind="base", fresh=True)
+        if bstate == "aborted":
+            for _ in range(ABORT_RETRIES):
+                bstate, _m, _b = _repeat([], memo=True, fresh=True)
+                if bstate != "aborted":
+                    break
+            else:
+                _note_abort()
+                raise SuiteAborted(f"a suite run aborted, its repeat and the fresh base too ({last_abort})")
+        if bstate == "red":
+            base_state = "red"
+            raise BaseRed(last_abort)
+        if bstate != "green":
+            base_state = bstate
+            raise SuiteAborted(f"a suite run aborted, and so did its repeat ({last_abort}); the base reads "
+                               f"{bstate} — nothing tells a hang from the load")
+        # green on the base, aborted twice with the passengers: the run is red (a test of
+        # theirs hangs every time). Its tree is gone (the base was built over it): no red
+        # tests are read, and its repeat was the flake run
+        base_state, base_from_memo = "green", False
+        if kind == "first":
+            retried = True
+            if red_ids:
+                rounds[-1]["red_tests"] = "suite-aborted"
+        log(f"aborted twice with {', '.join(subset)} aboard, green on the base — counted red")
+        return "red", merged, br
+
+    def run_judged(subset: list[str], *, kind: str, memo: bool = True,
+                   fresh: bool = False) -> tuple[str, list[str], str]:
+        """`attempt` plus the abort rule: every caller that evaluates a run, and none of
+        them ever sees "aborted"."""
+        state, merged, br = attempt(subset, kind=kind, memo=memo, fresh=fresh)
+        return abort_rule(subset, state, merged, br, kind=kind, memo=memo, fresh=fresh)
 
     def _report_dropped() -> None:
         for b in conflicted:
@@ -2176,175 +2459,209 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     def check_base() -> str:
         nonlocal base_state
         if not base_state:
-            base_state = attempt([], kind="base")[0]
+            base_state = run_judged([], kind="base")[0]
         return base_state
 
-    def _red_base() -> int:
+    def _red_base(aborted: str | None = None) -> int:
+        """Main is red: nobody blamed in this round, nothing merged. A passenger dropped
+        for a real red in an earlier round of this train is still reported. `aborted`:
+        the reason, when a run that aborted twice made the train ask the base."""
         _end_round(measure, "base-red")
-        print("train: the combined tree is red and the base is red too — the "
-              "integration branch itself is red (gates or suite fail with nobody aboard); "
-              "no candidate blamed, "
-              "nothing merged — fix main first", file=sys.stderr)
-        log("base red and combined red — aborted without blame")
+        if aborted is None:
+            print("train: the combined tree is red and the base is red too — the "
+                  "integration branch itself is red (gates or suite fail with nobody aboard); "
+                  "no candidate blamed, "
+                  "nothing merged — fix main first", file=sys.stderr)
+            log("base red and combined red — aborted without blame")
+        else:
+            print(f"train: a suite run aborted twice ({aborted}), and the base, run fresh, is red — the "
+                  "integration branch itself is red (gates or suite fail with nobody aboard); "
+                  "no candidate blamed, nothing merged — fix main first", file=sys.stderr)
+            log(f"a run aborted twice ({aborted}), the fresh base red — aborted without blame")
+        _report_dropped()
         _cleanup(root, stamp)
         return 1
 
-    while aboard:
-        # a round: the first run, and each one after a drop
-        rounds.append({"red_path": None, "runs": {}})
-        state, merged, branch = attempt(aboard, kind="first")
-        aboard = merged
-        if state == "green" or not aboard:
-            _end_round(measure, "green" if state == "green" else "conflicts")
-            if state == "green" and held_during_run():
-                continue
-            break
-        if red_ids and state == "red":
-            # read only, before any other run rebuilds the worktree: the board tree is this one
-            rounds[-1]["red_tests"] = "gates-red" if red_in == "gates" else \
-                red_tests(last_wt, base, red_ids, red_cache)
-        if state == "undefined":
-            if check_base() == "undefined":
-                _end_round(measure, "undefined")
-                print(f"train: the suite `{suite}` does not exist on the combined tree — fix the suite "
-                      "command (merge_suite in docs/process/testing.local.json, or --suite where none "
-                      "is set); nothing merged", file=sys.stderr)
-                log("suite undefined on the combined tree and on the base — aborted without blame")
-                # an offender dropped earlier may have been the one that brought
-                # the suite in: it still owes its fix, say so (downstream refutation)
-                _report_dropped()
-                _cleanup(root, stamp)
-                return 1
-            # the base HAS the suite: a passenger removed or broke it (deleted
-            # the make target, a script with CRLF line ends) — red, and no
-            # flake re-run: a missing suite is not flaky (downstream refutation)
-            log(f"suite undefined on the combined tree but defined on the base ({base_state}) — "
-                "a passenger removed or broke it: red")
-            print(f"train: `{suite}` exists on the base but not on the combined tree — a passenger "
-                  "removed or broke it; searching for it")
-            retried = True
-        searching = "retry"
-        if not retried:
-            # one more run of the SAME tree before anybody is blamed: red then
-            # green on identical code is a flaky test (observed downstream: a
-            # 5 s lock wait and a 5.1 s UI test under load 10 on 6 CPUs), not
-            # an offender — bisecting a flake blames whoever sits in the prefix
-            retried = True
-            how, why = retry_plan(red_in, retry)
-            if how != "full" and (last_wt is None or _changed_by_run(last_wt)):
-                # the first run wrote into the tree (a snapshot baseline it
-                # generated, a lockfile): the worktree is no longer the judged
-                # tree, and a retry there could pass on that residue (refutation)
-                how, why = "full", "the first run changed the worktree — rebuild and run the whole suite"
-            log(f"red — retry of the same combined tree: {how} — {why} ({_load()})")
-            # what the retry really ran decides what a green may claim (#263): only the
-            # same suite on the same tree is a flake; a narrower command is a subset
-            ran = "full"
-            if how == "gates" and last_wt is not None:
-                ran = "gates"
-                with counted("retry_gates"):
-                    state = "green" if timed("gates", _run_gates, last_wt, log, merge_target(last_wt)) else "red"
-                if state == "green" and suite:
-                    red_in = "suite"
-                    # the suite never ran behind the red gates
-                    with counted("retry_full"):
-                        state = full_suite(last_wt, _suite_key(last_wt, suite, merge_scope))
-            elif how == "failed" and last_wt is not None:
-                ran = "retry"
-                with counted("retry_failed"):
-                    state = timed("retry", _sh, last_wt, retry, log)
-                    _collect_stage_times(last_wt, stages, stage_seen, log)
-                    noop = certificate.noop_problem()
-                    if noop and state == "green":
-                        # `make -n` exits 0 having run nothing: no green to merge on (#265)
-                        raise EnvironmentRed(f"the retry ran under an environment that runs no recipe ({noop})")
-                if state == "undefined":  # no such command on this tree: the whole suite, as before
-                    log("the --retry command does not exist on this tree — rebuilding for the whole suite")
-                    ran = "full"
-                    state, merged, branch = attempt(aboard, kind="retry_full")
-                    aboard = merged
-            else:
-                state, merged, branch = attempt(aboard, kind="retry_full")
-                aboard = merged
-            searching = ""
-            if state == "green":
-                _end_round(measure, "gate-flaky" if ran == "gates" else "flaky")
-                if ran == "retry":
-                    # the suite ran whole on this tree and the retry re-ran what failed, green:
-                    # certified only when every stage of the scope has a green marker now — a
-                    # stage the first run never reached is no pass the retry made (#265, refute)
-                    if _every_stage_green(last_wt):
-                        _certify_merge(last_wt, suite, suite_before.get(last_wt), certificate_env or [], log,
-                                       merge_scope)
-                    else:
-                        log("retry green, but not every stage of the scope ran green on this tree — "
-                            "no merge certificate; the push runs the suite")
-                    print(f"train: green under the retry command `{retry}` (it re-ran only what failed), "
-                          f"red under the suite `{suite}` — flaky, or the two runs differ (flags, "
-                          f"environment); merging "
-                          f"(see {logfile}; {_load()})", file=sys.stderr)
-                    log(f"red under `{suite}`, then green under the retry command `{retry}` — flaky or "
-                        "the commands differ, merging")
-                elif ran == "gates":
-                    print("train: the gates were red, then green on the identical tree — a gate flake"
-                          + ("; the suite then ran green for the first time" if suite else "")
-                          + f"; merging (see {logfile}; {_load()})", file=sys.stderr)
-                    log("gates red then green on the identical tree — gate flake, merging")
-                else:
-                    print("train: FLAKY — the combined tree was red, then green on the identical tree; "
-                          f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
-                    log("red then green on the identical tree — flaky suite, merging")
-                if held_during_run():
+    # the abort rule's two exits (v2.95): a red fresh base is main's, a stop that blames
+    # nobody still reports who was dropped for a real red in an earlier round — on every
+    # environment stop of a round, the preflight's and a no-op suite's included
+    try:
+        while aboard:
+            # a round: the first run, and each one after a drop
+            rounds.append({"red_path": None, "runs": {}})
+            state, merged, branch = run_judged(aboard, kind="first")
+            aboard = merged
+            if state == "green" or not aboard:
+                _end_round(measure, "green" if state == "green" else "conflicts")
+                if state == "green" and held_during_run():
                     continue
                 break
-        # before blaming anybody: is the base itself red (a broken main)?
-        # Then no candidate is the offender.
-        searching = "bisect"
-        if check_base() == "red":
-            return _red_base()
-        if base_state == "undefined" and not told:
-            # a passenger introduces the suite (its make target): the base
-            # cannot be judged by it — that is not a red main
-            told = True
-            log("suite undefined on the base (a passenger introduces it) — base not comparable")
-            print(f"train: `{suite}` does not exist on the base — a passenger introduces it; "
-                  "the base is not judged red, the offender search continues")
-        # the combination is red: find the first candidate whose prefix turns
-        # it red (bisection over prefixes — O(log n) suite runs per offender),
-        # drop it, and try the rest. Order is boarding order, so "first red
-        # prefix" names the offender, not whoever happened to board last.
-        lo, hi = 1, len(aboard)
-        while lo < hi:
-            mid = (lo + hi) // 2
-            pstate, pmerged, _br = attempt(aboard[:mid], kind="probe")
-            # a prefix without the passenger that defines the suite cannot be
-            # judged by it — it is not the offender; where the base has the
-            # suite, a prefix without it lost it: red
-            if (pstate == "green" or (pstate == "undefined" and base_state == "undefined")) \
-                    and len(pmerged) == mid:
-                lo = mid + 1
-            else:
-                hi = mid
-        if lo == 1 and base_from_memo:
-            # every prefix red and the base green only by the memo: main may
-            # have turned red outside the tree (a host or dependency upgrade,
-            # a date) — run the base for real before the first passenger is
-            # blamed (refutation: otherwise each one is dropped in turn)
-            base_from_memo = False
-            log("first passenger about to be blamed on a remembered base — running the base")
-            base_state = attempt([], memo=False, kind="base")[0]
-            if base_state == "red":
+            if red_ids and state == "red" and "red_tests" not in rounds[-1]:
+                # read only, before any other run rebuilds the worktree: the board tree is this
+                # one (after an abort, the repeat's; "suite-aborted" when the base was built over it)
+                rounds[-1]["red_tests"] = "gates-red" if red_in == "gates" else \
+                    red_tests(last_wt, base, red_ids, red_cache)
+            if state == "undefined":
+                if check_base() == "undefined":
+                    _end_round(measure, "undefined")
+                    print(f"train: the suite `{suite}` does not exist on the combined tree — fix the suite "
+                          "command (merge_suite in docs/process/testing.local.json, or --suite where none "
+                          "is set); nothing merged", file=sys.stderr)
+                    log("suite undefined on the combined tree and on the base — aborted without blame")
+                    # an offender dropped earlier may have been the one that brought
+                    # the suite in: it still owes its fix, say so (downstream refutation)
+                    _report_dropped()
+                    _cleanup(root, stamp)
+                    return 1
+                # the base HAS the suite: a passenger removed or broke it (deleted
+                # the make target, a script with CRLF line ends) — red, and no
+                # flake re-run: a missing suite is not flaky (downstream refutation)
+                log(f"suite undefined on the combined tree but defined on the base ({base_state}) — "
+                    "a passenger removed or broke it: red")
+                print(f"train: `{suite}` exists on the base but not on the combined tree — a passenger "
+                      "removed or broke it; searching for it")
+                retried = True
+            searching = "retry"
+            if not retried:
+                # one more run of the SAME tree before anybody is blamed: red then
+                # green on identical code is a flaky test (observed downstream: a
+                # 5 s lock wait and a 5.1 s UI test under load 10 on 6 CPUs), not
+                # an offender — bisecting a flake blames whoever sits in the prefix
+                retried = True
+                how, why = retry_plan(red_in, retry)
+                if how != "full" and (last_wt is None or _changed_by_run(last_wt)):
+                    # the first run wrote into the tree (a snapshot baseline it
+                    # generated, a lockfile): the worktree is no longer the judged
+                    # tree, and a retry there could pass on that residue (refutation)
+                    how, why = "full", "the first run changed the worktree — rebuild and run the whole suite"
+                log(f"red — retry of the same combined tree: {how} — {why} ({_load()})")
+                # what the retry really ran decides what a green may claim (#263): only the
+                # same suite on the same tree is a flake; a narrower command is a subset
+                ran = "full"
+                if how == "gates" and last_wt is not None:
+                    ran = "gates"
+                    with counted("retry_gates"):
+                        state = "green" if timed("gates", _run_gates, last_wt, log, merge_target(last_wt)) else "red"
+                    if state == "green" and suite:
+                        red_in = "suite"
+                        # the suite never ran behind the red gates
+                        with counted("retry_full"):
+                            state = full_suite(last_wt, _suite_key(last_wt, suite, merge_scope), "retry_full")
+                        # the rule outside the `counted` block: its repeat counts as a run of its own.
+                        # A green repeat stays a gate flake, the suite ran green for the first time
+                        if state == "aborted":
+                            state, merged, branch = abort_rule(aboard, state, aboard, branch, kind="retry_full")
+                            aboard = merged
+                            if state != "green":
+                                ran = "full"
+                elif how == "failed" and last_wt is not None:
+                    ran = "retry"
+                    with counted("retry_failed"):
+                        state = timed("retry", _suite_run, last_wt, retry, "retry_failed")
+                        if state != "aborted":
+                            _collect_stage_times(last_wt, stages, stage_seen, log)
+                        noop = certificate.noop_problem()
+                        if noop and state == "green":
+                            # `make -n` exits 0 having run nothing: no green to merge on (#265)
+                            raise EnvironmentRed(f"the retry ran under an environment that runs no recipe ({noop})")
+                    if state == "aborted":
+                        # the repeat rebuilds the tree and runs the whole suite: `--retry` does not
+                        # run again, and a green is the full suite's
+                        ran = "full"
+                        state, merged, branch = abort_rule(aboard, state, aboard, branch, kind="retry_failed")
+                        aboard = merged
+                    if state == "undefined" and ran == "retry":  # no such command on this tree: the whole suite
+                        log("the --retry command does not exist on this tree — rebuilding for the whole suite")
+                        ran = "full"
+                        state, merged, branch = run_judged(aboard, kind="retry_full")
+                        aboard = merged
+                else:
+                    state, merged, branch = run_judged(aboard, kind="retry_full")
+                    aboard = merged
+                searching = ""
+                if state == "green":
+                    _end_round(measure, "gate-flaky" if ran == "gates" else "flaky")
+                    if ran == "retry":
+                        # the suite ran whole on this tree and the retry re-ran what failed, green:
+                        # certified only when every stage of the scope has a green marker now — a
+                        # stage the first run never reached is no pass the retry made (#265, refute)
+                        if _every_stage_green(last_wt):
+                            _certify_merge(last_wt, suite, suite_before.get(last_wt), certificate_env or [], log,
+                                           merge_scope)
+                        else:
+                            log("retry green, but not every stage of the scope ran green on this tree — "
+                                "no merge certificate; the push runs the suite")
+                        print(f"train: green under the retry command `{retry}` (it re-ran only what failed), "
+                              f"red under the suite `{suite}` — flaky, or the two runs differ (flags, "
+                              f"environment); merging "
+                              f"(see {logfile}; {_load()})", file=sys.stderr)
+                        log(f"red under `{suite}`, then green under the retry command `{retry}` — flaky or "
+                            "the commands differ, merging")
+                    elif ran == "gates":
+                        print("train: the gates were red, then green on the identical tree — a gate flake"
+                              + ("; the suite then ran green for the first time" if suite else "")
+                              + f"; merging (see {logfile}; {_load()})", file=sys.stderr)
+                        log("gates red then green on the identical tree — gate flake, merging")
+                    else:
+                        print("train: FLAKY — the combined tree was red, then green on the identical tree; "
+                              f"merging, but the suite has a flaky test (see {logfile}; {_load()})", file=sys.stderr)
+                        log("red then green on the identical tree — flaky suite, merging")
+                    if held_during_run():
+                        continue
+                    break
+            # before blaming anybody: is the base itself red (a broken main)?
+            # Then no candidate is the offender.
+            searching = "bisect"
+            if check_base() == "red":
                 return _red_base()
-        offender = aboard[lo - 1]
-        blamed.append(offender)
-        # the rest is a new combination: it earns its own flake re-run (the
-        # base does not change — its verdict is kept)
-        retried = False
-        searching = ""
-        log(f"red with {offender} aboard — dropped, rebuilding")
-        print(f"train: red with {offender} aboard — dropping it and rebuilding")
-        aboard = [b for b in aboard if b != offender]
-        _end_round(measure, f"dropped:{offender}")
+            if base_state == "undefined" and not told:
+                # a passenger introduces the suite (its make target): the base
+                # cannot be judged by it — that is not a red main
+                told = True
+                log("suite undefined on the base (a passenger introduces it) — base not comparable")
+                print(f"train: `{suite}` does not exist on the base — a passenger introduces it; "
+                      "the base is not judged red, the offender search continues")
+            # the combination is red: find the first candidate whose prefix turns
+            # it red (bisection over prefixes — O(log n) suite runs per offender),
+            # drop it, and try the rest. Order is boarding order, so "first red
+            # prefix" names the offender, not whoever happened to board last.
+            lo, hi = 1, len(aboard)
+            while lo < hi:
+                mid = (lo + hi) // 2
+                pstate, pmerged, _br = run_judged(aboard[:mid], kind="probe")
+                # a prefix without the passenger that defines the suite cannot be
+                # judged by it — it is not the offender; where the base has the
+                # suite, a prefix without it lost it: red
+                if (pstate == "green" or (pstate == "undefined" and base_state == "undefined")) \
+                        and len(pmerged) == mid:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            if lo == 1 and base_from_memo:
+                # every prefix red and the base green only by the memo: main may
+                # have turned red outside the tree (a host or dependency upgrade,
+                # a date) — run the base for real before the first passenger is
+                # blamed (refutation: otherwise each one is dropped in turn)
+                base_from_memo = False
+                log("first passenger about to be blamed on a remembered base — running the base")
+                base_state = run_judged([], kind="base", memo=False)[0]
+                if base_state == "red":
+                    return _red_base()
+            offender = aboard[lo - 1]
+            blamed.append(offender)
+            # the rest is a new combination: it earns its own flake re-run (the
+            # base does not change — its verdict is kept)
+            retried = False
+            searching = ""
+            log(f"red with {offender} aboard — dropped, rebuilding")
+            print(f"train: red with {offender} aboard — dropping it and rebuilding")
+            aboard = [b for b in aboard if b != offender]
+            _end_round(measure, f"dropped:{offender}")
+    except BaseRed as red_base:
+        return _red_base(aborted=str(red_base))
+    except EnvironmentRed:
+        _report_dropped()
+        raise
     if not aboard:
         if rounds and str(rounds[-1]["red_path"]).startswith("dropped:"):
             _end_round(measure, "none-survived")  # the last drop left nobody aboard

@@ -575,7 +575,7 @@ def test_after_a_drop_the_rest_gets_its_own_flake_rerun(render, tmp_path, monkey
     wt.mkdir()
     monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (wt, "train/x", list(subset), []))
     monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, **kw: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(train, "_out", lambda *a, **k: "")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
@@ -792,17 +792,31 @@ _SUITE_TABLE = [
     ("output redirected away from the train", "make test > log 2>&1", 2, [], "0", "red", "exit 2"),
     ("a target spelled through the shell", "make test-$${X:-new}", 2,
      ["make: *** No rule to make target 'test-4242{X:-new}'.  Stop."], "0", "red", "exit 2"),
+    # v2.95: the run marked itself aborted (`$PROCESS_SUITE_ABORT`, the last column: its lines),
+    # or the suite refused to run (exit 75 at the top) — no finding about the tree
+    ("a marker on a red run", "make test", 2, ["make: *** [Makefile:2: test] Error 1"], "0", "aborted",
+     "a run aborted: watchdog tests/t.py::a 10 8.2", None, ("watchdog tests/t.py::a 10 8.2", "a second line")),
+    ("a lane abort under make -k writes the marker", "make -k test", 2,
+     ["make: *** [Makefile:2: test] Error 75"], "0", "aborted", "a run aborted: lane-busy full", None,
+     ("lane-busy full held by pid 7",)),
+    ("a marker beside a missing suite", "./scripts/x.sh", 127, ["sh: 1: ./scripts/x.sh: not found"], "0",
+     "aborted", "a run aborted: nested-timeout", None, ("nested-timeout t::x 30",)),
+    ("exit 0 wins over a marker", "make test", 0, [], "0", "green", "exit 0", None, ("watchdog t::x 10 9.0",)),
+    ("exit 75 at the top", "./scripts/lanes.sh", 75, [], "0", "aborted",
+     "a run aborted: exit 75 (EX_TEMPFAIL), the suite refused to run", None, ()),
+    ("exit 75 under make without a marker", "make -k test", 2, ["make: *** [Makefile:2: test] Error 75"],
+     "0", "red", "defined target", None, ()),
 ]
-_SUITE_TABLE = [r if len(r) == 8 else (*r, None) for r in _SUITE_TABLE]
+_SUITE_TABLE = [(*r, *(None, ())[len(r) - 7:]) for r in _SUITE_TABLE]
 
 
-@pytest.mark.parametrize("case,cmd,rc,output,level,state,words,present", _SUITE_TABLE,
+@pytest.mark.parametrize("case,cmd,rc,output,level,state,words,present,abort", _SUITE_TABLE,
                          ids=[r[0] for r in _SUITE_TABLE])
-def test_suite_decide_table(render, tmp_path, case, cmd, rc, output, level, state, words, present):
+def test_suite_decide_table(render, tmp_path, case, cmd, rc, output, level, state, words, present, abort):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     train = _load_train(out)
     exists = None if present is None else present.__contains__
-    got, reason = train.decide(train.read_facts(cmd, rc, output, level, exists))
+    got, reason = train.decide(train.read_facts(cmd, rc, output, level, exists, abort=abort))
     assert (got, words in reason) == (state, True), (case, got, reason)
 
 
@@ -813,8 +827,9 @@ def test_every_row_of_decide_has_a_table_case(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     train = _load_train(out)
     reasons = re.findall(r'return "\w+", f?"([^"{]+)', inspect.getsource(train.decide))
-    reached = {train.decide(train.read_facts(c, rc, o, lv, None if p is None else p.__contains__))[1]
-               for _n, c, rc, o, lv, _s, _w, p in _SUITE_TABLE}
+    reached = {train.decide(train.read_facts(c, rc, o, lv, None if p is None else p.__contains__, abort=a))[1]
+               for _n, c, rc, o, lv, _s, _w, p, a in _SUITE_TABLE}
+    assert any(r.startswith("a run aborted") for r in reasons), reasons  # v2.95: the rows exist
     for r in reasons:
         assert any(x.startswith(r) for x in reached), r
 
@@ -965,7 +980,7 @@ def test_a_suite_the_base_has_but_the_combined_tree_lost_is_red(render, tmp_path
     written = []
     monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (wt, "train/x", list(subset), []))
     monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, **kw: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(train, "_out", lambda *a, **k: "")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
@@ -1007,7 +1022,7 @@ def test_an_offender_that_brought_the_suite_is_still_reported(render, tmp_path, 
         return wt, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
     monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: next(states))
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, **kw: next(states))
     monkeypatch.setattr(train, "_git", lambda *a, **k: SimpleNamespace(returncode=0, stdout="", stderr=""))
     monkeypatch.setattr(train, "_out", lambda *a, **k: "")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
@@ -2032,7 +2047,7 @@ def _memo_batch(render, tmp_path, monkeypatch, *, seen, red):
         return out, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
     monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(list(current)) or
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, **kw: runs.append(list(current)) or
                         ("red" if red(current) else "green"))
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda root, state, *a, **k: written.append(state))
@@ -2107,7 +2122,7 @@ def _retry_batch_with(train, render, tmp_path, monkeypatch, *, retry, sh):
         return out, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
     monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or sh(cmd, len(runs)))
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, **kw: runs.append(cmd) or sh(cmd, len(runs)))
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
     p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
@@ -2222,7 +2237,7 @@ def test_red_gates_rerun_the_gates_on_the_same_tree_then_the_suite(render, tmp_p
     monkeypatch.setattr(train, "build_train",
                         lambda root, base, subset, stamp, log, **kw: builds.append(1) or (out, "train/x", list(subset), []))
     monkeypatch.setattr(train, "_run_gates", lambda *a, **k: next(gates))
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(cmd) or "green")
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, **kw: runs.append(cmd) or "green")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
     p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
@@ -2268,7 +2283,7 @@ def test_a_tree_this_train_saw_green_is_not_run_again_after_the_drop(render, tmp
         return out, "train/x", list(subset), []
     monkeypatch.setattr(train, "build_train", build)
     monkeypatch.setattr(train, "_run_gates", lambda *a, **k: True)
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: runs.append(list(current)) or
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, **kw: runs.append(list(current)) or
                         ("red" if "b2" in current else "green"))
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
@@ -2718,7 +2733,7 @@ def test_red_gates_then_green_are_a_gate_flake_not_a_flaky_suite(render, tmp_pat
     gates = iter([False, True, True, True])
     monkeypatch.setattr(train, "build_train", lambda root, base, subset, stamp, log, **kw: (out, "train/x", list(subset), []))
     monkeypatch.setattr(train, "_run_gates", lambda *a, **k: next(gates))
-    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log: "green")
+    monkeypatch.setattr(train, "_sh", lambda cwd, cmd, log, **kw: "green")
     monkeypatch.setattr(train, "_cleanup", lambda *a: None)
     monkeypatch.setattr(train, "_write", lambda *a, **k: None)
     p = {"base": "main", "candidates": [{"branch": "b1", "hours_waiting": 1}]}
@@ -2998,7 +3013,7 @@ def _measured(render, tmp_path, monkeypatch, *, sh, n=2, gates=None, retry=None,
         _git(out, "checkout", "-q", {0: "main", 1: "one", 2: "both"}[len(merged)])
         return out, "train/x", merged, dropped
 
-    def fake_sh(cwd, cmd, log, *a):
+    def fake_sh(cwd, cmd, log, *a, **kw):
         calls.append((tuple(current), cmd))
         time.sleep(0.01)
         return sh(tuple(current), cmd, len(calls))
@@ -4364,6 +4379,466 @@ def test_a_second_holding_run_overwrites_the_hold_log(render, tmp_path):
     held = (out / ".git/process-train/last-hold.txt").read_text()
     assert "waiting for 6" in held and "waiting for 5" not in held, held
     assert held.count("holding") == 1, held
+
+
+# --- v2.95: a load abort is no finding about a passenger ------------------------------------
+
+_ABORT_LINE = "watchdog tests/test_x.py::test_slow 10 8.2"
+_MARK = f"printf '%s\\n' '{_ABORT_LINE}' >> \"$PROCESS_SUITE_ABORT\""
+# what the fake suite runs for each answer: a real command under the real `_sh`, so an abort is
+# the line the command appends to `$PROCESS_SUITE_ABORT`, judged by `decide` — before v2.95 the
+# variable is unset, the append fails and the run reads red
+_OUTCOME_CMD = {
+    "green": "true",
+    "red": "exit 1",
+    "undefined": "./scripts/not-on-this-tree.sh",
+    "abort": f"{_MARK}; exit 1",
+}
+
+
+def _lastfailed_cmd(node_id: str) -> str:
+    return ("mkdir -p .pytest_cache/v/cache && "
+            f"printf '{{\"{node_id}\": true}}' > .pytest_cache/v/cache/lastfailed")
+
+
+_TREES = (("one", {"a.txt": "a\n"}),
+          ("both", {"a.txt": "a\n", "tests/test_new.py": "def test_n():\n    pass\n"}),
+          ("three", {"a.txt": "a\n", "tests/test_new.py": "def test_n():\n    pass\n", "c.txt": "c\n"}))
+
+
+def _aborting(render, tmp_path, monkeypatch, *, sh, n=2, retry=None, red_ids=None, seen=False, gates=None,
+              load=(0.0, 0.0, 0.0), via_run=False):
+    """b1..bn judged on real trees — main, one = [b1], both = [b1, b2], three — with a suite
+    that answers `sh(subset, cmd, nth)`: green, red, undefined, abort or a command of its own,
+    run by the real `_sh`. The load is `load` on the host's CPUs; the wait's clock and sleep
+    are fake. `via_run`: through `run()`, with `plan` answering the candidates. Returns a
+    namespace: the rounds, the `_sh` calls, the log, rc, the EnvironmentRed raised, the
+    `blocked` reports, the phases and what went to stderr."""
+    import io
+    from types import SimpleNamespace
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    with (out / ".gitignore").open("a") as fh:
+        fh.write("\n.pytest_cache/\n")
+    _repo(out)
+    train = _load_train(out)
+    if seen:
+        train._remember_green_suite(out, train._suite_key(out, "s"))
+    for name, files in _TREES:
+        _git(out, "checkout", "-q", "-b", name, "main")
+        for rel, text in files.items():
+            (out / rel).parent.mkdir(parents=True, exist_ok=True)
+            (out / rel).write_text(text)
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", name)
+    _git(out, "checkout", "-q", "main")
+    current, calls, written = [], [], []
+    real_sh = train._sh
+
+    def build(root, base, subset, stamp, log, **kw):
+        current[:] = subset
+        _git(out, "checkout", "-q", ("main", "one", "both", "three")[len(subset)])
+        return out, "train/x", list(subset), []
+
+    def fake_sh(cwd, cmd, log, *a, **kw):
+        calls.append((tuple(current), cmd))
+        answer = sh(tuple(current), cmd, len(calls))
+        return real_sh(cwd, _OUTCOME_CMD.get(answer, answer), log, *a, **kw)
+    clock = [0.0]
+    monkeypatch.setattr(train, "_abort_clock", lambda: clock[0])
+    monkeypatch.setattr(train, "_abort_sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setattr(train.os, "getloadavg", lambda: load, raising=False)
+    monkeypatch.setattr(train, "build_train", build)
+    gate = iter(gates) if gates is not None else None
+    monkeypatch.setattr(train, "_run_gates", lambda *a, **k: next(gate, True) if gate else True)
+    monkeypatch.setattr(train, "_sh", fake_sh)
+    monkeypatch.setattr(train, "_cleanup", lambda *a: None)
+    monkeypatch.setattr(train, "_write", lambda root, state, note, worker: written.append((state, worker)))
+    branches = [f"b{i}" for i in range(1, n + 1)]
+    p = {"base": "main", "ready": True, "why": "forced",
+         "candidates": [{"branch": b, "hours_waiting": n - i, "eligible": True} for i, b in enumerate(branches)]}
+    measure: dict = {}
+    phases: dict = {}
+    rc = raised = None
+    err, old_err = io.StringIO(), sys.stderr
+    sys.stderr = err
+    try:
+        if via_run:
+            monkeypatch.setattr(train, "plan", lambda root, **kw: p)
+            rc = train.run(out, suite="s", deploy=None, push=False, min_candidates=1, max_wait_hours=0,
+                           force=True, keep_branches=True, dry_run=False, retry=retry, red_ids=red_ids)
+        else:
+            rc = train._run_batch(out, "main", p, list(branches), "x", tmp_path / "t.log", suite="s",
+                                  deploy=None, push=False, keep_branches=True, retry=retry, measure=measure,
+                                  red_ids=red_ids, phases=phases)
+    except SystemExit:
+        rc = None  # the stub train/x cannot be fast-forwarded: the judging is done
+    except train.EnvironmentRed as exc:
+        raised = exc
+    finally:
+        sys.stderr = old_err
+    if via_run:
+        row = _phases(out)[-1]
+        measure, phases = {"rounds": row["rounds"]}, row
+        logs = sorted((out / ".git/process-train").glob("2*.log"))
+        log = logs[-1].read_text() if logs else ""
+    else:
+        log = (tmp_path / "t.log").read_text() if (tmp_path / "t.log").exists() else ""
+    return SimpleNamespace(train=train, out=out, measure=measure, calls=calls, log=log, rc=rc, raised=raised,
+                           written=written, phases=phases, err=err.getvalue())
+
+
+def _subsets(r) -> list[tuple[str, ...]]:
+    return [sub for sub, _cmd in r.calls]
+
+
+def _round_aborts(r, i: int = 0) -> list[tuple[str, object]]:
+    return [(a["reason"], a["ended"]) for a in r.measure["rounds"][i].get("aborts", [])]
+
+
+def test_a_first_run_that_aborts_is_repeated_and_a_green_repeat_merges(render, tmp_path, monkeypatch):
+    """Plan test 2: the first run aborted, its repeat green — merged, nobody blamed, the
+    round ends green and keeps its abort."""
+    r = _aborting(render, tmp_path, monkeypatch, n=1, sh=lambda sub, cmd, nth: "abort" if nth == 1 else "green")
+    assert r.rc is None and r.raised is None and r.written == [], r.err
+    assert _shape(r.measure) == [("green", {"first": 1, "retry_abort": 1})]
+    assert _subsets(r) == [("b1",), ("b1",)]
+    aborts = r.measure["rounds"][0]["aborts"]
+    assert [(a["reason"], a["ended"], a["wait_s"]) for a in aborts] == [(_ABORT_LINE, "load", 0.0)]
+    assert f"a run aborted: {_ABORT_LINE}" in r.log
+
+
+def test_a_red_repeat_without_marker_takes_todays_path(render, tmp_path, monkeypatch):
+    """Plan test 3: the repeat is red without a marker — the retry plan, the base, the search:
+    the real offender b2 is dropped; the red tests are read from the rebuilt tree."""
+    def sh(sub, cmd, nth):
+        if nth == 1:  # the aborted run leaves a lastfailed of its own
+            return f"{_lastfailed_cmd('tests/test_x.py::test_slow')}; {_MARK}; exit 1"
+        if "b2" in sub:
+            return f"{_lastfailed_cmd('tests/test_new.py::test_n')}; exit 1"
+        return "green"
+    red_ids = [{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}]
+    r = _aborting(render, tmp_path, monkeypatch, sh=sh, red_ids=red_ids)
+    assert r.rc is None and r.measure["rounds"][0]["red_path"] == "dropped:b2", r.err  # merged: the rest
+    assert _shape(r.measure) == [("dropped:b2", {"first": 1, "retry_abort": 1, "retry_full": 1, "base": 1,
+                                                 "probe": 1}), ("green", {"first": 1})]
+    ids = r.measure["rounds"][0]["red_tests"]["sources"][0]["ids"]
+    assert ids == {"tests/test_new.py::test_n": False}, ids  # the repeat's tree, not the aborted run's
+
+
+@pytest.mark.parametrize("retry", [None, "make retry"])
+def test_a_test_that_always_aborts_on_a_green_base_is_red_and_its_passenger_dropped(
+        render, tmp_path, monkeypatch, retry):
+    """Plan test 4: b2 brings a test that writes the marker on every run. The run, its repeat,
+    a fresh green base, then the search — an "aborted is red" shortcut runs the retry plan
+    instead. With --retry: the retry command never runs on the base's tree, no "flaky"."""
+    red_ids = [{"lastfailed": LASTFAILED, "rootdir": ".", "stage": None}]
+    r = _aborting(render, tmp_path, monkeypatch, retry=retry, red_ids=red_ids,
+                  sh=lambda sub, cmd, nth: "abort" if "b2" in sub else "green")
+    assert r.rc is None and r.measure["rounds"][0]["red_path"] == "dropped:b2", r.err  # merged: the rest
+    assert _subsets(r)[:4] == [("b1", "b2"), ("b1", "b2"), (), ("b1",)]
+    assert _shape(r.measure)[0] == ("dropped:b2", {"first": 1, "retry_abort": 1, "base": 1, "probe": 1})
+    assert r.measure["rounds"][0]["red_tests"] == "suite-aborted"
+    assert [cmd for _s, cmd in r.calls] == ["s"] * len(r.calls)  # never `make retry`
+    assert "flaky" not in r.log.lower() and "FLAKY" not in r.err
+    assert _round_aborts(r) == [(_ABORT_LINE, "load"), (_ABORT_LINE, None)]
+
+
+def test_a_load_that_aborts_everything_ends_suite_aborted_and_blames_nobody(render, tmp_path, monkeypatch):
+    """Plan test 5: run, repeat, base and its repeat abort — `suite-aborted`, result
+    `environment`, nobody blamed, nothing merged."""
+    r = _aborting(render, tmp_path, monkeypatch, via_run=True, sh=lambda sub, cmd, nth: "abort")
+    assert r.rc == 1 and r.written == [], r.err
+    assert r.phases["result"] == "environment" and r.phases["branches"] == []
+    assert _shape(r.measure) == [("suite-aborted", {"first": 1, "retry_abort": 2, "base": 1})]
+    assert "nobody is blamed" in r.err and _ABORT_LINE in r.err, r.err
+
+
+def test_run_ends_suite_aborted_and_reports_who_was_dropped_before(render, tmp_path, monkeypatch):
+    """Plan test 15: `SuiteAborted` ends the round `suite-aborted` (not `environment`), and
+    the passenger dropped for a real red in an earlier round gets its report."""
+    r = _aborting(render, tmp_path, monkeypatch, via_run=True,
+                  sh=lambda sub, cmd, nth: ("red" if "b1" in sub else "green") if nth <= 4 else "abort")
+    assert r.rc == 1 and r.written == [("blocked", "b1")], (r.written, r.err)
+    assert [x["red_path"] for x in r.measure["rounds"]] == ["dropped:b1", "suite-aborted"]
+    assert r.phases["result"] == "environment"
+
+
+def test_a_base_that_aborts_after_an_undefined_first_run_blames_nobody(render, tmp_path, monkeypatch):
+    """Plan test 6: the first run undefined, the base aborts twice — suite-aborted."""
+    r = _aborting(render, tmp_path, monkeypatch, n=1, sh=lambda sub, cmd, nth: "undefined" if sub else "abort")
+    assert isinstance(r.raised, r.train.SuiteAborted) and r.written == [], r.err
+    assert _subsets(r) == [("b1",), (), ()]
+
+
+def test_a_base_that_aborts_before_the_search_blames_nobody(render, tmp_path, monkeypatch):
+    r = _aborting(render, tmp_path, monkeypatch, n=1, sh=lambda sub, cmd, nth: "red" if sub else "abort")
+    assert isinstance(r.raised, r.train.SuiteAborted) and r.written == [], r.err
+    assert _shape(r.measure) == [(None, {"first": 1, "retry_full": 1, "base": 1, "retry_abort": 1})]
+
+
+def test_the_guard_before_the_first_blame_repeats_without_the_memo(render, tmp_path, monkeypatch):
+    """Plan test 6 (r3, M1b): the base came from the memo; the real base run before the first
+    blame aborts — its repeat runs without the memo too, aborts, and nobody is blamed."""
+    r = _aborting(render, tmp_path, monkeypatch, n=1, seen=True, sh=lambda sub, cmd, nth: "red" if sub else "abort")
+    assert isinstance(r.raised, r.train.SuiteAborted) and r.written == [], (r.written, r.err)
+    assert _subsets(r) == [("b1",), ("b1",), (), ()]
+
+
+@pytest.mark.parametrize("repeat, blamed, runs", [
+    ("green", "b2", [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",)]),
+    ("red", "b1", [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",), ("b2",)]),
+    # the repeat aborts too: a fresh base, green — the probe counts red
+    ("abort", "b1", [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",), (), ("b2",)]),
+])
+def test_a_probe_that_aborts_is_repeated(render, tmp_path, monkeypatch, repeat, blamed, runs):
+    """Plan test 6: a probe aborts; its repeat green, red, or aborted on a green base."""
+    r = _aborting(render, tmp_path, monkeypatch,
+                  sh=lambda sub, cmd, nth: {1: "red", 2: "red", 3: "green", 4: "abort", 5: repeat}.get(nth, "green"))
+    assert r.rc is None and r.measure["rounds"][0]["red_path"] == f"dropped:{blamed}", r.err
+    assert _subsets(r) == runs
+
+
+def test_the_fresh_base_and_its_repeat_skip_this_trains_green(render, tmp_path, monkeypatch):
+    """Plan test 6 (r2, M3a; r3, M1a): the base ran green earlier in this train; a probe aborts
+    twice — the base runs fresh, and so does its repeat; both abort: suite-aborted."""
+    r = _aborting(render, tmp_path, monkeypatch,
+                  sh=lambda sub, cmd, nth: {1: "red", 2: "red", 3: "green"}.get(nth, "abort"))
+    assert isinstance(r.raised, r.train.SuiteAborted) and r.written == [], (r.written, r.err)
+    assert _subsets(r) == [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",), (), ()]
+
+
+def test_a_probe_that_aborts_on_a_red_fresh_base_ends_base_red(render, tmp_path, monkeypatch):
+    """Plan test 6 (r2, M3b; r3, m4, n4): nobody blamed in this round, the passenger dropped
+    in the round before is reported, and the message says the run aborted."""
+    answers = {8: "abort", 9: "abort", 3: "green"}
+    r = _aborting(render, tmp_path, monkeypatch, n=3, sh=lambda sub, cmd, nth: answers.get(nth, "red"))
+    assert r.rc == 1 and r.raised is None and r.written == [("blocked", "b1")], (r.written, r.err)
+    assert [x["red_path"] for x in r.measure["rounds"]] == ["dropped:b1", "base-red"]
+    assert _subsets(r)[-3:] == [("b2",), ("b2",), ()]
+    assert "aborted" in r.err and "fix main first" in r.err and "the combined tree is red" not in r.err, r.err
+
+
+def test_an_abort_on_an_undefined_base_blames_nobody(render, tmp_path, monkeypatch):
+    """Plan test 6 (r3, m2): a passenger brings the suite; a probe aborts twice — hang and
+    load cannot be told apart: suite-aborted, no fresh base."""
+    r = _aborting(render, tmp_path, monkeypatch,
+                  sh=lambda sub, cmd, nth: "undefined" if not sub else ("abort" if sub == ("b1",) else "red"))
+    assert isinstance(r.raised, r.train.SuiteAborted) and r.written == [], (r.written, r.err)
+    assert _subsets(r) == [("b1", "b2"), ("b1", "b2"), (), ("b1",), ("b1",)]
+
+
+def test_an_aborted_failed_retry_is_repeated_on_a_rebuilt_tree(render, tmp_path, monkeypatch):
+    """Plan tests 6 and 11: `--retry` aborts; the repeat is the whole suite on a rebuilt tree,
+    outside the `counted` block (no exception), and its green is a flake of the full suite."""
+    r = _aborting(render, tmp_path, monkeypatch, n=1, retry="make retry",
+                  sh=lambda sub, cmd, nth: {1: "red", 2: "abort"}.get(nth, "green"))
+    assert r.rc is None and r.raised is None and r.written == [], r.err
+    assert _shape(r.measure) == [("flaky", {"first": 1, "retry_failed": 1, "retry_abort": 1})]
+    assert [cmd for _s, cmd in r.calls] == ["s", "make retry", "s"]
+    assert "FLAKY" in r.err and "under the retry command" not in r.err, r.err
+
+
+def test_an_aborted_suite_behind_a_gates_retry_is_repeated_and_stays_a_gate_flake(render, tmp_path, monkeypatch):
+    """Plan test 6 (r3, n3): the gates red, then green; the suite behind them aborts; the
+    repeat is green — the message speaks of a gate flake."""
+    r = _aborting(render, tmp_path, monkeypatch, n=1, gates=[False],
+                  sh=lambda sub, cmd, nth: "abort" if nth == 1 else "green")
+    assert r.rc is None and r.raised is None and r.written == [], r.err
+    assert _shape(r.measure) == [("gate-flaky", {"first": 1, "retry_gates": 1, "retry_full": 1, "retry_abort": 1})]
+    assert "a gate flake" in r.err, r.err
+
+
+def test_an_aborted_run_feeds_no_memo_certificate_or_stage_times(render, tmp_path, monkeypatch):
+    """Plan test 10."""
+    from types import SimpleNamespace
+    seen = SimpleNamespace(memo=[], cert=[], stages=[])
+    real_load = _load_train
+
+    def load(out):
+        train = real_load(out)
+        monkeypatch.setattr(train, "_remember_green_suite", lambda *a: seen.memo.append(a))
+        monkeypatch.setattr(train, "_certify_merge", lambda *a, **k: seen.cert.append(a))
+        monkeypatch.setattr(train, "_collect_stage_times", lambda *a: seen.stages.append(a))
+        return train
+    monkeypatch.setitem(globals(), "_load_train", load)
+    r = _aborting(render, tmp_path, monkeypatch, n=1, sh=lambda sub, cmd, nth: "abort")
+    assert isinstance(r.raised, r.train.SuiteAborted)
+    assert seen.memo == [] and seen.cert == [] and seen.stages == []
+    assert len(r.calls) == 4 and "earlier in this train" not in r.log
+
+
+def test_the_wait_for_the_load_is_bounded_and_recorded(render, tmp_path, monkeypatch):
+    """Plan test 9: the load never falls below the CPUs — the wait ends at its bound, in the
+    round's `aborts` and the `abort_wait` phase."""
+    r = _aborting(render, tmp_path, monkeypatch, n=1, load=(1000.0, 1000.0, 1000.0),
+                  sh=lambda sub, cmd, nth: "abort" if nth == 1 else "green")
+    aborts = r.measure["rounds"][0]["aborts"]
+    assert [(a["wait_s"], a["ended"]) for a in aborts] == [(600.0, "budget")], aborts
+    assert r.phases["abort_wait"] == 600.0 and "abort_wait" in r.train.PHASES
+
+
+def _fake_clock():
+    now = [0.0]
+    slept: list[float] = []
+
+    def sleep(s):
+        slept.append(s)
+        now[0] += s
+    return (lambda: now[0]), sleep, slept
+
+
+def test_wait_for_load_ends_when_the_load_falls(render, tmp_path, monkeypatch):
+    train = _load_train(render(tmp_path / "repo", {"project_name": "d", "modules": {}}))
+    clock, sleep, slept = _fake_clock()
+    loads = iter([9.0, 9.0, 1.0])
+    monkeypatch.setattr(train.os, "getloadavg", lambda: (next(loads), 0.0, 0.0), raising=False)
+    monkeypatch.setattr(train.os, "sched_getaffinity", lambda pid: {0, 1, 2, 3}, raising=False)
+    lines: list[str] = []
+    waited, ended = train.wait_for_load(lines.append, clock=clock, sleep=sleep)
+    assert ended == "load" and waited == 2 * train.ABORT_POLL_S and slept == [train.ABORT_POLL_S] * 2
+    assert train.ABORT_WAIT_S == 600 and train.ABORT_RETRIES == 1
+
+
+@pytest.mark.parametrize("missing", ["getloadavg", "oserror", "cpus"])
+def test_without_a_load_or_a_cpu_count_nothing_waits_and_the_log_says_so(render, tmp_path, monkeypatch, missing):
+    train = _load_train(render(tmp_path / "repo", {"project_name": "d", "modules": {}}))
+    clock, sleep, slept = _fake_clock()
+    if missing == "getloadavg":
+        monkeypatch.delattr(train.os, "getloadavg", raising=False)
+    elif missing == "oserror":
+        def broken():
+            raise OSError("no load")
+        monkeypatch.setattr(train.os, "getloadavg", broken, raising=False)
+    else:
+        monkeypatch.setattr(train.os, "getloadavg", lambda: (9.0, 0.0, 0.0), raising=False)
+        monkeypatch.delattr(train.os, "sched_getaffinity", raising=False)
+        monkeypatch.setattr(train.os, "cpu_count", lambda: None)
+    lines: list[str] = []
+    waited, ended = train.wait_for_load(lines.append, clock=clock, sleep=sleep)
+    assert (waited, ended, slept) == (0.0, "unread", []) and lines and "no wait" in lines[0], lines
+    assert train._load()  # the red verdict's load note never raises either
+
+
+def _marker_dir(out: Path) -> Path:
+    return out / ".git/process-train/suite-abort"
+
+
+def test_marked_runs_read_only_their_own_path(render, tmp_path, monkeypatch):
+    """Plan tests 8 and 16: a marker elsewhere is not read; the marker of run n-1 does not
+    count for run n; a writer after the cleanup creates no file; exit 0 with a marker is green."""
+    import importlib.util
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    log = lambda _l: None  # noqa: E731
+    elsewhere = tmp_path / "elsewhere"
+    # beside its own path: another file in the folder, a fixed path
+    cmd = f"printf 'x\\n' >> \"$PROCESS_SUITE_ABORT.other\"; printf 'x\\n' >> {elsewhere}; exit 1"
+    assert train._marked_sh(out, "x", out, cmd, log) == ("red", "")
+    # run n-1 leaves a late writer behind; run n stays red
+    late = (f"P=\"$PROCESS_SUITE_ABORT\"; echo \"$P\" > {tmp_path / 'late-path'}; "
+            "(sleep 0.3; printf 'late\\n' >> \"$P\") >/dev/null 2>&1 & exit 1")
+    assert train._marked_sh(out, "x", out, late, log)[0] == "red"
+    assert train._marked_sh(out, "x", out, "sleep 0.8; exit 1", log)[0] == "red"
+    first = Path((tmp_path / "late-path").read_text().strip())
+    # a writer that keeps the contract (append, no create) after the cleanup creates nothing
+    assert train._marked_sh(out, "x", out, f"echo \"$PROCESS_SUITE_ABORT\" > {tmp_path / 'p'}; exit 1",
+                            log)[0] == "red"
+    gone = Path((tmp_path / "p").read_text().strip())
+    spec = importlib.util.spec_from_file_location("lane_under_test", out / "scripts/process/lane.py")
+    lane = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lane)
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(gone))
+    lane._note_suite_abort("full", "held by pid 1")
+    assert not gone.exists() and first.parent == gone.parent == _marker_dir(out)
+    assert first != gone and first.name.startswith(f"x-{os.getpid()}.")
+    # green wins: exit 0 with a marker
+    assert train._marked_sh(out, "x", out, f"{_MARK}; exit 0", log) == ("green", "")
+    train._clear_aborts(out, "x")
+    assert list(_marker_dir(out).iterdir()) == []
+
+
+def test_exit_75_is_an_abort_at_the_top_and_red_under_make_without_a_marker(render, tmp_path, monkeypatch):
+    """Plan test 1, under real make."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    tree = _real_make(monkeypatch, tmp_path)
+    (tree / "Makefile").write_text(
+        "test:\n\texit 75\nmarked:\n\tprintf 'lane-busy full x\\n' >> \"$$PROCESS_SUITE_ABORT\"; exit 75\n")
+    log = lambda _l: None  # noqa: E731
+    assert train._sh(tree, "exit 75", log) == "aborted"
+    assert train._sh(tree, "make -k test", log) == "red"
+    assert train._marked_sh(out, "x", tree, "make -k test", log) == ("red", "")
+    assert train._marked_sh(out, "x", tree, "make -k marked", log) == ("aborted", "lane-busy full x")
+
+
+def test_the_suite_variable_reaches_the_suite_and_nothing_else(render, tmp_path, monkeypatch, capsys):
+    """Plan test 8: gates, preflight, deploy and the push hook never see PROCESS_SUITE_ABORT,
+    even when the parent carries it; the suite sees its own path; afterwards the folder is empty."""
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(tmp_path / "parents"))
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    hook = out / ".git/hooks/pre-push"
+    hook.write_text(f"#!/bin/sh\necho \"${{PROCESS_SUITE_ABORT-unset}}\" > {rec}/hook\n")
+    hook.chmod(0o755)
+    train = _load_train(out)  # after the variable is set: `_GIT_ENV` is built at import
+
+    def record(name):
+        return f"echo \"${{PROCESS_SUITE_ABORT-unset}}\" > {rec}/{name}"
+    monkeypatch.setattr(train, "gate_runner_argv", lambda wt: ["sh", "-c", record("gates")])
+    rc = _run_in_process(train, out, suite=record("suite"), preflight=record("preflight"),
+                         deploy=record("deploy"), push=True, keep_branches=True)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    for name in ("gates", "preflight", "deploy", "hook"):
+        assert (rec / name).read_text().strip() == "unset", name
+    suite = Path((rec / "suite").read_text().strip())
+    assert suite.parent == _marker_dir(out) and suite.name.startswith(f"{_phases(out)[-1]['stamp']}-")
+    assert list(_marker_dir(out).iterdir()) == []
+
+
+def test_a_preboard_probe_a_held_lane_stops_under_make_boards_unchecked(render, tmp_path):
+    """Plan test 7: a held lane under `make -k` writes the marker; the probe is not checked,
+    boards and is never dropped."""
+    lanes = tmp_path / "lanes"
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    (out / "Makefile").write_text(
+        "pre:\n\tif [ -e src/lane.txt ]; then " + sys.executable
+        + " scripts/process/lane.py run --lane scoped --wait 0 -- true; fi\n")
+    _repo(out)
+    _branch(out, "alpha", {"src/lane.txt": "x\n"})
+    env = {**os.environ, "PROCESS_LANE_DIR": str(lanes), "PYTHONDONTWRITEBYTECODE": "1", "LC_ALL": "C"}
+    for name in ("MAKELEVEL", "MAKEFLAGS", "PROCESS_SUITE_ABORT"):
+        env.pop(name, None)
+    holder = subprocess.Popen([sys.executable, str(out / "scripts/process/lane.py"), "run", "--lane", "scoped",
+                               "--label", "holder", "--", sys.executable, "-c", "import time; time.sleep(60)"],
+                              cwd=out, env=env)
+    try:
+        for _ in range(100):
+            if (lanes / "test-lane-scoped.status").exists():
+                break
+            time.sleep(0.05)
+        r = subprocess.run([sys.executable, str(out / "scripts/process/train.py"), "run", "--force", "--suite",
+                            "true", "--preboard", "make -k pre"], cwd=out, env=env, capture_output=True, text=True)
+    finally:
+        holder.kill()
+        holder.wait()
+    assert r.returncode == 0, r.stdout + r.stderr
+    row = _phases(out)[-1]
+    checks = row["preboard_checks"]
+    assert row["branches"] == ["alpha"] and checks["dropped"] == [] and checks["unchecked"] == 1, checks
+    assert "alpha: aborted" in checks["reason"], checks
+    assert "held back" not in (out / ".git/process-train").joinpath(f"{row['stamp']}.log").read_text()
+    assert list(_marker_dir(out).iterdir()) == []
 
 
 # --- v2.95: train-phases tells a suite abort from the preflight -----------------------------
