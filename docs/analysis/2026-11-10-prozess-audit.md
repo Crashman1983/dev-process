@@ -872,6 +872,28 @@ Die Struktur ist schon dort nutzbar, wo das Template eine Auswahl heute erlaubt:
 
 Der Merge fährt dabei unverändert die ganze Suite. Ob und wie die Auswahl später auch dort gilt, ist eine eigene Entscheidung.
 
+## 25. Unabhängiger Kontextpfad: Verlieren Pläne Kriterien aus dem Issue?
+
+Anlass: ein Artikel über einen Review-Agenten-Workflow (heise, 2026-11-09), dessen Kern ein eigener Kontextpfad für den Prüfer ist. Bei uns liest der Reviewer die Akzeptanzkriterien aus dem Plan; das Bundle enthält Diff, Plan, Produktrahmen und Checkliste, das Issue nicht (`make_review_bundle.py:1010-1059`). Geprüft wurde, ob Pläne die Kriterien des Issues treu übernehmen.
+
+**Stichprobe:** 20 Kenni-Arbeiten ab Tier 2, zehn mit den meisten Code-Blocks (4 bis 29) und zehn ohne Block. Je Issue wurden die Kriterien gegen Plan und Spec verglichen. Den Vergleich hat ein Subagent gemacht; den deutlichsten Fall (#2717) habe ich an Issue, Plan und Review-Report nachgelesen. Die Pläne wurden im Endstand gelesen, nicht im Stand der ersten Review-Runde.
+
+| Gruppe | Kriterien im Issue | übernommen | mit festgehaltener Entscheidung geändert | ohne Entscheidung abweichend |
+|---|---:|---:|---:|---:|
+| viele Blocks | 54 | 39 | 13 (24 %) | 2 |
+| ohne Block | 41 | 33 | 7 (17 %) | 1 |
+
+- Pläne verlieren selten ein Kriterium: drei von 95 weichen ohne Entscheidungszeile ab.
+- Zwei der drei liegen in #2717, einer Arbeit mit neun Blocks. Das Issue verlangte 200 hängerfreie Läufe des Tests `test_deadline_drains_before_slot_release_AGENT_US_023`; der Plan führte als Beleg einen anderen Test (`2026-10-23-2717-preview-drain-flake.md:192-194`) und strich das dritte Kriterium aus der Abnahme (`:273-275`). Der Blocker, der das benennt, kam in Runde 9 (`2026-10-25-2717-claude-r9.md:21`): „Der Leittest des Issues ist nicht repariert, nur übersprungen.“
+- Jedes fünfte Kriterium (20 von 95) wurde mit einer festgehaltenen Entscheidung geändert, eingeengt oder in ein Folge-Issue verschoben. Laut Auswertung stammen die meisten dieser Entscheidungen von Agenten oder vom Steward, nicht vom Owner. Der Reviewer prüft danach gegen die geänderte Fassung.
+
+**Folgerung**
+
+- Die Plan-Lücken aus Abschnitt 13 (39 % der späten Blocker) sind überwiegend keine verlorenen Kriterien. Sie betreffen, was der Plan nicht entschieden hat. Ein eigener Kontextpfad hätte in dieser Stichprobe einen Fall früh gezeigt, diesen allerdings mit bis zu acht gesparten Runden.
+- Der Befund liegt an anderer Stelle: Kriterien werden auf dem Weg vom Issue zum Plan häufig umgeschrieben, und diese Änderungen sieht weder der Reviewer als Änderung noch zwingend der Owner.
+- Naheliegend und billig: Das Bundle zeigt die Kriterien des Issues neben denen des Plans, und der Reviewer nennt jede Abweichung. Damit wird eine Umdeutung in Runde 1 sichtbar statt in Runde 9.
+- Die Stichprobe ist klein. Der Unterschied zwischen den Gruppen (24 % gegen 17 %) trägt keine Aussage.
+
 ## Anhang: Befunde außerhalb des Fokus
 
 Nicht Gegenstand der Empfehlung, aber gesehen:
