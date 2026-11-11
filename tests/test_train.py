@@ -4924,3 +4924,23 @@ def test_train_phases_tells_a_suite_abort_from_the_preflight(render, tmp_path):
     rows.append(aborted("lane-busy full held by pid 2"))
     out = _train_phases(render, tmp_path / "b", rows)
     assert 'suite aborted on "lane-busy full held by pid 2" — 2 trains in a row' in out, out
+
+
+def test_train_phases_counts_trains_in_a_row_on_the_kind_and_its_subject(render, tmp_path):
+    """Refute: real marker lines vary from train to train (lane.py's holder carries a pid, a
+    time and minutes; a watchdog the load) — the trains in a row compare the first two
+    words, the kind and its subject (a lane, a test)."""
+    def aborted(line):
+        return {"result": "environment", "rounds": [
+            {"red_path": "suite-aborted", "runs": {"first": {"n": 1, "build_gates_s": 1.0, "suite_s": 5.0}},
+             "aborts": [{"reason": line, "wait_s": 0.0, "ended": None}]}]}
+    rows = [aborted("watchdog tests/t.py::test_b 10 7.9"),
+            aborted("lane-busy full held by pid 4242 — train (main) since 10:01 (3 min)"),
+            aborted("lane-busy full held by pid 4317 — train (main) since 10:40 (12 min)"),
+            aborted("lane-busy full held by pid 5120 — other (b) since 11:02 (31 min)")]
+    out = _train_phases(render, tmp_path, rows)
+    assert ('suite aborted on "lane-busy full held by pid 5120 — other (b) since 11:02 (31 min)" '
+            '— 3 trains in a row') in out, out
+    rows += [aborted("watchdog tests/t.py::test_a 10 8.2"), aborted("watchdog tests/t.py::test_a 10 9.7")]
+    out = _train_phases(render, tmp_path / "b", rows)
+    assert 'suite aborted on "watchdog tests/t.py::test_a 10 9.7" — 2 trains in a row' in out, out
