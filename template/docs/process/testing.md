@@ -513,6 +513,15 @@ hunting for a defect in the branch that lives in the machine. The same rule
 covers the process gates: `finish.py` and the review bundle name a runner
 that cannot start apart from a runner that ran red.
 
+The merge train reads it the same way (v2.95, `train.md`, "Red, undefined,
+aborted"): a suite command that exits 75 itself is an **aborted** run, not a
+red one. Under make a recipe's 75 becomes make's own exit 2, so a tool deep
+inside the suite says it explicitly: it appends one line to the file named
+in `PROCESS_SUITE_ABORT` (append only, never creating it); `lane.py` does so
+when its wait runs out. An aborted run is repeated after the load falls;
+it never blames a passenger by itself. Nested runs, and tests that provoke
+an abort on purpose, run without that variable.
+
 ## Suite discipline
 
 - A **flaky test is a defect**, not weather: fix it or quarantine it the same

@@ -255,7 +255,9 @@ candidates that share no commit beyond the base cost no `merge-base`.
    path is the tool's argument, not the suite's file). `make nope test`
    stops before `test` runs and reads undefined; a pipe hides the exit
    code (`make test | tee log` is green when `tee` is). Every red verdict logs the load average — a timeout under
-   load 10 on 6 CPUs is a different finding from a broken test. A
+   load 10 on 6 CPUs is a different finding from a broken test. A run that
+   marked itself aborted is neither red nor undefined (see "Red, undefined,
+   aborted" below). A
    candidate dropped for a merge conflict is reported `blocked` too, with
    "rebase" as the reason; like the offender's, that report holds nothing.
 4. Green: a suite run that left the worktree as it found it writes the
@@ -288,7 +290,7 @@ candidates that share no commit beyond the base cost no `merge-base`.
 Run from the root worktree on the integration branch with a clean tree.
 The log lives in the clone's git common dir (`process-train/<stamp>.log`).
 Each run ends with its phase times — plan, preboard, preflight, gates, suite,
-retry, bisect, push, deploy — in the log and as one line of
+retry, bisect, push, deploy, abort_wait — in the log and as one line of
 `<git-common-dir>/process-train/phases.jsonl`; `process_kpis.py train-phases` reads the
 median and maximum per phase, so a slow merge names its slow phase. A run
 that holds or has nothing to do writes no line; it prints its planning time.
@@ -297,10 +299,14 @@ that holds or has nothing to do writes no line; it prints its planning time.
 per round: the first, and one more after each drop. Each entry has:
 - `red_path`, how the round ended: `green`, `flaky`, `gate-flaky`,
   `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`,
-  `environment`, `push-rejected` or `aborted`.
+  `environment`, `suite-aborted` (a suite run aborted and nobody could be
+  blamed), `push-rejected` or `aborted` (the train itself crashed or was
+  interrupted).
 - `runs`, every run of the round by kind (`first`, `retry_gates`,
-  `retry_failed`, `retry_full`, `base`, `probe`), each with its count, its
-  build-and-gates seconds and its suite seconds kept apart.
+  `retry_failed`, `retry_full`, `base`, `probe`, `retry_abort`), each with
+  its count, its build-and-gates seconds and its suite seconds kept apart.
+- `aborts`, only where a suite run aborted: one entry per aborted run (see
+  "Red, undefined, aborted").
 
 With `red_ids` configured (`testing.md`, "Red tests"), the entry also holds
 `red_tests`, read from pytest's own `lastfailed` after a suite-red first
@@ -324,6 +330,81 @@ measured yet. Reading the decision needs more than the default window
 
 The train decides nothing from these fields. They are the data the subset
 run waits for: four plan rounds of dev-process #378 left its saving unproven.
+
+## Red, undefined, aborted
+
+A suite run says one of four things (v2.95):
+- **green** — exit 0, always, a marker line included;
+- **red** — a finding about the tree: the search may blame a passenger;
+- **undefined** — the suite does not exist on that tree (above): not
+  comparable; against a base that has the suite, a passenger removed it —
+  red;
+- **aborted** — the run measured nothing (a load timeout, a lane that stayed
+  held). It is no verdict: the train never merges, blames, remembers or
+  certifies on it.
+
+Downstream, a nested run's 10-second budget ran out under load 8.2 on a
+green base, and the search for its "offender" took almost three hours.
+
+**The marker, a contract for project tools.** Before every suite run —
+first run, retries, base, probes, `--retry`, preboard probes — the train
+makes a fresh, empty file and names it in `PROCESS_SUITE_ABORT`:
+`<git-common-dir>/process-train/suite-abort/<stamp>-<pid>.<n>`, one per run,
+removed after it. A tool that stops the run for a reason outside the tree
+appends one line:
+- `<kind> <details>`, e.g. `lane-busy <lane> <holder>` (what `lane.py`
+  writes when its wait runs out), `watchdog <nodeid> <timeout> <load>`,
+  `nested-timeout <nodeid> <budget>`;
+- in one write, opened append-only **without** creating the file
+  (`O_APPEND`, no `O_CREAT`): a writer that outlives its run marks nothing;
+- the run still exits non-zero.
+
+The train reads only that path, without following a link, at most 64 KiB
+and 50 lines; the first line is the reason. Without a marker, exit 75
+(`EX_TEMPFAIL`) of the suite command itself is an abort too. Under make a
+recipe's 75 becomes make's 2, and only the marker tells. The variable
+reaches suite runs only: gates, preflight, deploy, git and the push never
+see it, even when the train's parent carries it. **Nested runs, and tests
+that cause an abort on purpose, run without the variable.** A nested pytest
+would otherwise write its own watchdog into the outer marker. A test that
+provokes a busy lane with the variable passed on aborts every train it runs
+in: each red then costs about three times as much, and a red main ends
+`suite-aborted` instead of `base-red`.
+
+**The rule.** An aborted run is repeated once (`ABORT_RETRIES`), after the
+host's one-minute load fell below its CPUs or 600 s passed (`ABORT_WAIT_S`;
+without a load average or a CPU count nothing waits, and the log says so).
+The repeat (`retry_abort`) has the aborted run's features: a fresh base
+stays fresh, the real base before the first blame stays without the memo.
+A green or red repeat replaces the unmeasured run and counts as it would —
+a first run red on its repeat still gets the retry plan above, once. If the
+repeat aborts too:
+- the aborted run was the base, or the base has no suite (a passenger
+  brings it): the run stops `suite-aborted` — nothing tells a hang from
+  the load;
+- otherwise the base runs **fresh** (neither this train's greens nor the
+  memo), repeated the same way once:
+  - green: the aborted run counts **red** — a passenger's test hangs every
+    time, and the search goes on. At the first run the repeat was the flake
+    run: no second retry, and `--retry` never runs on the base's tree;
+  - red: main is red — `base-red`, nobody blamed;
+  - aborted: `suite-aborted`.
+
+`suite-aborted` ends the run as `environment`: nobody blamed, nothing
+merged. Passengers dropped for a real red in earlier rounds of the same
+train are reported, as on every environment stop. A repeat after `gates`
+or `--retry` rebuilds the tree and runs the whole suite; a green there after
+red gates is still a gate flake. A preboard probe that aborts is not
+repeated: it boards, not pre-checked, and is never dropped. One place costs
+at most a repeat, a fresh base and its repeat, and twice the wait.
+
+The wait is the phase `abort_wait`. Each round's `aborts` lists every aborted
+run: `reason` (the marker's first line), `wait_s` (the wait before its
+repeat) and `ended` (`load`, `budget`, `unread`, or null when nothing was
+repeated after it); a round that ends green keeps them. `train-phases`
+counts `suite-aborted` apart from the preflight and names the line the
+latest one stopped on, with the number of trains in a row that ended on
+that same line — a test or a lane that aborts every train shows there.
 
 ## Who pushes to main — the merge route
 
