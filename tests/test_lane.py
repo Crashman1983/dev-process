@@ -176,3 +176,49 @@ def test_lane_readers_use_the_projects_own_script_then_the_template_one(tmp_path
     assert cfg.lane_status(root, env) == ["scoped: free", "full: free"]
     (root / "scripts/lane.py").write_text("print('scoped: held by pid 1 — own (b) since 09:00 (1 min)')\n")
     assert cfg.lane_status(root, env) == ["scoped: held by pid 1 — own (b) since 09:00 (1 min)"]
+
+
+def test_a_busy_lane_appends_its_line_to_the_suite_marker(tmp_path, monkeypatch):
+    """v2.95 (plan test 12): with PROCESS_SUITE_ABORT set, a lane that stays held appends one
+    line `lane-busy <lane> <holder>` before LaneBusy; without it nothing is written."""
+    mod = _load()
+    marker = tmp_path / "marker"
+    marker.write_text("")
+    monkeypatch.setenv("PROCESS_LANE_DIR", str(tmp_path / "lanes"))
+    proc = _holder(tmp_path)
+    try:
+        monkeypatch.delenv("PROCESS_SUITE_ABORT", raising=False)
+        with pytest.raises(mod.LaneBusy):
+            with mod.hold("scoped", wait=0, settings=_settings(tmp_path), quiet=True):
+                pass
+        assert marker.read_text() == ""
+        monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
+        with pytest.raises(mod.LaneBusy):
+            with mod.hold("scoped", wait=0, settings=_settings(tmp_path), quiet=True):
+                pass
+        lines = marker.read_text().splitlines()
+        assert len(lines) == 1 and lines[0].startswith("lane-busy scoped held by pid ") and "— holder" in lines[0]
+        # the command line keeps its exit 75 — and writes the line
+        r = subprocess.run([sys.executable, str(LANE), "wait", "--lane", "scoped", "--wait", "0", "--quiet"],
+                           cwd=tmp_path, env={**_env(tmp_path), "PROCESS_SUITE_ABORT": str(marker)},
+                           capture_output=True, text=True)
+        assert r.returncode == 75 and len(marker.read_text().splitlines()) == 2, r.stderr
+        # a missing path is never created, a path that is a directory is no error: exit 75 either way
+        for where in (tmp_path / "missing", tmp_path):
+            r = subprocess.run([sys.executable, str(LANE), "run", "--lane", "scoped", "--wait", "0", "--", "true"],
+                               cwd=tmp_path, env={**_env(tmp_path), "PROCESS_SUITE_ABORT": str(where)},
+                               capture_output=True, text=True)
+            assert r.returncode == 75, (where, r.stderr)
+        assert not (tmp_path / "missing").exists()
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_the_marker_line_carries_no_line_break_of_the_holder(tmp_path, monkeypatch):
+    mod = _load()
+    marker = tmp_path / "marker"
+    marker.write_text("")
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
+    mod._note_suite_abort("full", "held by pid 1 — a\nlabel\r\nwith breaks")
+    assert marker.read_text() == "lane-busy full held by pid 1 — a label with breaks\n"
