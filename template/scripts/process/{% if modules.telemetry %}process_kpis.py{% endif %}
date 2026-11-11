@@ -1988,10 +1988,11 @@ def share(weeks: int = 4) -> int:
 
 
 # --- train-phases: where the merge train's time goes ---------------------------
-_TRAIN_PHASES = ("plan", "preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy")
+_TRAIN_PHASES = ("plan", "preboard", "preflight", "gates", "suite", "retry", "bisect", "push", "deploy",
+                 "abort_wait")
 # phases rows of older releases do not carry: their median is over the rows that do,
-# never a 0 for a phase that ran unmeasured (v2.91 refute)
-_LATER_PHASES = frozenset({"plan"})
+# never a 0 for a phase that ran unmeasured (v2.91 refute; `abort_wait` since v2.95)
+_LATER_PHASES = frozenset({"plan", "abort_wait"})
 
 
 def _preboard_lines(rows: list[dict]) -> list[str]:
@@ -2041,8 +2042,9 @@ def _stage_lines(rows: list[dict]) -> list[str]:
     return lines
 
 
-# The run kinds of a red-path round (`rounds[].runs`, train.md), in the order the train runs them.
-_RED_PATH_KINDS = ("first", "retry_gates", "retry_failed", "retry_full", "base", "probe")
+# The run kinds of a red-path round (`rounds[].runs`, train.md), in the order the train runs them;
+# `retry_abort` (v2.95), the repeat of a run that aborted, can follow any of them.
+_RED_PATH_KINDS = ("first", "retry_gates", "retry_failed", "retry_full", "base", "probe", "retry_abort")
 _FLAKE_PATHS = ("flaky", "gate-flaky")
 
 
@@ -2145,6 +2147,44 @@ def _red_path_lines(rows: list[dict]) -> list[str]:
     return lines
 
 
+def _ending(row: dict) -> dict | None:
+    """The last round of a phases line, the one that ended the train; None without one."""
+    rounds = row.get("rounds")
+    last = rounds[-1] if isinstance(rounds, list) and rounds else None
+    return last if isinstance(last, dict) else None
+
+
+def _abort_line(row: dict) -> str | None:
+    """The marker line a train that ended `suite-aborted` stopped on: the reason of the last
+    abort of its last round (the first line of that run's marker, train.md); None for any
+    other train, "unknown" for one without a readable reason."""
+    last = _ending(row)
+    if last is None or last.get("red_path") != "suite-aborted":
+        return None
+    found = last.get("aborts")
+    aborts = [a for a in found if isinstance(a, dict)] if isinstance(found, list) else []
+    reason = aborts[-1].get("reason") if aborts else None
+    return reason if isinstance(reason, str) and reason else "unknown"
+
+
+def _suite_abort_lines(every: list[dict], window: list[dict]) -> list[str]:
+    """v2.95: the latest train of the window that ended `suite-aborted`, the marker line it
+    stopped on, and how many trains in a row (over all of `phases.jsonl`, up to it) ended on
+    that same line — a test or a lane that aborts every train shows as a count that grows."""
+    latest = next((row for row in reversed(window) if _abort_line(row) is not None), None)
+    if latest is None:
+        return []
+    line = _abort_line(latest)
+    at = max(i for i, row in enumerate(every) if row is latest)
+    streak = 0
+    for row in reversed(every[:at + 1]):
+        if _abort_line(row) != line:
+            break
+        streak += 1
+    return [f'  suite aborted on "{line}" — {streak} train{"" if streak == 1 else "s"} in a row'
+            + ("" if latest is window[-1] else " (not the latest train)")]
+
+
 def train_phases(runs: int = 20) -> int:
     """Median and maximum seconds per phase over the last `runs` trains
     (`process-train/phases.jsonl`, written by train.py): a slow merge is
@@ -2168,7 +2208,7 @@ def train_phases(runs: int = 20) -> int:
                 rows.append(row)
     except (OSError, TypeError):
         pass
-    rows = rows[-runs:]
+    every, rows = rows, rows[-runs:]
     if not rows:
         print("  no train run recorded yet — train-phases skipped")
         return 0
@@ -2186,9 +2226,15 @@ def train_phases(runs: int = 20) -> int:
     results = [row.get("result") for row in rows]
     # `preboard`: the preboard check dropped every candidate — no red train, nothing built
     stopped = results.count("preboard")
+    # `environment` is two stops (v2.95): the preflight, and a suite run that aborted with
+    # nobody to blame (its last round `suite-aborted`)
+    aborted = sum(1 for row in rows if row.get("result") == "environment" and _abort_line(row) is not None)
     print(f"  {results.count('red')}/{len(rows)} runs ended red, "
-          f"{results.count('environment')} stopped by the preflight (the host, not a passenger)"
+          f"{results.count('environment') - aborted} stopped by the preflight (the host, not a passenger)"
+          + (f", {aborted} suite aborted, nobody blamed" if aborted else "")
           + (f", {stopped} ended at the preboard check (every candidate dropped)" if stopped else ""))
+    for line in _suite_abort_lines(every, rows):
+        print(line)
     n = len(rows)
     print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'shorten the phase with the largest median first: plan → fewer unmerged stale branches to read (tidy.py), suite → test selection and certificates, bisect → smaller batches, retry → flaky tests (failure-catalog.md)', thin='let more trains run before acting on a phase')}")
     for line in _red_path_lines(rows):

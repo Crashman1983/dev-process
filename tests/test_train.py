@@ -4364,3 +4364,33 @@ def test_a_second_holding_run_overwrites_the_hold_log(render, tmp_path):
     held = (out / ".git/process-train/last-hold.txt").read_text()
     assert "waiting for 6" in held and "waiting for 5" not in held, held
     assert held.count("holding") == 1, held
+
+
+# --- v2.95: train-phases tells a suite abort from the preflight -----------------------------
+
+def test_train_phases_tells_a_suite_abort_from_the_preflight(render, tmp_path):
+    """Plan test 13: `suite-aborted` apart from the preflight, `retry_abort` its own kind, and
+    the first marker line with the count of trains in a row that ended on it."""
+    def run(n, s):
+        return {"n": n, "build_gates_s": 1.0, "suite_s": s}
+
+    def aborted(line):
+        return {"result": "environment", "abort_wait": 30.0, "rounds": [
+            {"red_path": "suite-aborted", "runs": {"first": run(1, 10.0), "retry_abort": run(2, 20.0)},
+             "aborts": [{"reason": "watchdog t::a 10 9.0", "wait_s": 30.0, "ended": "budget"},
+                        {"reason": line, "wait_s": 0.0, "ended": None}]}]}
+    rows = [aborted("lane-busy full held by pid 1"),
+            {"result": "environment", "rounds": [{"red_path": "environment", "runs": {"first": run(1, 0.0)}}]},
+            aborted("lane-busy full held by pid 2"), aborted("lane-busy full held by pid 2"),
+            {"result": "green", "rounds": [{"red_path": "green", "runs": {"first": run(1, 5.0)}, "aborts": [
+                {"reason": "watchdog t::a 10 9.0", "wait_s": 1.0, "ended": "load"}]}]},
+            aborted("lane-busy full held by pid 2")]
+    out = _train_phases(render, tmp_path, rows)
+    assert ("0/6 runs ended red, 1 stopped by the preflight (the host, not a passenger), "
+            "4 suite aborted, nobody blamed") in out, out
+    assert "runs retry_abort    8 runs, suite median     10 s per run" in out, out
+    assert "abort_wait median" in out, out
+    assert 'suite aborted on "lane-busy full held by pid 2" — 1 train in a row' in out, out
+    rows.append(aborted("lane-busy full held by pid 2"))
+    out = _train_phases(render, tmp_path / "b", rows)
+    assert 'suite aborted on "lane-busy full held by pid 2" — 2 trains in a row' in out, out
