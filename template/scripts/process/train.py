@@ -744,6 +744,7 @@ def plan(root: Path, *, min_candidates: int, max_wait_hours: float) -> dict:
 # (`run_judged`) turns it into green, red or a stop that blames nobody, and the
 # preboard check boards it unchecked. It is not "undefined", which can blame (a
 # passenger removed the suite).
+EXIT_75_REASON = "exit 75 (EX_TEMPFAIL), the suite refused to run"
 
 # make options that take their value as the next word
 _MAKE_VALUE_OPTS = {"-C", "-f", "-I", "-o", "-W", "--directory", "--file", "--makefile", "--include-dir",
@@ -785,7 +786,7 @@ def decide(f: SuiteFacts) -> tuple[str, str]:
         return "aborted", f"a run aborted: {f.abort[0]}"
     # the suite itself refused to run (a lane called without make): not measured
     if f.rc == 75:
-        return "aborted", "a run aborted: exit 75 (EX_TEMPFAIL), the suite refused to run"
+        return "aborted", f"a run aborted: {EXIT_75_REASON}"
     # any make call failing on a defined target makes the tree red, even when
     # a later call finds no rule (`make test; make -C examples test`)
     if f.recipe_failed:
@@ -1110,6 +1111,10 @@ ABORT_POLL_S = 10.0
 ABORT_DIR = "suite-abort"     # under the train's directory: `<stamp>-<pid>.<n>`, one file per run
 ABORT_BYTES = 64 * 1024       # what the train reads of a marker at most
 ABORT_LINES = 50
+ABORT_LINE_CHARS = 500        # of one line, the rest is cut
+ABORT_STALE_S = 86400.0       # a marker this old is a killed train's: any cleanup removes it
+# C0 and C1 controls and DEL: a terminal escape in a reason prints nowhere
+_ABORT_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 # what `wait_for_load` waits with; the tests replace them
 _abort_clock = time.monotonic
 _abort_sleep = time.sleep
@@ -1159,7 +1164,10 @@ def _abort_lines(path: Path) -> tuple[str, ...]:
         return ()
     finally:
         os.close(fd)
-    lines = (ln.strip() for ln in raw.decode("utf-8", "replace").splitlines())
+    # a line becomes a reason (the log, `aborts`, a stop's message): no control
+    # characters, at most ABORT_LINE_CHARS
+    lines = (_ABORT_CONTROL.sub(" ", ln).strip()[:ABORT_LINE_CHARS]
+             for ln in raw.decode("utf-8", "replace").splitlines())
     return tuple(ln for ln in lines if ln)[:ABORT_LINES]
 
 
@@ -1179,11 +1187,17 @@ def _abort_marker(root: Path, stamp: str) -> Path | None:
 
 
 def _clear_aborts(root: Path, stamp: str) -> None:
-    """Remove this train's markers (`<stamp>-<pid>.*`): what a run left behind."""
+    """Remove this train's markers (`<stamp>-<pid>.*`): what a run left behind — and
+    every marker older than ABORT_STALE_S, whoever made it: a killed train cleans up
+    nothing, and a live run's marker is as young as the run."""
     try:
-        for f in (_train_dir(root) / ABORT_DIR).glob(f"{stamp}-{os.getpid()}.*"):
+        folder = _train_dir(root) / ABORT_DIR
+        own = set(folder.glob(f"{stamp}-{os.getpid()}.*"))
+        stale = time.time() - ABORT_STALE_S
+        for f in folder.iterdir() if folder.is_dir() else ():
             with contextlib.suppress(OSError):
-                f.unlink()
+                if f in own or f.lstat().st_mtime < stale:
+                    f.unlink()
     except OSError:
         pass
 
@@ -1195,18 +1209,21 @@ def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) ->
     the contract (append, never create) cannot bring it back. A marker that cannot be
     made runs the suite without one, and says so."""
     path = _abort_marker(root, stamp)
+    lines: tuple[str, ...] = ()
     if path is None:
         log(f"abort marker not made in {TRAIN_DIR}/{ABORT_DIR} — `{cmd}` runs without {SUITE_ABORT_ENV}")
-        return _sh(cwd, cmd, log, *args, **kw), ""
-    try:
-        state = _sh(cwd, cmd, log, *args, abort=path, **kw)
-        lines = _abort_lines(path) if state == "aborted" else ()
-    finally:
-        with contextlib.suppress(OSError):
-            path.unlink()
+        state = _sh(cwd, cmd, log, *args, **kw)
+    else:
+        try:
+            state = _sh(cwd, cmd, log, *args, abort=path, **kw)
+            lines = _abort_lines(path) if state == "aborted" else ()
+        finally:
+            with contextlib.suppress(OSError):
+                path.unlink()
     if state != "aborted":
         return state, ""
-    return state, lines[0] if lines else "exit 75 (EX_TEMPFAIL)"
+    # no marker line: only an exit 75 at the top aborts a run
+    return state, lines[0] if lines else EXIT_75_REASON
 
 
 def _echo(text: str, end: str = "\n") -> None:
@@ -2941,6 +2958,9 @@ def resolve_suite(cli: str | None, merge_suite: str | None, *,
 
 
 def main(argv: list[str]) -> int:
+    # a parent's marker is no run of this train: no selector, check or other child of
+    # the train inherits it — the suite runs get their own (`_marked_sh`)
+    os.environ.pop(SUITE_ABORT_ENV, None)
     p = argparse.ArgumentParser(prog="train.py", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="command", required=True)
     for name in ("plan", "run"):
