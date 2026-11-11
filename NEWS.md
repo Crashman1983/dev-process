@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.95.0 — A load abort is no finding about a passenger
+
+When a test run stops because the machine is overloaded or a lane stays busy, the merge train no longer searches for a culprit among the queued works and drops an innocent one. It waits for the load to fall, runs once more, and only if that also stops does a fresh run of the main line decide. A test that hangs every time is still found and its work taken off the train. A project's own watchdog can report such an abort by writing one line to a file the train names.
+
 ## v2.94.0 — Less repetition in the run; measurements the tools write
 
 A work no longer runs the full checks for a plan review, and `finish` saves one run. Checks that only matter at the merge now stop a work already in `finish` and in the train, not first at the push. Texts that asked for a new review after a clean rebase are corrected. Two Spec Kit steps that nothing required are optional. The tools now record, without any new line for an agent, what each phase of a work cost, how large a work was at its review, and which fixes may repair an earlier work's regression. The template is frozen for new rules until 8 December.
