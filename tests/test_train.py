@@ -4813,6 +4813,59 @@ def test_marked_runs_read_only_their_own_path(render, tmp_path, monkeypatch):
     assert list(_marker_dir(out).iterdir()) == []
 
 
+def test_a_marker_line_is_capped_and_carries_no_control_character(render, tmp_path, monkeypatch):
+    """Refute nit: a single marker line is at most 500 characters, without control characters,
+    before it is a reason — in the log, the round's `aborts`, the SuiteAborted message."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    marker = tmp_path / "marker"
+    marker.write_bytes(b"watchdog \x1b[31mt::a\x1b[0m 10\x00 8.2\x07\n" + b"x" * 900 + b"\n")
+    first, second = train._abort_lines(marker)
+    assert first == "watchdog  [31mt::a [0m 10  8.2", first
+    assert second == "x" * 500
+    line = "printf 'lane-busy full \\033[2Jheld\\n' >> \"$PROCESS_SUITE_ABORT\"; exit 1"
+    assert train._marked_sh(out, "x", out, line, lambda _l: None) == ("aborted", "lane-busy full  [2Jheld")
+
+
+def test_exit_75_without_a_marker_names_its_reason(render, tmp_path, monkeypatch):
+    """Refute nit: the marker could not be made — an exit 75 at the top still has its reason."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    monkeypatch.setattr(train, "_abort_marker", lambda root, stamp: None)
+    assert train._marked_sh(out, "x", out, "exit 75", lambda _l: None) == (
+        "aborted", "exit 75 (EX_TEMPFAIL), the suite refused to run")
+
+
+def test_the_train_drops_a_parents_suite_variable_at_startup(render, tmp_path, monkeypatch):
+    """Refute nit: `main` pops PROCESS_SUITE_ABORT from its own environment once, so no
+    selector or other subprocess of the train inherits a parent's value."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(tmp_path / "parents"))
+    assert train.main(["plan", "--root", str(out)]) == 0
+    assert "PROCESS_SUITE_ABORT" not in os.environ
+
+
+def test_clear_aborts_removes_the_markers_of_killed_trains_after_a_day(render, tmp_path):
+    """Refute nit: a killed train leaves its markers; the next cleanup removes every marker
+    older than a day, whoever made it — a younger one of another train stays."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    folder = _marker_dir(out)
+    folder.mkdir(parents=True)
+    old, young, own = folder / "y-1.1", folder / "y-2.1", folder / f"x-{os.getpid()}.3"
+    for f in (old, young, own):
+        f.write_text("")
+    past = time.time() - 2 * 86400
+    os.utime(old, (past, past))
+    train._clear_aborts(out, "x")
+    assert sorted(f.name for f in folder.iterdir()) == ["y-2.1"]
+
+
 def test_exit_75_is_an_abort_at_the_top_and_red_under_make_without_a_marker(render, tmp_path, monkeypatch):
     """Plan test 1, under real make."""
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
