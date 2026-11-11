@@ -2426,8 +2426,11 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         state, merged, br = attempt(subset, kind=kind, memo=memo, fresh=fresh)
         return abort_rule(subset, state, merged, br, kind=kind, memo=memo, fresh=fresh)
 
-    def _report_dropped() -> None:
-        for b in conflicted:
+    def _report_dropped(*, conflicts: bool = True) -> None:
+        """`blocked` for the passengers this train dropped. `conflicts=False` (a stop that
+        judged nobody: the environment, a red base): only those dropped for a real red —
+        a conflict with a batch that never merged is no news its worker owes a fix for."""
+        for b in conflicted if conflicts else []:
             print(f"train: {b} did not board — merge conflict with the batch; its worker rebases (report: blocked)")
             _write(root, "blocked", f"{_tower.TRAIN_DROP_NOTE} {stamp}: merge conflict — rebase onto {local}", b)
         for b in blamed:
@@ -2495,13 +2498,14 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                   "integration branch itself is red (gates or suite fail with nobody aboard); "
                   "no candidate blamed, nothing merged — fix main first", file=sys.stderr)
             log(f"a run aborted twice ({aborted}), the fresh base red — aborted without blame")
-        _report_dropped()
+        _report_dropped(conflicts=False)
         _cleanup(root, stamp)
         return 1
 
     # the abort rule's two exits (v2.95): a red fresh base is main's, a stop that blames
     # nobody still reports who was dropped for a real red in an earlier round — on every
-    # environment stop of a round, the preflight's and a no-op suite's included
+    # environment stop of a round, the preflight's and a no-op suite's included; a passenger
+    # that only conflicted is not reported there
     try:
         while aboard:
             # a round: the first run, and each one after a drop
@@ -2678,7 +2682,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     except BaseRed as red_base:
         return _red_base(aborted=str(red_base))
     except EnvironmentRed:
-        _report_dropped()
+        _report_dropped(conflicts=False)
         raise
     if not aboard:
         if rounds and str(rounds[-1]["red_path"]).startswith("dropped:"):

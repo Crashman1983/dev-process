@@ -4407,10 +4407,11 @@ _TREES = (("one", {"a.txt": "a\n"}),
 
 
 def _aborting(render, tmp_path, monkeypatch, *, sh, n=2, retry=None, red_ids=None, seen=False, gates=None,
-              load=(0.0, 0.0, 0.0), via_run=False):
+              load=(0.0, 0.0, 0.0), via_run=False, preflight=None, conflicts=()):
     """b1..bn judged on real trees — main, one = [b1], both = [b1, b2], three — with a suite
     that answers `sh(subset, cmd, nth)`: green, red, undefined, abort or a command of its own,
-    run by the real `_sh`. The load is `load` on the host's CPUs; the wait's clock and sleep
+    run by the real `_sh` (the preflight `preflight` too). The passengers in `conflicts` never
+    merge. The load is `load` on the host's CPUs; the wait's clock and sleep
     are fake. `via_run`: through `run()`, with `plan` answering the candidates. Returns a
     namespace: the rounds, the `_sh` calls, the log, rc, the EnvironmentRed raised, the
     `blocked` reports, the phases and what went to stderr."""
@@ -4435,9 +4436,10 @@ def _aborting(render, tmp_path, monkeypatch, *, sh, n=2, retry=None, red_ids=Non
     real_sh = train._sh
 
     def build(root, base, subset, stamp, log, **kw):
-        current[:] = subset
-        _git(out, "checkout", "-q", ("main", "one", "both", "three")[len(subset)])
-        return out, "train/x", list(subset), []
+        merged = [b for b in subset if b not in conflicts]
+        current[:] = merged
+        _git(out, "checkout", "-q", ("main", "one", "both", "three")[len(merged)])
+        return out, "train/x", merged, [b for b in subset if b in conflicts]
 
     def fake_sh(cwd, cmd, log, *a, **kw):
         calls.append((tuple(current), cmd))
@@ -4469,7 +4471,7 @@ def _aborting(render, tmp_path, monkeypatch, *, sh, n=2, retry=None, red_ids=Non
         else:
             rc = train._run_batch(out, "main", p, list(branches), "x", tmp_path / "t.log", suite="s",
                                   deploy=None, push=False, keep_branches=True, retry=retry, measure=measure,
-                                  red_ids=red_ids, phases=phases)
+                                  red_ids=red_ids, phases=phases, preflight=preflight)
     except SystemExit:
         rc = None  # the stub train/x cannot be fast-forwarded: the judging is done
     except train.EnvironmentRed as exc:
@@ -4634,6 +4636,21 @@ def test_a_load_during_the_search_drops_only_the_real_offender(render, tmp_path,
     assert [x["red_path"] for x in r.measure["rounds"]] == ["dropped:b2", "green"], r.err
     assert _subsets(r) == [("b1", "b2", "b3"), ("b1", "b2", "b3"), (), ("b1", "b2"), ("b1",), ("b1",), (),
                            ("b1",), ("b1", "b3")]
+
+
+def test_a_red_preflight_reports_no_passenger_that_only_conflicted(render, tmp_path, monkeypatch):
+    """Refute: an environment stop reports who was dropped for a real red, never a passenger
+    that merely conflicted — its worker hears about the conflict from a train that judges."""
+    r = _aborting(render, tmp_path, monkeypatch, preflight="pf", conflicts=("b2",),
+                  sh=lambda sub, cmd, nth: "red" if cmd == "pf" else "green")
+    assert isinstance(r.raised, r.train.EnvironmentRed), r.err
+    assert r.written == [], r.written
+
+
+def test_a_red_base_reports_no_passenger_that_only_conflicted(render, tmp_path, monkeypatch):
+    r = _aborting(render, tmp_path, monkeypatch, conflicts=("b2",), sh=lambda sub, cmd, nth: "red")
+    assert r.rc == 1 and r.raised is None and r.measure["rounds"][0]["red_path"] == "base-red", r.err
+    assert r.written == [], r.written
 
 
 def test_the_fresh_base_and_its_repeat_skip_this_trains_green(render, tmp_path, monkeypatch):
