@@ -10,6 +10,40 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.95.0 — A load abort is no finding about a passenger · 2026-11-11
+
+**Why.**
+- In Kenni, red trains used 37 % of train minutes, 971 of their 1,196 minutes in retry and bisect (process audit, PR #407).
+- Train 0519 was a load timeout in a test with a 10 s budget at load 8.2; the base alone was green, yet the search for a culprit took almost three hours.
+- Today a lane that stays busy, or a project watchdog, ends as an ordinary red. Under `make -k` an exit 75 becomes make's exit 2. The train then searches and drops a passenger who caused nothing.
+
+**What changes.**
+- **A marker the train sets and reads.** For every suite run the train creates an empty file under `<git-common-dir>/process-train/suite-abort/` and passes its path as `PROCESS_SUITE_ABORT`, only to suite runs and preboard probes, never to gates, preflight, deploy or push. A tool that aborts a run for load or a time limit appends one line. `lane.py` does so when a lane stays busy.
+- **A run that aborts blames nobody.** A non-zero exit with a marker line, or an exit 75 at the top level, is an abort.
+  - The train waits until the load drops below the CPU count (at most 600 s) and repeats the run once on a rebuilt tree.
+  - If the repeat aborts too, a fresh base run decides. A green base means the run counts red, so a test that hangs every time is still found and its passenger dropped. A red base ends as `base-red`. An aborted base ends the round as `suite-aborted`, result `environment`: nobody blamed, nothing merged.
+  - An aborted run never feeds the green memo, a merge certificate or the tree cache. A preboard probe that aborts boards unchecked.
+- **Reporting.** Passengers dropped earlier in the same train are reported on every environment stop and on a red base.
+- **Telemetry.** `red_path="suite-aborted"`, run kind `retry_abort`, `rounds[].aborts` with reason, wait and how the wait ended. `train-phases` names suite aborts apart from a red preflight and counts consecutive trains that stopped on the same line.
+- **Unchanged:** without a marker and without an exit 75 at the top level, the train decides as before. A green run stays green.
+
+**Effect.**
+- A load spike or a busy lane costs one repeat and at most a fresh base, instead of a search over all passengers and a wrong drop.
+
+**Changed sections.**
+- `train.md` (The run; Red, undefined, aborted (new))
+- `testing.md` (Unmeasurable is not red)
+
+**Update.**
+- Pure update. No new configuration key.
+- For projects:
+  - A lane that stays busy now ends as an abort, not red, also under `make -k`.
+  - A project watchdog can report an abort by appending a line to `$PROCESS_SUITE_ABORT` (`O_APPEND`, without `O_CREAT`).
+  - Nested runs and tests that provoke an abort on purpose should run without the variable; otherwise a real red costs extra runs.
+  - An exit 75 at the top level of the suite is an abort.
+
+Details: [Plan](docs/analysis/2026-11-10-v2.95.md) PR #407
+
 ## v2.94.0 — Less repetition in the run; measurements the tools write · 2026-11-10
 
 **Why.**

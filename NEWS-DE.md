@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.95.0 — Ein Abbruch durch Last ist kein Befund über einen Passagier
+
+Bricht ein Testlauf ab, weil die Maschine überlastet ist oder eine Lane belegt bleibt, sucht der Merge-Zug nicht mehr unter den wartenden Arbeiten nach einem Schuldigen und setzt keine unschuldige mehr ab. Er wartet, bis die Last sinkt, läuft einmal neu, und erst wenn auch das abbricht, entscheidet ein frischer Lauf der Hauptlinie. Ein Test, der jedes Mal hängt, wird weiterhin gefunden und seine Arbeit vom Zug genommen. Ein eigener Watchdog des Projekts kann einen solchen Abbruch melden, indem er eine Zeile in eine Datei schreibt, die der Zug nennt.
+
 ## v2.94.0 — Weniger Wiederholung im Durchlauf; Messwerte, die Werkzeuge schreiben
 
 Eine Arbeit fährt für ein Plan-Review nicht mehr die vollen Prüfungen, und `finish` spart einen Lauf. Prüfungen, die nur beim Merge zählen, halten eine Arbeit jetzt schon in `finish` und im Zug an, nicht erst beim Push. Texte, die nach einem sauberen Rebase ein neues Review verlangten, sind korrigiert. Zwei Spec-Kit-Schritte, die nichts verlangte, sind optional. Die Werkzeuge halten jetzt fest, ohne neue Zeile für einen Agenten, was jede Phase einer Arbeit gekostet hat, wie groß eine Arbeit beim Review war und welche Fixes eine Regression einer früheren Arbeit reparieren könnten. Für neue Regeln ist das Template bis zum 8. Dezember eingefroren.

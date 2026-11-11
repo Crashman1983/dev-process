@@ -9,6 +9,40 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.95.0 — Ein Abbruch durch Last ist kein Befund über einen Passagier · 2026-11-11
+
+**Warum.**
+- In Kenni kosteten rote Züge 37 % der Zug-Minuten, 971 ihrer 1.196 Minuten in Wiederholung und Suche (Prozess-Audit, PR #407).
+- Zug 0519 war ein Last-Timeout in einem Test mit 10-s-Budget bei Load 8,2; die Basis allein war grün, trotzdem dauerte die Suche nach dem Verursacher fast drei Stunden.
+- Heute endet eine belegt bleibende Lane oder ein Projekt-Watchdog als gewöhnliches Rot. Unter `make -k` wird ein Exit 75 zu make Exit 2. Der Zug sucht dann und setzt einen Passagier ab, der nichts verursacht hat.
+
+**Was sich ändert.**
+- **Ein Marker, den der Zug setzt und liest.** Für jeden Suite-Lauf legt der Zug unter `<git-common-dir>/process-train/suite-abort/` eine leere Datei an und gibt ihren Pfad als `PROCESS_SUITE_ABORT` weiter, nur an Suite-Läufe und Proben der Vorab-Prüfung, nie an Gates, Preflight, Deploy oder Push. Ein Werkzeug, das einen Lauf wegen Last oder Zeitlimit abbricht, hängt eine Zeile an. `lane.py` tut das, wenn eine Lane belegt bleibt.
+- **Ein abgebrochener Lauf beschuldigt niemanden.** Ein Exit ≠ 0 mit Marker-Zeile oder ein Exit 75 ganz oben ist ein Abbruch.
+  - Der Zug wartet, bis die Last unter der Zahl der CPUs liegt (höchstens 600 s), und wiederholt den Lauf einmal auf einem neu gebauten Baum.
+  - Bricht auch die Wiederholung ab, entscheidet ein frischer Basis-Lauf. Bei grüner Basis zählt der Lauf als rot; ein Test, der bei jedem Lauf hängt, wird so gefunden und sein Passagier abgesetzt. Bei roter Basis endet die Runde als `base-red`. Bricht auch die Basis ab, endet die Runde als `suite-aborted`, Ergebnis `environment`: niemand beschuldigt, nichts gemergt.
+  - Ein abgebrochener Lauf füttert nie den Merker für grüne Läufe, ein Merge-Zertifikat oder den Baum-Cache. Eine Probe der Vorab-Prüfung, die abbricht, steigt ungeprüft ein.
+- **Meldungen.** Passagiere, die früher im selben Zug abgesetzt wurden, werden bei jedem Stopp wegen der Umgebung und bei roter Basis gemeldet.
+- **Telemetrie.** `red_path="suite-aborted"`, Lauf-Art `retry_abort`, `rounds[].aborts` mit Grund, Wartezeit und wie das Warten endete. `train-phases` nennt Suite-Abbrüche getrennt vom roten Preflight und zählt Züge in Folge, die an derselben Zeile stoppten.
+- **Unverändert:** Ohne Marker und ohne Exit 75 ganz oben entscheidet der Zug wie bisher. Ein grüner Lauf bleibt grün.
+
+**Wirkung.**
+- Eine Lastspitze oder eine belegte Lane kostet eine Wiederholung und höchstens eine frische Basis, statt einer Suche über alle Passagiere und eines falschen Absetzens.
+
+**Geänderte Abschnitte.**
+- `train.md` (The run; Red, undefined, aborted (neu))
+- `testing.md` (Unmeasurable is not red)
+
+**Update.**
+- Reines Update. Kein neuer Konfigurationsschlüssel.
+- Für Projekte:
+  - Eine belegt bleibende Lane endet jetzt als Abbruch, nicht als Rot, auch unter `make -k`.
+  - Ein Projekt-Watchdog meldet einen Abbruch, indem er eine Zeile an `$PROCESS_SUITE_ABORT` anhängt (`O_APPEND`, ohne `O_CREAT`).
+  - Verschachtelte Läufe und Tests, die absichtlich einen Abbruch auslösen, sollen ohne die Variable laufen; sonst kostet ein echtes Rot zusätzliche Läufe.
+  - Ein Exit 75 ganz oben in der Suite ist ein Abbruch.
+
+Details: [Plan](docs/analysis/2026-11-10-v2.95.md) PR #407
+
 ## v2.94.0 — Weniger Wiederholung im Durchlauf; Messwerte, die Werkzeuge schreiben · 2026-11-10
 
 **Warum.**
