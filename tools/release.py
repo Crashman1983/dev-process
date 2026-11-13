@@ -15,7 +15,10 @@ steps, in order, stopping at the first failure:
    NEWS-DE.md a plain-language section (`release_notes.news`). The entry names
    the template sections it changed or removed (**Changed sections.** /
    **Geänderte Abschnitte.**) when there are any — a project's overlays anchor
-   to them (`changed_sections`, against the last release's tag);
+   to them (`changed_sections`, against the last release's tag); every
+   first-level item under **What changes.** / **Was sich ändert.** starts with
+   its mark, `[required]`, `[recommended]` or `[optional]` (`_marks_missing`;
+   the grammar is the core `changelog.py`, read from this tool's tree);
 2. every version location carries it (`LOCATIONS`);
 3. the SBOM is regenerated (`tools/gen_sbom.py`);
 4. `ruff check .` and the full suite pass;
@@ -47,7 +50,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from release_notes import news, notes  # noqa: E402
+from release_notes import changelog, news, notes  # noqa: E402
 
 VERSION = re.compile(r"^v(\d+\.\d+\.\d+)$")
 
@@ -103,6 +106,12 @@ def _current(root: Path) -> tuple[int, ...]:
     text = shown.stdout if shown.returncode == 0 and shown.stdout else (root / LOCATIONS[0][0]).read_text(encoding="utf-8")
     found = LOCATIONS[0][1].findall(text)
     return tuple(int(x) for x in found[0].split(".")) if found else (0,)
+
+
+def _above_current(root: Path, tag: str) -> bool:
+    """Is `tag` a version above the released one — a release still to be made?"""
+    m = VERSION.match(tag)
+    return bool(m) and tuple(int(x) for x in m.group(1).split(".")) > _current(root)
 
 
 def _notes_missing(root: Path, tag: str) -> list[str]:
@@ -172,8 +181,7 @@ def changed_sections(root: Path) -> list[str] | None:
 def _sections_unnamed(root: Path, tag: str) -> list[str]:
     """The changed sections, when the CHANGELOG entry of a new release does not name
     them yet (the released version itself has nothing to compare against)."""
-    m = VERSION.match(tag)
-    if not m or tuple(int(x) for x in m.group(1).split(".")) <= _current(root):
+    if not _above_current(root, tag):
         return []
     found = changed_sections(root)
     if not found:
@@ -186,6 +194,21 @@ def _sections_unnamed(root: Path, tag: str) -> list[str]:
     return []
 
 
+def _marks_missing(root: Path, tag: str) -> list[str]:
+    """Every first-level item under **What changes.** / **Was sich ändert.** of a new
+    release's entry that carries no mark. The released entries were written before the
+    marks; an entry without that part has no item; no entry at all is _notes_missing's."""
+    if not _above_current(root, tag):
+        return []
+    out = []
+    for rel in CHANGELOGS:
+        path = root / rel
+        found = notes(path.read_text(encoding="utf-8"), tag) if path.is_file() else None
+        out += [f"{rel}: {tag} item without a mark ([required]/[recommended]/[optional]) — {line}"
+                for mark, line in changelog.marks(found[1] if found else "") if mark is None]
+    return out
+
+
 def check(root: Path, tag: str) -> list[str]:
     """What is not at `tag` yet: the locations, the CHANGELOG entry and the SBOM (its own
     `--check`; the SBOM names the version too, and `--check` said OK while it was stale)."""
@@ -194,6 +217,7 @@ def check(root: Path, tag: str) -> list[str]:
         return [f"{tag!r} is no version (expected vX.Y.Z)"]
     left = mismatches(root, m.group(1))
     left += _notes_missing(root, tag)
+    left += _marks_missing(root, tag)
     left += [f"CHANGELOG: `Changed sections` / `{SECTIONS_MARKER}` not named — {s}"
              for s in _sections_unnamed(root, tag)]
     sbom = subprocess.run([sys.executable, "tools/gen_sbom.py", "--check"], cwd=root, capture_output=True)
@@ -226,6 +250,12 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     if missing:
         raise SystemExit("release: write the release notes first — a release without them is not "
                          "published:\n  " + "\n  ".join(missing))
+    unmarked = _marks_missing(root, tag)
+    if unmarked:
+        raise SystemExit("release: every first-level item under `What changes` / `Was sich ändert` starts "
+                         "with its mark — `[required]` (security, a broken contract, data loss, a defect "
+                         "that blocks work), `[recommended]` or `[optional]` (MAINTAINING.md):\n  "
+                         + "\n  ".join(unmarked))
     if changed_sections(root) is None:
         print("release: the last release's tag is not here — `git fetch --tags` to list the changed "
               "sections overlays may anchor to", flush=True)

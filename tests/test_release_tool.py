@@ -300,3 +300,61 @@ def test_a_doc_that_became_a_template_keeps_its_sections(tmp_path):
         subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
     doc.rename(doc.with_name("x.md.jinja"))
     assert rel.changed_sections(root) == []
+
+
+# --- v2.96 A4: every first-level item under What changes carries its mark ---
+
+MARKED = "**What changes.**\n- [required] A fix.\n- [optional] A flag.\n"
+UNMARKED = "**What changes.**\n- [required] A fix.\n- A point nobody graded.\n"
+
+
+def _changelogs_de(root: Path, body: str) -> None:
+    """Both languages, the German one under its own heading."""
+    (root / "CHANGELOG.md").write_text(f"## v9.9.9 — t · 2026-11-14\n\n{body}", encoding="utf-8")
+    (root / "CHANGELOG-DE.md").write_text("## v9.9.9 — t · 2026-11-14\n\n"
+                                          + body.replace("**What changes.**", "**Was sich ändert.**"),
+                                          encoding="utf-8")
+
+
+def test_check_names_an_unmarked_item_of_a_new_entry(tmp_path, monkeypatch):
+    root = _copy(tmp_path)
+    _changelogs_de(root, UNMARKED)
+    monkeypatch.setattr(rel.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0))
+
+    left = rel.check(root, "v9.9.9")
+
+    unmarked = [line for line in left if "without a mark" in line]
+    assert [line.split(":", 1)[0] for line in unmarked] == ["CHANGELOG.md", "CHANGELOG-DE.md"], left
+    assert all("A point nobody graded." in line for line in unmarked), unmarked
+
+
+def test_check_passes_a_marked_entry_and_one_without_what_changes(tmp_path, monkeypatch):
+    root = _copy(tmp_path)
+    monkeypatch.setattr(rel.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0))
+    for body in (MARKED, "body\n"):
+        _changelogs_de(root, body)
+        assert not [line for line in rel.check(root, "v9.9.9") if "without a mark" in line], body
+
+
+def test_release_refuses_an_unmarked_item_before_anything_moves(tmp_path):
+    root = _copy(tmp_path)
+    _changelogs_de(root, UNMARKED)
+
+    with pytest.raises(SystemExit, match=r"without a mark[\s\S]*A point nobody graded"):
+        rel.release(root, "v9.9.9")
+    assert rel.mismatches(root, CURRENT) == []  # nothing bumped
+
+
+def test_a_released_entry_is_not_held_to_the_marks(tmp_path):
+    """the entries up to the current version were written before the marks"""
+    root = _copy(tmp_path)
+    for name in ("CHANGELOG.md", "CHANGELOG-DE.md"):
+        (root / name).write_text(f"## v{CURRENT} — t · 2026-11-11\n\n{UNMARKED}", encoding="utf-8")
+
+    assert rel._marks_missing(root, f"v{CURRENT}") == []
+    assert rel._marks_missing(root, "v9.9.9") == []  # no entry: _notes_missing speaks
+
+
+def test_the_release_tools_read_the_entry_grammar_from_their_own_tree():
+    """not from the `root` argument: a test root has no template (plan r3 m7)"""
+    assert Path(rel.changelog.__file__) == REPO / "template/scripts/process/changelog.py"

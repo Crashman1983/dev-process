@@ -137,6 +137,14 @@ Der bestehende Weg, unverändert:
    „Keine Schritte.“, „Für <Projekt>“ wo nötig), bei geänderten Template-Docs
    **Geänderte Abschnitte.**, zuletzt `Details:` mit Plan-Link und Issues (ohne beides entfällt die Zeile;
    ein kleines Fix-Release darf die Wirkung weglassen).
+   Ab v2.96 beginnt jeder Punkt erster Ebene unter **Was sich ändert.** /
+   **What changes.** direkt nach dem Spiegelstrich mit seiner Marke, in beiden
+   Sprachen gleich: `[required]` (Sicherheit, gebrochener Vertrag, Datenverlust
+   oder ein Fehler, der Arbeit blockiert), `[recommended]` (ein Projekt sollte
+   es übernehmen) oder `[optional]` (kann warten). Ein Gruppenpunkt trägt die
+   strengste Marke seiner Unterpunkte. `tools/release.py` verweigert einen
+   unmarkierten Punkt in einem neuen Eintrag; `template_update.py --dry-run`
+   zeigt einem Projekt die `[required]`-Punkte vor dem Update.
    Höchstens rund 20 Zeilen; die technischen Einzelheiten stehen im Plan,
    nicht im CHANGELOG. Dazu je ein Abschnitt in `NEWS.md` und `NEWS-DE.md` (`## vX.Y.Z — <Titel>`, drei bis sechs Sätze ohne
    Fachbegriffe: was ändert sich für ein Projekt, was bringt es);
