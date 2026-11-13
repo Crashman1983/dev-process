@@ -247,6 +247,20 @@ def sync_reports(root: Path, remote: str = "origin", timeout: float = 60) -> boo
     return _run(["git", "-C", str(root), "push", "--quiet", "--force", remote, f"{ref}:{ref}"], timeout)
 
 
+def publish_if_steered(root: Path, timeout: float = 15) -> bool | None:
+    """Publish this host's reports when the mandate sets `steering`: the WIP count of the
+    other host (`tower.in_progress`) sees a `done` only once it is published. None when
+    there is no steering block (nothing to publish for); else whether the sync went through."""
+    try:
+        from optimize import steering  # noqa: PLC0415 — the block's one reader
+        conf, _problems = steering(root)
+    except Exception:  # noqa: BLE001 — bookkeeping: an unreadable mandate publishes nothing
+        return None
+    if not conf:
+        return None
+    return sync_reports(root, timeout=timeout)
+
+
 def pushed_refusal(root: Path, remote: str = "origin") -> str | None:
     """Why a `pushed` report would be false right now — None when it is true."""
     branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD")

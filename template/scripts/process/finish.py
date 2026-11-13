@@ -874,6 +874,9 @@ def _done(root: Path, branch: str) -> None:
         import report as _report
         _report.write_report(root, "done", issue=issue, note=tokens,
                              worker=os.environ.get("PROCESS_WORKER") or branch)
+        if _report.publish_if_steered(root) is False:
+            print("finish: the `done` report is written but not published — the other host "
+                  "counts the issue in progress until the next sync", file=sys.stderr)
     except (Exception, SystemExit) as exc:  # noqa: BLE001
         print(f"finish: merged, but the `done` report was not written ({exc}) — "
               f"`report.py done --issue N` by hand", file=sys.stderr)
