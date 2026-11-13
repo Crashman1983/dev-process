@@ -9,7 +9,7 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
-## v2.96.0 — Steuerung mit Grenzen: offene Arbeit gemessen und begrenzt, Lanes für schwere Läufe · 2026-11-13
+## v2.97.0 — Steuerung mit Grenzen: offene Arbeit gemessen und begrenzt, Lanes für schwere Läufe · 2026-11-13
 
 **Warum.**
 - Vergleich Kenni gegen ein zweites Projekt (#411–#417): Das Template kostet beide je Commit etwa gleich viel, trotzdem kommt Kenni langsamer voran — 65 Issues gleichzeitig in Arbeit, 156 eröffnet gegen 26 geschlossen in zwei Wochen, 32 Template-Releases in 30 Tagen. Die Optimierungsschleife maß davon nichts.

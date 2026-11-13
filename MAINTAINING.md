@@ -137,7 +137,7 @@ Der bestehende Weg, unverändert:
    „Keine Schritte.“, „Für <Projekt>“ wo nötig), bei geänderten Template-Docs
    **Geänderte Abschnitte.**, zuletzt `Details:` mit Plan-Link und Issues (ohne beides entfällt die Zeile;
    ein kleines Fix-Release darf die Wirkung weglassen).
-   Ab v2.96 beginnt jeder Punkt erster Ebene unter **Was sich ändert.** /
+   Ab v2.97 beginnt jeder Punkt erster Ebene unter **Was sich ändert.** /
    **What changes.** direkt nach dem Spiegelstrich mit seiner Marke, in beiden
    Sprachen gleich: `[required]` (Sicherheit, gebrochener Vertrag, Datenverlust
    oder ein Fehler, der Arbeit blockiert), `[recommended]` (ein Projekt sollte

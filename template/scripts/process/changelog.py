@@ -6,7 +6,7 @@ was a bold paragraph, `**vX.Y.Z — <title>.** body`, running until the next suc
 paragraph or any heading; an old tag's CHANGELOG still reads that way, and its
 notes must stay publishable.
 
-From v2.96 every first-level item under **What changes.** (German: **Was sich
+From v2.97 every first-level item under **What changes.** (German: **Was sich
 ändert.**) starts with its mark, right after the dash: `- [required] …`,
 `- [recommended] …` or `- [optional] …`. `required` means security, a broken
 contract, data loss or a defect that blocks work. The template's release tool

@@ -262,7 +262,7 @@ def leftover_conflicts(root: Path, owned: list[str]) -> list[str]:
 # and `.jinja` is gone — how an overlay's `overlay-of:` path finds its source file
 _JINJA_IF = re.compile(r"\{%-?\s*if\b[^%]*%\}(.*?)\{%-?\s*endif\s*-?%\}")
 _SUBDIRECTORY = re.compile(r"^_subdirectory:[ \t]*['\"]?([^'\"\s#]+)", re.MULTILINE)
-MARKED_SINCE = (2, 96, 0)  # the release notes carry their marks from this release on
+MARKED_SINCE = (2, 97, 0)  # the release notes carry their marks from this release on
 
 
 def rendered_path(source_rel: str) -> str:
@@ -321,7 +321,7 @@ def _notes_lines(text: str, installed: tuple[int, int, int],
         found = marks(body)
         graded = [m for m, _ in found if m]
         if not graded:
-            before = " (before v2.96)" if number < MARKED_SINCE else ""
+            before = " (before v2.97)" if number < MARKED_SINCE else ""
             lines.append(f"  {version} — {title}: not marked{before}")
             unknown = unknown or bool(found) or number < MARKED_SINCE
             continue

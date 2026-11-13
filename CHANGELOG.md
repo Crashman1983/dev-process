@@ -10,7 +10,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
-## v2.96.0 — Steering with limits: open work measured and held, lanes for heavy runs · 2026-11-13
+## v2.97.0 — Steering with limits: open work measured and held, lanes for heavy runs · 2026-11-13
 
 **Why.**
 - Comparing Kenni with a second adopter project (#411–#417): the template costs both about the same per commit, yet Kenni moves slower — 65 issues in progress at once, 156 opened against 26 closed in two weeks, 32 template releases in 30 days. The improvement loop measured none of it.
