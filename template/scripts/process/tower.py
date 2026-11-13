@@ -540,6 +540,104 @@ def latest_reports(root: Path, *, remote: bool = False, states: tuple[str, ...] 
     return out
 
 
+# --- in progress (v2.97 B2): one rule, for the WIP limit of dispatch and `process_kpis.py intake` ---
+
+# a worker whose last report says this holds no issue; `review-pass` holds one (the work waits for
+# the train) — `PARKED` is the rule of a live session's silence, not of this
+REPORT_OVER = ("done", "idle", "failed")
+# no report and no dispatch record of an issue for this long: dormant — shown, never counted.
+# "stale" stays the rule of a silent live session (`quiet_too_long`, STALE_MINUTES)
+DORMANT_DAYS = 14
+FETCH_TIMEOUT_S = 15  # the deadline of the fetch before the count (dispatch: also of its sync)
+UNDERCOUNT_NOTE = "other hosts not read — may undercount"
+
+
+def _issue_number(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return int(value) if isinstance(value, str) and value.isdigit() else None
+
+
+def _epoch_of(value: object) -> float:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+
+
+def _track_of(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def in_progress(root: Path, *, fetch: bool = True, now: float | None = None,
+                timeout: float = FETCH_TIMEOUT_S) -> dict:
+    """The issues in progress over every host, the one rule (v2.97; it replaces the reading of
+    v2.96 `intake`): the issue of each worker's last report whose state is not `done`, `idle` or
+    `failed`, and the issue of a dispatch record no report of its branch followed since its start
+    (a hand-over to another host, `state: remote`, among them). An issue with neither a report nor
+    a record for DORMANT_DAYS is `dormant`: listed apart, not counted.
+
+    Per issue: its `track` (the phase history `phases/<issue>.json`, else the newest report or
+    record of the issue that names one; None is untracked and counts against no track), its claim
+    (`claimed`: the earliest phase start of any branch in the history, else its earliest report),
+    the newest word (`state`, `worker`, `host`, `source` report|record, `remote`) and `last`, the
+    epoch of its newest report or record. `fetch` first fetches the other hosts' published reports
+    (`report.fetch_reports`, `timeout` s); without it they are read as last fetched. `hosts` gives
+    the age in minutes of each other host's newest report, `notes` what the count may miss.
+    Reads `dispatch.records` and `report.read_reports` directly — never `sessions` — and no `gh`."""
+    import dispatch as _dispatch  # noqa: PLC0415 — the records' and phase histories' owner
+    now = time.time() if now is None else now
+    fetched = _report.fetch_reports(root, timeout=timeout) if fetch else None
+    own = _report.host_name()
+    reports = sorted(_report.read_reports(root, remote=True), key=lambda r: _epoch_of(r.get("epoch")))
+    recs = [r for r in _dispatch.records(root) if _issue_number(r.get("issue")) is not None]
+    by_branch = {r["branch"]: r for r in recs}
+    latest: dict[str, dict] = {}
+    for rec in reports:
+        latest[rec["worker"]] = rec
+    word: dict[int, dict] = {}
+
+    def take(n: int, seen: dict) -> None:
+        if n not in word or seen["last"] >= word[n]["last"]:
+            word[n] = seen
+
+    for worker, rec in latest.items():
+        n = _issue_number(rec.get("issue"))
+        if n is None and worker in by_branch:  # a report without --issue: the session's issue
+            n = _issue_number(by_branch[worker].get("issue"))
+        if n is None or rec.get("state") in REPORT_OVER:
+            continue
+        host = str(rec.get("host") or "")
+        take(n, {"state": rec.get("state"), "worker": worker, "host": host, "source": "report",
+                 "remote": host != own, "last": _epoch_of(rec.get("epoch"))})
+    for rec in recs:
+        if _dispatch.session_report(rec, reports) is not None:
+            continue  # its branch reported since: that word decides
+        take(int(_issue_number(rec["issue"]) or 0), {
+            "state": rec.get("state"), "worker": rec["branch"], "host": None if rec.get("remote") else own,
+            "source": "record", "remote": rec.get("remote") is True, "last": _epoch_of(rec.get("started"))})
+    counted: list[dict] = []
+    dormant: list[dict] = []
+    for n in sorted(word):
+        mine = [r for r in reports if _issue_number(r.get("issue")) == n]
+        theirs = [r for r in recs if _issue_number(r.get("issue")) == n]
+        last = max([_epoch_of(r.get("epoch")) for r in mine] + [_epoch_of(r.get("started")) for r in theirs]
+                   + [word[n]["last"]])
+        history = _dispatch.issue_history(root, n)
+        named = [(_epoch_of(r.get("epoch")), t) for r in mine if (t := _track_of(r.get("track")))] + [
+            (_epoch_of(r.get("started")), t) for r in theirs if (t := _track_of(r.get("track")))]
+        track = _dispatch.history_track(history) or (max(named, key=lambda x: x[0])[1] if named else None)
+        starts = _dispatch.history_starts(history)
+        claimed = min(starts) if starts else (min(_epoch_of(r.get("epoch")) for r in mine) if mine else None)
+        entry = {"issue": n, "track": track, **word[n], "claimed": claimed, "last": last}
+        (dormant if now - last > DORMANT_DAYS * 86400 else counted).append(entry)
+    hosts: dict[str, int] = {}
+    for rec in reports:
+        host = str(rec.get("host") or "")
+        if host and host != own:
+            hosts[host] = max(0, int((now - _epoch_of(rec.get("epoch"))) // 60))
+    notes = [UNDERCOUNT_NOTE] if fetched is False else []
+    notes += [f"host {h} as of {m} min ago" for h, m in sorted(hosts.items())]
+    return {"in_progress": counted, "dormant": dormant, "fetched": fetched, "hosts": hosts, "notes": notes}
+
+
 # --- the train's hold (#326): one owner, read by the train and shown here (#336) -----------
 
 # the report states that hold a branch (`blocked`) or release it (#326)

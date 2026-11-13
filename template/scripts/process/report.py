@@ -11,7 +11,8 @@ hour as stale.
 
 Where it lands: `<git common dir>/process-tower/reports.jsonl` — shared by
 every worktree of this clone on this machine, never committed, one line
-per report: {"ts","host","worker","branch","issue","state","note","cwd"}.
+per report: {"ts","host","worker","branch","issue","state","note","cwd"} and,
+where the issue has one, its "track" (PROCESS_TRACK).
 
 More than one host (the steward on one machine, a detached worker on
 another): `--sync` (or PROCESS_REPORT_SYNC=1) publishes this host's file
@@ -130,7 +131,10 @@ def parse_usage(text: str) -> dict:
 
 def write_report(root: Path, state: str, *, issue: int | None, note: str, worker: str | None,
                  model: str | None = None, effort: str | None = None, execution: str | None = None,
-                 usage: dict | None = None) -> dict:
+                 usage: dict | None = None, track: str | None = None) -> dict:
+    """One report line into this host's file. `track` (or PROCESS_TRACK, which dispatch sets from the
+    issue's phase history) names the issue's track of the mandate's `steering` block; absent when
+    neither says one (v2.97)."""
     # never empty: an empty model was indistinguishable from a lost field downstream
     model = (model or os.environ.get("PROCESS_MODEL") or "").strip()
     if not model:
@@ -152,6 +156,7 @@ def write_report(root: Path, state: str, *, issue: int | None, note: str, worker
         "cwd": str(root),
         **({"execution": execution} if execution else {}),
         **({"usage": usage} if usage else {}),
+        **({"track": tr} if (tr := (track or os.environ.get("PROCESS_TRACK") or "").strip()) else {}),
     }
     p = reports_path(root)
     if p is None:
@@ -213,12 +218,16 @@ def _run(argv: list[str], timeout: float = 60) -> bool:
         return False
 
 
-def fetch_reports(root: Path, remote: str = "origin") -> bool:
-    return _run(["git", "-C", str(root), "fetch", "--quiet", remote, f"+{REPORT_REFS}/*:{REPORT_REFS}/*"])
+def fetch_reports(root: Path, remote: str = "origin", timeout: float = 60) -> bool:
+    """Fetch every host's published reports; `timeout` bounds the call in seconds (dispatch asks
+    with 15 before it counts the work in progress)."""
+    return _run(["git", "-C", str(root), "fetch", "--quiet", remote, f"+{REPORT_REFS}/*:{REPORT_REFS}/*"],
+                timeout)
 
 
-def sync_reports(root: Path, remote: str = "origin") -> bool:
-    """Publish this host's reports file as a blob ref on the remote."""
+def sync_reports(root: Path, remote: str = "origin", timeout: float = 60) -> bool:
+    """Publish this host's reports file as a blob ref on the remote — the whole file, which only
+    grows, so a later sync carries every earlier line. `timeout` bounds each git call."""
     p = reports_path(root)
     if p is None or not p.is_file():
         return False
@@ -226,9 +235,9 @@ def sync_reports(root: Path, remote: str = "origin") -> bool:
     if not blob:
         return False
     ref = f"{REPORT_REFS}/{host_name()}"
-    if not _run(["git", "-C", str(root), "update-ref", ref, blob]):
+    if not _run(["git", "-C", str(root), "update-ref", ref, blob], timeout):
         return False
-    return _run(["git", "-C", str(root), "push", "--quiet", "--force", remote, f"{ref}:{ref}"])
+    return _run(["git", "-C", str(root), "push", "--quiet", "--force", remote, f"{ref}:{ref}"], timeout)
 
 
 def pushed_refusal(root: Path, remote: str = "origin") -> str | None:
