@@ -115,3 +115,6 @@ def _outside_ci(monkeypatch):
     # the host's /tmp towards that limit, and a test about something else then fails
     # on the host's disk. The disk-guard tests set or drop the variable themselves.
     monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "100")
+    # a suite run inside a dispatched worker inherits its PROCESS_WORKER — a branch of the
+    # outer repository, none of a test's: report.py would refuse it (v2.97 B8)
+    monkeypatch.delenv("PROCESS_WORKER", raising=False)

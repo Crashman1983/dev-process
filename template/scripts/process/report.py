@@ -28,6 +28,13 @@ must have moved past that point. A premature `pushed` let the steward
 start the next phase on a branch that held none of this phase's work
 (observed downstream three times in one day). `--force` records it anyway,
 marked unverified in the note — for an origin that is unreachable.
+
+The worker is checked too: the train, the tower and dispatch find reports
+by `worker == branch`, so `--worker`, PROCESS_WORKER and the current-branch
+fallback must name a local or remote-tracking branch (a detached `HEAD`
+names none) — else exit 2. `done` and `idle` also take a deleted branch
+that `phases/branches.json` or a former report knows: the merge may have
+removed it before the worker said so.
 Stdlib only."""
 from __future__ import annotations
 
@@ -261,12 +268,53 @@ def pushed_refusal(root: Path, remote: str = "origin") -> str | None:
     return None
 
 
+# `done` and `idle` may name a branch that is gone: the merge deleted it before the worker
+# said so (`finish`, `commands/report.md`) — for a name dispatch or a former report knows
+_AFTER_THE_BRANCH = ("done", "idle")
+
+
+def _is_branch(root: Path, name: str) -> bool:
+    """A local branch `name`, or a remote-tracking `<remote>/name`. `HEAD` is none:
+    a detached checkout names no branch, and `<remote>/HEAD` is a pointer."""
+    if not name or name == "HEAD":
+        return False
+    if _git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}^{{commit}}"):
+        return True
+    tracking = _git(root, "for-each-ref", "--format=%(refname)", "refs/remotes/")
+    return any(ref.removeprefix("refs/remotes/").partition("/")[2] == name for ref in tracking.splitlines())
+
+
+def _known_worker(root: Path, name: str) -> bool:
+    """A name dispatch placed issues on (`phases/branches.json`) or a former report carries
+    — this host's or a fetched one."""
+    if any(rec.get("worker") == name for rec in read_reports(root, remote=True)):
+        return True
+    from dispatch import BRANCH_INDEX, DISPATCH_DIR, common_dir  # late: dispatch imports this module
+    try:
+        index = json.loads((common_dir(root) / DISPATCH_DIR / "phases" / BRANCH_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(index, dict) and name in index
+
+
+def worker_refusal(root: Path, state: str, worker: str) -> str | None:
+    """Why `worker` cannot carry this report — None when it may. The train, the tower and
+    dispatch find a worker's reports by `worker == branch`; a report under another name is
+    never read."""
+    if _is_branch(root, worker) or (state in _AFTER_THE_BRANCH and worker != "HEAD"
+                                    and _known_worker(root, worker)):
+        return None
+    return f"worker {worker} is no branch — the train and the tower match reports by branch"
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="report.py", description=__doc__.split("\n\n")[0])
     p.add_argument("state", choices=STATES)
     p.add_argument("--issue", type=int)
     p.add_argument("--note", default="")
-    p.add_argument("--worker", help="name (default: PROCESS_WORKER or the branch)")
+    p.add_argument("--worker", help="the branch (default: PROCESS_WORKER or the current branch); it must "
+                                     "be a local or remote-tracking branch — `done` and `idle` also take a "
+                                     "deleted one that dispatch or a former report knows")
     p.add_argument("--model", help="the model doing this phase (default: PROCESS_MODEL) — what the KPIs cut by")
     p.add_argument("--effort", help="the reasoning effort of this phase's cell (default: PROCESS_EFFORT)")
     p.add_argument("--execution", choices=EXECUTION,
@@ -289,6 +337,12 @@ def main(argv: list[str]) -> int:
             usage = parse_usage(a.usage)
         except ValueError as exc:
             print(f"report: --usage {exc}", file=sys.stderr)
+            return 2
+    if _git(root, "rev-parse", "--git-dir"):  # outside a clone, write_report names that
+        worker = a.worker or default_worker(root)
+        refused = worker_refusal(root, a.state, worker)
+        if refused:
+            print(f"report: {refused}", file=sys.stderr)
             return 2
     note = a.note
     if a.state == "pushed":
