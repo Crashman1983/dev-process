@@ -2271,8 +2271,20 @@ def _wip_event(root: Path, *, issue: int, branch: str, track: str, limit: int, m
         "head": None, "dirty": None, "ci": False})
 
 
+def begun_elsewhere(root: Path, issue: int) -> bool:
+    """Was the issue begun before, outside this host's phase starts? A `started` claim of any host
+    (as fetched; only dispatch writes it, on a first start under a WIP limit) or a local history
+    from before v2.94 with branches but no `starts`. A `done` or a steward's report naming the issue
+    is no beginning — mentioning an issue must not exempt it from its first-start check."""
+    import tower  # noqa: PLC0415
+    if any(r.get("state") == "started" and tower._issue_number(r.get("issue")) == issue
+           for r in _report.read_reports(root, remote=True)):
+        return True
+    return bool(issue_history(root, issue).get("branches"))
+
+
 def wip_check(root: Path, *, issue: int, branch: str, track: str | None, over_wip: str | None,
-              settings: dict, net: tuple[bool | None, bool | None], dry_run: bool) -> tuple[str | None, str | None]:
+              settings: dict, net: tuple[bool | None, bool | None], dry_run: bool) -> tuple[str | None, str | None, bool]:
     """(refusal, track) of a start that may be an issue's first: one not in progress on any host
     (`tower.in_progress`, as `net` fetched it) — the issue never counts against itself. A started
     one keeps its track. A first start needs a track once `steering.tracks` is set; at its track's
@@ -2283,26 +2295,23 @@ def wip_check(root: Path, *, issue: int, branch: str, track: str | None, over_wi
     work = tower.in_progress(root, fetch=False)
     mine = [e for e in work["in_progress"] if e["issue"] == issue]
     if mine:
-        return None, track or mine[0]["track"]
-    # begun before, on another host (its reports, as fetched) or in a history from before v2.94
-    # without `starts`: a continuation, never a first start — it keeps its track
-    seen = [r for r in _report.read_reports(root, remote=True) if tower._issue_number(r.get("issue")) == issue]
-    if seen or issue_history(root, issue).get("branches"):
-        return None, track or tower.issue_facts(root, issue, reports=seen)[0]
+        return None, track or mine[0]["track"], False
+    if begun_elsewhere(root, issue):  # a continuation, never a first start — it keeps its track
+        return None, track or tower.issue_facts(root, issue)[0], False
     track = track or next((e["track"] for e in work["dormant"] if e["issue"] == issue), None)
     notes = ([tower.UNDERCOUNT_NOTE] if False in net else []) + list(work["notes"])
     said = "".join(f"; {n}" for n in notes)
     tracks = settings.get("tracks")
     if tracks and not track:
         return (f"#{issue} starts here first and the mandate's steering.tracks is set — pass --track "
-                f"<{', '.join([*tracks, optimize.PROCESS_TRACK])}> (or record it: dispatch.py track)"), None
+                f"<{', '.join([*tracks, optimize.PROCESS_TRACK])}> (or record it: dispatch.py track)"), None, True
     key = "process_issues_in_progress" if track == optimize.PROCESS_TRACK else "wip_per_track"
     limit = settings.get(key) if track else None
     members = sorted(e["issue"] for e in work["in_progress"] if track and e["track"] == track)
     if limit is None or len(members) < limit:
         print(f"dispatch: wip — track {track or 'untracked'}: {len(members)} in progress"
               + (f", limit {limit}" if limit is not None else ", no limit") + said)
-        return None, track
+        return None, track, True
     what = (f"track {track} at its limit {limit} ({key}): in progress "
             f"{', '.join(f'#{n}' for n in members)}")
     if over_wip:
@@ -2310,12 +2319,12 @@ def wip_check(root: Path, *, issue: int, branch: str, track: str | None, over_wi
             _wip_event(root, issue=issue, branch=branch, track=track, limit=limit, members=members,
                        outcome="override", reason=over_wip)
         print(f"dispatch: wip — {what}; started over the limit: {over_wip}{said}", file=sys.stderr)
-        return None, track
+        return None, track, True
     if not dry_run:
         _wip_event(root, issue=issue, branch=branch, track=track, limit=limit, members=members,
                    outcome="refused", reason=f"track {track} at its limit")
     return (f"wip — {what}; take a track below its limit, finish one of these, or start with "
-            f'--over-wip "<reason>" on the owner\'s DECISION{said}'), track
+            f'--over-wip "<reason>" on the owner\'s DECISION{said}'), track, True
 
 
 def growth_note(root: Path, issue: int, settings: dict, now: float | None = None) -> str | None:
@@ -2432,8 +2441,9 @@ def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str 
     if full:
         print(f"dispatch: not starting — {full}", file=sys.stderr)
         return 3
+    first = False  # a first start publishes its claim (`_publish_claim`), on every path below
     if net is not None:  # maybe the issue's first start: the WIP limit (start holds the lock)
-        why, track = wip_check(root, issue=issue, branch=branch, track=track, over_wip=over_wip,
+        why, track, first = wip_check(root, issue=issue, branch=branch, track=track, over_wip=over_wip,
                                settings=settings, net=net, dry_run=dry_run)
         if why:
             print(f"dispatch: not starting — {why}", file=sys.stderr)
@@ -2594,6 +2604,8 @@ def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str 
                         "log": str(log)})
             _write_record(root, branch, rec)
             _remember_issue(root, issue, branch)
+            if first and not dry_run:
+                _publish_claim(root, issue=issue, branch=branch, track=track, model=model)
             print(f"dispatch: handing {phase} for #{issue} on {branch} to another host with {label} from "
                   f"tmux {session}:{window} ({window_id}) — watch it with `dispatch.py log {branch}`; "
                   f"reports via origin (`tower.py --remote`)")
@@ -2610,6 +2622,8 @@ def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str 
         rec["handover"] = r.stdout.strip()[-400:]
         _write_record(root, branch, rec)
         _remember_issue(root, issue, branch)
+        if first and not dry_run:
+            _publish_claim(root, issue=issue, branch=branch, track=track, model=model)
         print(f"dispatch: handed {phase} for #{issue} on {branch} to another host with {label} — "
               f"reports via origin (`tower.py --remote`)" + (f"\n  {rec['handover']}" if rec["handover"] else ""))
         return 0
@@ -2650,6 +2664,8 @@ def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str 
             rec["log"] = str(Path(rec["evidence"]) / "stdout.log")
             _write_record(root, branch, rec)
             _remember_issue(root, issue, branch)
+            if first and not dry_run:
+                _publish_claim(root, issue=issue, branch=branch, track=track, model=model)
             codex_run.activate(rec)
         except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
             print(f"dispatch: Codex launch refused — {exc}", file=sys.stderr)
@@ -2679,7 +2695,7 @@ def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str 
         where = f"pid {proc.pid}"
     _write_record(root, branch, rec)
     _remember_issue(root, issue, branch)
-    if net is not None and not dry_run:
+    if first and not dry_run:
         _publish_claim(root, issue=issue, branch=branch, track=track, model=model)
     print(f"dispatch: started {phase} for #{issue} on {branch} with {label} ({where}, log {log.name})")
     return 0
@@ -3095,6 +3111,8 @@ def stop(root: Path, branch: str, *, force: bool, keep_report: bool = False) -> 
                                  note=f"stopped by dispatch ({rec.get('phase')})", worker=branch)
         except SystemExit:
             pass
+        if _report.publish_if_steered(root) is False:  # the other host would count it until a sync
+            print(f"dispatch: {branch}'s idle is written but not published", file=sys.stderr)
     p.unlink()
     print(f"dispatch: stopped {branch}")
     return 0
@@ -3243,7 +3261,7 @@ def _needs_track(root: Path, issue: int, settings: dict) -> bool:
     if history_starts(history) or history_track(history):
         return False
     import tower  # noqa: PLC0415
-    if tower.issue_facts(root, issue)[0]:
+    if tower.issue_facts(root, issue)[0] or begun_elsewhere(root, issue):
         return False
     return not any(e["issue"] == issue for e in tower.in_progress(root, fetch=False)["in_progress"])
 

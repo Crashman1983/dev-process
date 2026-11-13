@@ -683,7 +683,7 @@ def wip(root: Path) -> list[dict]:
     when work carries no track. [] without the block. The tower decides nothing: dispatch refuses."""
     import optimize  # noqa: PLC0415 — the steering block's one reader
     settings, _problems = optimize.steering(root)
-    if not settings:
+    if not optimize.holds_wip(settings):  # no WIP limit: nothing is published, nothing to count
         return []
     seen = in_progress(root, fetch=False)
     work = seen["in_progress"]
