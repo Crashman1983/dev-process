@@ -152,7 +152,10 @@ untouched open issue gets a comment naming the question. Then
 `tower.py --remote --min-severity low`: `remote-residue` names unmerged
 branches nobody has touched for weeks — ask the owner, then delete.
 Residue is never "later": a clean tree is the precondition for every
-table you read.
+table you read. Template updates go by the mandate's
+`steering.kit_update_cadence_days`: `uv run scripts/process/template_update.py --dry-run`
+says due, due now or defer — batch the releases into one update when due,
+and take a `[required]` change at once.
 
 ## Improvement loop — the process gets measurably better
 

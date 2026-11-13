@@ -130,6 +130,10 @@ fix. Each update is a branch, an acknowledgment and a train run; taking every
 patch release as it comes turned the template's release rate into the
 project's process load downstream. Carry a local workaround for a known
 template defect until the next scheduled update rather than updating twice.
+Where the mandate sets `steering.kit_update_cadence_days`,
+`template_update.py --dry-run` names the last update and says due, due now
+or defer: batch the releases into one update by that cadence, and take a
+`[required]` change at once.
 
 Verification also catches a release-pin bump that leaves a changed template
 file at the old version. Template deletions qualify only when the old project

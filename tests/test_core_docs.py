@@ -529,6 +529,19 @@ def test_the_weekly_pass_weighs_the_process_share_against_its_limit(render, tmp_
     assert "share" in seen and "weeks" in seen, seen
 
 
+def test_template_updates_go_by_the_cadence_and_required_at_once(render, tmp_path):
+    # v2.97 B6 (#415 AC-3/4): batch by the mandate's cadence, a [required] change at once
+    out = render(tmp_path, {"project_name": "demo", "harnesses": {"claude": True}})
+    releases = " ".join((out / "docs/process/releases.md").read_text().split())
+    when = releases.split("**When to update.**", 1)[1].split("**", 1)[0]
+    assert "steering.kit_update_cadence_days" in when and "--dry-run" in when, when
+    assert "`[required]` change at once" in when, when
+    steward = (out / ".claude/commands/steward.md").read_text()
+    housekeeping = " ".join(steward.split("## Housekeeping", 1)[1].split("\n## ", 1)[0].split())
+    assert "kit_update_cadence_days" in housekeeping and "template_update.py --dry-run" in housekeeping
+    assert "`[required]` change at once" in housekeeping, housekeeping
+
+
 def test_threat_question_at_tier3(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     checklist = (out / "docs/process/review-checklist.md").read_text()
