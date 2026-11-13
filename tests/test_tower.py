@@ -1093,3 +1093,53 @@ def test_a_host_first_read_during_the_run_brings_no_news(render, tmp_path, monke
     # the same blocked from a host boarding did read is news of this run
     local.append({"worker": "alpha", "epoch": 3, "state": "blocked", "note": "new", "host": "me"})
     assert tower.held_since(out, seen)["alpha"]["note"] == "new"
+
+
+def _dated(root: Path, rel: str, text: str, msg: str, day: int) -> None:
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    _git(root, "add", "-A")
+    when = f"2026-03-{day:02d}T09:00:00+00:00"
+    subprocess.run(["git", "commit", "-q", "-m", msg], cwd=root, check=True, capture_output=True,
+                   env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+
+
+def test_issue_branch_commits_counts_a_rebased_copy_once_and_no_integration_commit(render, tmp_path, monkeypatch):
+    """#413 (v2.96 A2, v2.97 B4): the commits on an issue's branches, local and remote, each
+    `--no-merges <branch> --not <integration>`, authored since the claim; a local branch and
+    its remote copy after a rebase count once (`git patch-id --stable`)."""
+    from datetime import datetime, timezone
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = tmp_path / "origin.git"
+    _git(tmp_path, "init", "-q", "--bare", str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "push", "-q", "origin", "main")
+    _git(out, "checkout", "-q", "-b", "12-x")
+    _dated(out, "src/a.py", "a\n", "feat: a", 2)
+    _dated(out, "src/b.py", "b\n", "feat: b", 3)
+    _git(out, "push", "-q", "origin", "12-x")
+    _git(out, "checkout", "-q", "main")
+    _dated(out, "src/c.py", "c\n", "feat: c on main", 4)
+    _git(out, "push", "-q", "origin", "main")
+    _git(out, "checkout", "-q", "12-x")
+    _git(out, "rebase", "-q", "main")  # the local copy has new SHAs, origin/12-x the old ones
+    _git(out, "checkout", "-q", "-b", "feat/12-more", "main")
+    _dated(out, "src/d.py", "d\n", "feat: d", 5)
+    _git(out, "checkout", "-q", "main")
+    _dated(out, "src/e.py", "e\n", "feat: e on main", 6)
+    _git(out, "push", "-q", "origin", "main")
+    _git(out, "checkout", "-q", "feat/12-more")
+    _git(out, "merge", "-q", "--no-ff", "-m", "Merge main", "main")  # main's commits stay main's
+    _git(out, "checkout", "-q", "-b", "13-y", "main")
+    _dated(out, "src/y.py", "y\n", "feat: y", 5)
+    _git(out, "checkout", "-q", "main")
+    tower = _load_tower(out)
+    assert tower.integration_ref(out) == "origin/main"
+    assert tower.issue_branch_commits(out, 12, None) == 3  # a, b, d — not c, e, the merge, the copies
+    assert tower.issue_branch_commits(out, 12, datetime(2026, 3, 2, 12, tzinfo=timezone.utc)) == 2
+    assert tower.issue_branch_commits(out, 13, None) == 1
+    assert tower.issue_branch_commits(out, 99, None) == 0
+    monkeypatch.setattr(tower, "integration_ref", lambda _root: None)
+    assert tower.issue_branch_commits(out, 12, None) is None  # no integration branch: unknown
