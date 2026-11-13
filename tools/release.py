@@ -137,7 +137,7 @@ SECTIONS_MARKER = "Geänderte Abschnitte"
 SECTIONS_MARKERS = {"CHANGELOG.md": "Changed sections", "CHANGELOG-DE.md": SECTIONS_MARKER}
 
 
-def _sections_reader(root: Path):
+def _changes_reader(root: Path):
     spec = importlib.util.spec_from_file_location(
         "release_check_overlays", root / "template/scripts/process/check_overlays.py")
     mod = importlib.util.module_from_spec(spec)
@@ -146,7 +146,7 @@ def _sections_reader(root: Path):
         spec.loader.exec_module(mod)
     finally:
         sys.dont_write_bytecode = keep
-    return mod.sections
+    return mod.section_changes
 
 
 def changed_sections(root: Path) -> list[str] | None:
@@ -158,23 +158,19 @@ def changed_sections(root: Path) -> list[str] | None:
                             capture_output=True, text=True)
     if listed.returncode != 0:
         return None
-    sections, out = None, []
+    section_changes, out = None, []
     for rel in sorted((listed.stdout or "").splitlines()):
         if not rel.endswith((".md", ".md.jinja")) or rel.endswith(".local.md"):
             continue
         old = subprocess.run(["git", "-C", str(root), "show", f"{base}:{rel}"], capture_output=True, text=True)
         if old.returncode != 0:
             continue
-        sections = sections or _sections_reader(root)
+        section_changes = section_changes or _changes_reader(root)
         path = root / rel
         if not path.is_file() and (root / f"{rel}.jinja").is_file():  # became a template: not gone
             path = root / f"{rel}.jinja"
-        now = sections(path.read_text(encoding="utf-8")) if path.is_file() else {}
-        for heading, body in sections(old.stdout).items():
-            if heading not in now:
-                out.append(f"{rel}: {heading} — gone")
-            elif now[heading] != body:
-                out.append(f"{rel}: {heading} — changed")
+        now = path.read_text(encoding="utf-8") if path.is_file() else ""
+        out += [f"{rel}: {heading} — {kind}" for heading, kind in section_changes(old.stdout, now).items()]
     return out
 
 

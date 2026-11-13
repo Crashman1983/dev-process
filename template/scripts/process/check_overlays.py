@@ -106,6 +106,15 @@ def sections(text: str) -> dict[str, str]:
     return out
 
 
+def section_changes(old: str, new: str) -> dict[str, str]:
+    """Heading -> "changed" or "gone" for every section of `old` that `new` reads
+    differently or lacks; a new section breaks no overlay. The template's release tool
+    names these in its CHANGELOG, `template_update.py --dry-run` before an update."""
+    before, after = sections(old), sections(new)
+    return {heading: "gone" if heading not in after else "changed"
+            for heading, body in before.items() if after.get(heading) != body}
+
+
 def section_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
@@ -122,6 +131,23 @@ def overlays(root: Path) -> list[Path]:
         except (OSError, UnicodeDecodeError):
             found.append(p)  # unreadable: check() names it
     return found
+
+
+def anchored(root: Path) -> list[tuple[str, str, list[str]]]:
+    """(overlay, the template file it names, the headings it anchors to) for every
+    overlay whose head parses — what `template_update.py --dry-run` compares between
+    two releases. An overlay that does not parse is check_one's to name."""
+    out = []
+    for overlay in overlays(root):
+        try:
+            text = unfenced(overlay.read_text(encoding="utf-8")).lstrip("﻿")
+        except (OSError, UnicodeDecodeError):
+            continue
+        head = HEAD.search(text)
+        if head:
+            out.append((overlay.relative_to(root).as_posix(), head.group("path").removeprefix("./"),
+                        [_norm(a.group("heading")) for a in ANCHOR.finditer(text)]))
+    return out
 
 
 def target_of(root: Path, rel: str) -> Path | None:
