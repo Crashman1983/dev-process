@@ -7,7 +7,7 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
-## v2.96.0 — Steering with limits: open work measured and held, lanes for heavy runs
+## v2.97.0 — Steering with limits: open work measured and held, lanes for heavy runs
 
 The improvement loop now sees open work, not only merged work: how many issues are in progress at once, how long each has run and how much it keeps growing, and whether new issues outrun closed ones. The value reading finds long-running product epics it used to miss. A session's start load per harness is measured, and a dry run of a template update says which changes a project must take now; from this release every change in the notes is marked required, recommended or optional. A project can now set limits in its mandate: how many issues each track may have in progress (the steward then starts nothing in a full track), how large the share of pure process work may grow, and how often template updates are taken. Two heavy test runs on one machine no longer collide.
 

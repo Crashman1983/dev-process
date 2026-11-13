@@ -55,7 +55,7 @@ record, not an accident.
 2. Run `uv run scripts/process/template_update.py --ref <release>` on a clean
    branch. Resolve conflicts and port owned-file deltas deliberately. Before
    that, `--dry-run` lists per release since the installed one its
-   `[required]` changes (from v2.96 every change is marked `[required]`,
+   `[required]` changes (from v2.97 every change is marked `[required]`,
    `[recommended]` or `[optional]`) and the overlays whose anchored sections
    the template changed; it changes nothing.
 3. Run `uv run --script scripts/process/template_verify.py --base <baseline-sha>`.

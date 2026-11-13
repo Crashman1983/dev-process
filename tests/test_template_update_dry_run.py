@@ -112,7 +112,7 @@ def test_dry_run_names_the_required_items_and_the_overlays_to_re_check(repos):
     assert "1 required" in marks and "1 recommended" in marks and "1 optional" in marks, marks
     for version in ("v2.95.0 — Plain", "v2.94.0 — Bold"):
         line = next(ln for ln in out.splitlines() if version in ln)
-        assert "not marked (before v2.96)" in line, line
+        assert "not marked (before v2.97)" in line, line
     assert "v2.93.0 — Oldest" not in out  # the installed release is no change
     assert "docs/process/testing.local.md: ## Stages — changed" in out
     assert "docs/process/testing.local.md: ## Retired — gone" in out
