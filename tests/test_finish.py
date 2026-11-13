@@ -1291,3 +1291,127 @@ def test_merge_events_count_the_cost_commit_in_its_own_finish_event(render, tmp_
     assert (seven["process_lines"], eight["process_lines"]) == (4 + 2, 4), (seven, eight)
     assert shard not in eight["process_files"]
     assert not seven["mixed"]
+
+
+# --- v2.97 B7: `finish --tests` holds the lane `full` ---------------------------------------
+
+def _lane_config(out: Path, *, full_wait: float = 60, own_script: bool = False) -> None:
+    import json
+    (out / "docs/process/testing.local.json").write_text(json.dumps(
+        {"lanes": {"scoped": {"wait": 5}, "full": {"wait": full_wait}}}))
+    if own_script:
+        (out / "scripts/lane.py").write_text("print('scoped: free')\nprint('full: free')\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "lanes")
+    _git(out, "push", "-q", "origin", "HEAD")
+
+
+def _hold_full(out: Path, seconds: float, label: str = "other-holder"):
+    """A process outside finish that holds `full` for `seconds`."""
+    import time
+    code = f"import time; time.sleep({seconds!r})"
+    lanes = Path(os.environ["PROCESS_LANE_DIR"])
+    holder = subprocess.Popen([sys.executable, str(out / "scripts/process/lane.py"), "run", "--lane", "full",
+                               "--label", label, "--no-nice", "--", sys.executable, "-c", code], cwd=out,
+                              env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    for _ in range(200):
+        if (lanes / "test-lane-full.status").exists():
+            return holder
+        time.sleep(0.05)
+    holder.kill()
+    raise AssertionError("the holder never took the lane")
+
+
+def _suite_script(tmp_path: Path) -> tuple[str, Path]:
+    """A `--tests` command that writes when it started, what `lane.py status` says while it
+    runs, and the exit of `lane.py run --lane full --wait 0` inside it — a project's suite
+    that queues on the lane itself."""
+    seen = tmp_path / "seen"
+    script = tmp_path / "suite.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "started = time.time()\n"
+        "status = subprocess.run([sys.executable, 'scripts/process/lane.py', 'status'],\n"
+        "                        capture_output=True, text=True).stdout\n"
+        "nested = subprocess.run([sys.executable, 'scripts/process/lane.py', 'run', '--lane', 'full',\n"
+        "                         '--wait', '0', '--', sys.executable, '-c', 'pass']).returncode\n"
+        f"open({str(seen)!r}, 'w').write(f'{{started!r}}\\n{{nested}}\\n{{status}}')\n"
+        "sys.exit(nested)\n")
+    return f"{sys.executable} {script}", seen
+
+
+def test_finish_tests_holds_full_and_the_suites_own_lane_call_runs_through(render, tmp_path):
+    """B7: the suite runs under `full`, held by finish; `lane.py run --lane full` inside it
+    passes through (`PROCESS_LANE_HELD`), it does not wait for its own parent."""
+    out, bare = _repo_with_origin(render, tmp_path)
+    _lane_config(out)
+    cmd, seen = _suite_script(tmp_path)
+    r = _run_args(out, "--apply", "--tests", cmd)
+    assert r.returncode == 0, r.stdout + r.stderr
+    _started, nested, status = seen.read_text().split("\n", 2)
+    assert nested == "0", status
+    assert "full: held by" in status and "finish --tests" in status, status
+    assert "payload.txt" in subprocess.run(["git", "ls-tree", "-r", "--name-only", "main"], cwd=bare,
+                                           capture_output=True, text=True, check=True).stdout
+    assert "full: free" in subprocess.run([sys.executable, str(out / "scripts/process/lane.py"), "status"],
+                                          cwd=out, capture_output=True, text=True).stdout
+
+
+def test_two_finish_runs_serialise_on_full(render, tmp_path):
+    """B7: a second heavy run on the host waits for the first to let go of `full`."""
+    import time
+    out, _bare = _repo_with_origin(render, tmp_path)
+    _lane_config(out)
+    cmd, seen = _suite_script(tmp_path)
+    holder = _hold_full(out, 120.0)
+    said = tmp_path / "finish.err"
+    with said.open("w") as err:
+        finish = subprocess.Popen([sys.executable, str(out / "scripts/process/finish.py"), "--apply", "--tests",
+                                   cmd, "."], cwd=out, stdout=subprocess.DEVNULL, stderr=err, text=True)
+    try:
+        # until finish queues on the lane — or, holding none, has run its suite and ended
+        while finish.poll() is None and "waiting" not in said.read_text():
+            time.sleep(0.05)
+    finally:
+        holder.kill()
+        holder.wait()
+    released = time.time()
+    assert finish.wait(timeout=120) == 0, said.read_text()
+    started = float(seen.read_text().split("\n", 1)[0])
+    assert started >= released, (started, released)
+
+
+def test_finish_on_a_held_full_lane_exits_75_and_merges_nothing(render, tmp_path):
+    """B7: past the lane's wait budget, exit 75 naming the holder; the suite never ran,
+    origin's main is where it was, the branch stays."""
+    out, bare = _repo_with_origin(render, tmp_path)
+    _lane_config(out, full_wait=1)
+    main_before = _git(bare, "rev-parse", "main").stdout
+    cmd, seen = _suite_script(tmp_path)
+    holder = _hold_full(out, 30.0)
+    try:
+        r = _run_args(out, "--apply", "--tests", cmd)
+    finally:
+        holder.kill()
+        holder.wait()
+    assert r.returncode == 75, r.stdout + r.stderr
+    said = r.stdout + r.stderr
+    assert "other-holder" in said and "nothing merged" in said, said
+    assert not seen.exists()
+    assert _git(bare, "rev-parse", "main").stdout == main_before
+    assert _git(bare, "rev-parse", "--verify", "feature").returncode == 0
+
+
+def test_finish_with_the_projects_own_lane_script_holds_nothing(render, tmp_path):
+    """B7: a project that kept its own `scripts/lane.py` holds its lanes itself — finish
+    takes no lock first, as `test_select.run`: a held template lane does not stop it."""
+    out, _bare = _repo_with_origin(render, tmp_path)
+    _lane_config(out, full_wait=1, own_script=True)
+    holder = _hold_full(out, 30.0)
+    try:
+        r = _run_args(out, "--apply", "--tests", "true")
+    finally:
+        holder.kill()
+        holder.wait()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "merged feature into main" in r.stdout, r.stdout
