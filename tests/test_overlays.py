@@ -240,3 +240,22 @@ def test_template_update_names_the_overlays_to_re_check(render, tmp_path, monkey
             sys.modules.pop(name, None)
     printed = capsys.readouterr().out
     assert "re-check an overlay" in printed and "testing.local.md" in printed
+
+
+def test_section_changes_names_changed_and_gone_sections_only():
+    """v2.96 A5: one owner of the section comparison, for release.py and template_update."""
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "overlays_section_changes", Path(__file__).resolve().parents[1] / "template/scripts/process/check_overlays.py")
+    mod = importlib.util.module_from_spec(spec)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = keep
+    old = "# X\n\n## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n"
+    new = "# X\n\n## A\n\na\n\n## B\n\nb, sharper\n\n## D\n\nnew\n"
+    assert mod.section_changes(old, new) == {"# X": "changed", "## B": "changed", "## C": "gone"}
+    assert mod.section_changes(old, old) == {}
+    assert mod.section_changes(old, "") == {"# X": "gone", "## A": "gone", "## B": "gone", "## C": "gone"}

@@ -17,6 +17,11 @@ makes the owner list explicit and the port mechanical:
      port by hand, without the noise of the local divergence.
   4. Leftover conflict markers in non-owned files are listed.
 
+`--dry-run` changes nothing. From a clone of the template source it names the
+`[required]` items of every release between the installed one and the target
+(`changelog.py`) and the overlays whose anchored section the template changed
+(`check_overlays.section_changes`) — the work an update brings, before it runs.
+
 Stdlib plus the `copier` CLI on PATH (uvx copier works; PyYAML, copier's
 own dependency, is used when importable). The two extra
 renders cost seconds; the manual port they replace cost an hour.
@@ -249,6 +254,132 @@ def leftover_conflicts(root: Path, owned: list[str]) -> list[str]:
     return hits
 
 
+# a template path names its rendered file once `{% if … %}name{% endif %}` reads `name`
+# and `.jinja` is gone — how an overlay's `overlay-of:` path finds its source file
+_JINJA_IF = re.compile(r"\{%-?\s*if\b[^%]*%\}(.*?)\{%-?\s*endif\s*-?%\}")
+_SUBDIRECTORY = re.compile(r"^_subdirectory:[ \t]*['\"]?([^'\"\s#]+)", re.MULTILINE)
+MARKED_SINCE = (2, 96, 0)  # the release notes carry their marks from this release on
+
+
+def rendered_path(source_rel: str) -> str:
+    return _JINJA_IF.sub(r"\1", source_rel).removesuffix(".jinja")
+
+
+def _bare_read(clone: Path, *args: str) -> bytes:
+    from process_git import git_environment  # noqa: PLC0415
+    from template_verify import _bare  # noqa: PLC0415
+    r = subprocess.run([*_bare(clone), *args], capture_output=True, timeout=120, env=git_environment())
+    if r.returncode:
+        raise ValueError(r.stderr.decode(errors="replace").strip() or f"git {args[0]} failed")
+    return r.stdout
+
+
+def _blob(clone: Path, sha: str, rel: str) -> str | None:
+    """The file at `sha`, None when it is not there; the blob-less clone fetches just it."""
+    try:
+        return _bare_read(clone, "cat-file", "blob", f"{sha}:{rel}").decode("utf-8", errors="replace")
+    except ValueError:
+        return None
+
+
+def _source_files(clone: Path, sha: str) -> dict[str, str]:
+    """Rendered path -> template source path at `sha`, below copier's `_subdirectory`."""
+    config = _blob(clone, sha, "copier.yml") or _blob(clone, sha, "copier.yaml") or ""
+    sub = _SUBDIRECTORY.search(config)
+    prefix = sub.group(1).strip("/") + "/" if sub else ""
+    out: dict[str, str] = {}
+    for rel in _bare_read(clone, "ls-tree", "-r", "-z", "--name-only", sha).decode(
+            errors="surrogateescape").split("\0"):
+        if rel.startswith(prefix):
+            out.setdefault(rendered_path(rel[len(prefix):]), rel)
+    return out
+
+
+def _latest_release(clone: Path) -> str | None:
+    from process_git import release_of  # noqa: PLC0415
+    tags = _bare_read(clone, "for-each-ref", "--format=%(refname:short)", "refs/tags").decode().split()
+    released = [(release_of(t), t) for t in tags if t.startswith("v") and release_of(t)]
+    return max(released)[1] if released else None
+
+
+def _notes_lines(text: str, installed: tuple[int, int, int], target: tuple[int, int, int]) -> list[str]:
+    from changelog import entries, marks  # noqa: PLC0415
+    from process_git import release_of  # noqa: PLC0415
+    lines = []
+    for version, title, body in entries(text):
+        number = release_of(version)
+        if number is None or not installed < number <= target:
+            continue
+        found = marks(body)
+        graded = [m for m, _ in found if m]
+        if not graded:
+            before = " (before v2.96)" if number < MARKED_SINCE else ""
+            lines.append(f"  {version} — {title}: not marked{before}")
+            continue
+        counts = ", ".join(f"{graded.count(m)} {m}" for m in ("required", "recommended", "optional"))
+        unmarked = len(found) - len(graded)
+        lines.append(f"  {version} — {title}: {counts}" + (f", {unmarked} not marked" if unmarked else ""))
+        lines += [f"    [required] {line}" for m, line in found if m == "required"]
+    return lines
+
+
+def _overlay_lines(root: Path, clone: Path, old_sha: str, new_sha: str) -> list[str]:
+    """`overlay: section — changed|gone` for every anchored section the template changed
+    between the two releases; only the overlays' own template files are fetched."""
+    from check_overlays import anchored, section_changes  # noqa: PLC0415
+    found = anchored(root)
+    if not found:
+        return []
+    old_files, new_files = _source_files(clone, old_sha), _source_files(clone, new_sha)
+    lines = []
+    for overlay, target, headings in found:
+        old_text = _blob(clone, old_sha, old_files[target]) if target in old_files else None
+        if old_text is None:
+            continue  # no template file at the installed release: nothing it built on moved
+        new_text = _blob(clone, new_sha, new_files[target]) if target in new_files else None
+        changes = section_changes(old_text, new_text or "")
+        lines += [f"  {overlay}: {h} — {changes[h]}" for h in headings if h in changes]
+    return lines
+
+
+def release_report(root: Path, src: str, installed: str, ref: str | None) -> list[str]:
+    """What `--dry-run` says past its first line, read from a clone of the template
+    source: the `[required]` items of every release above the installed one up to the
+    target (`--ref`, else the highest `vN.N.N` tag) and the overlays whose anchored
+    section changed. Never raises: unreadable is one line, and the dry run stays 0."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from process_git import release_of  # noqa: PLC0415
+    import template_verify as tv  # noqa: PLC0415
+    for name in (installed, ref):
+        if name is not None and release_of(name) is None:
+            return [f"template-update: release notes unreadable: {name} is no release"]
+    lines: list[str] = []
+    try:
+        clone = tv._clone(src, ref or "the latest release")
+        target = ref or _latest_release(clone)
+        if target is None:
+            return ["template-update: release notes unreadable: the template source has no release tag"]
+        new_sha = tv._release(src, target)
+        notes = _blob(clone, new_sha, "CHANGELOG.md")
+        if notes is None:
+            lines.append(f"template-update: release notes unreadable: no CHANGELOG.md at {target}")
+        else:
+            found = _notes_lines(notes, release_of(installed), release_of(target))
+            lines.append(f"template-update: release notes from {installed} to {target}"
+                         + (f" (CHANGELOG.md at {target}):" if found else ": no release in between"))
+            lines += found
+        changed = _overlay_lines(root, clone, tv._release(src, installed), new_sha)
+        if changed:
+            lines.append(f"template-update: overlays to re-check — the template changed the section "
+                         f"between {installed} and {target}:")
+            lines += changed
+    except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+        what = "overlays" if lines else "release notes and overlays"
+        reason = str(exc).removesuffix(" — verification fails closed")  # template_verify's wording
+        lines.append(f"template-update: {what} unreadable: {reason}")
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if "--verify" in args:
@@ -263,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
                                  description=__doc__.split("\n\n")[0].split(": ", 1)[-1])
     ap.add_argument("root", nargs="?", default=".", help="the project to update (default: the current directory)")
     ap.add_argument("--ref", help="the release tag or commit to update to (default: the latest release)")
-    ap.add_argument("--dry-run", action="store_true", help="check and report; change nothing")
+    ap.add_argument("--dry-run", action="store_true", help="check and report the required items and the overlays to re-check; change nothing")
     ns = ap.parse_args(args)
     ref: str | None = ns.ref
     dry = ns.dry_run
@@ -297,6 +428,8 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
     if dry:
+        for line in release_report(root, src, old_ref, ref):
+            print(line)
         return 0
     try:
         upd = _copier("update", "--trust", "--defaults", "--conflict", "inline",
