@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.96.0 — Steuerung messbar: Epics, offene Arbeit, Ankerlast, Pflicht-Updates
+
+Die Optimierungsschleife sieht jetzt offene Arbeit, nicht nur gemergte: wie viele Issues gleichzeitig in Arbeit sind, wie lange jedes schon läuft und wie stark es wächst, und ob neue Issues schneller kommen als geschlossene. Die Wert-Messung findet lange laufende Produkt-Epics, die sie bisher übersah. Die Startlast einer Sitzung wird je Harness gemessen, und ein Trockenlauf des Template-Updates sagt, welche Änderungen ein Projekt jetzt übernehmen muss; ab diesem Release ist jede Änderung in den Notes als verlangt, empfohlen oder optional markiert.
+
 ## v2.95.0 — Ein Abbruch durch Last ist kein Befund über einen Passagier
 
 Bricht ein Testlauf ab, weil die Maschine überlastet ist oder eine Lane belegt bleibt, sucht der Merge-Zug nicht mehr unter den wartenden Arbeiten nach einem Schuldigen und setzt keine unschuldige mehr ab. Er wartet, bis die Last sinkt, läuft einmal neu, und erst wenn auch das abbricht, entscheidet ein frischer Lauf der Hauptlinie. Ein Test, der jedes Mal hängt, wird weiterhin gefunden und seine Arbeit vom Zug genommen. Ein eigener Watchdog des Projekts kann einen solchen Abbruch melden, indem er eine Zeile in eine Datei schreibt, die der Zug nennt.

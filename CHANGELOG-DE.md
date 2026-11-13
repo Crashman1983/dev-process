@@ -9,6 +9,34 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.96.0 — Steuerung messbar: Epics, offene Arbeit, Ankerlast, Pflicht-Updates · 2026-11-13
+
+**Warum.**
+- Vergleich Kenni gegen ein zweites Projekt (#411–#417): Das Template kostet beide je Commit etwa gleich viel, trotzdem kommt Kenni langsamer voran — 65 Issues gleichzeitig in Arbeit, 156 eröffnet gegen 26 geschlossen in zwei Wochen, 32 Template-Releases in 30 Tagen. Die Optimierungsschleife maß davon nichts.
+- `outcomes` las nur die 100 zuletzt geänderten Issues und 50 Sub-Issues je Epic; ein lange laufendes Produkt-Epic war unsichtbar (#417).
+
+**Was sich ändert.**
+- [recommended] **`outcomes` liest jedes offene Issue und jedes im Fenster geänderte**, geblättert und mit Budget (`rateLimit`, Seitengrenze). Sub-Issues werden über 50 hinaus gelesen und nur bei einer `label:`/`title:`-Marke aufgelöst. Eine abgeschnittene Liste sagt `complete: false` und nennt den Schnitt; ein Epic mit nicht vollständig gelesenen Sub-Issues ist `missing`, nie nutzbar.
+- [optional] **Neue Messung `process_kpis.py intake`** (Telemetrie): je Woche eröffnete und geschlossene Issues, der offene Bestand und die Issues in Arbeit (Label und die letzten Berichte der Worker, andere Hosts vorher geholt) mit Claim-Zeit, Tagen seit dem Claim und Wachstum — Commits auf ihren Branches und über ihre Merge-Ereignisse gelandete Commits.
+- [optional] **`process_context.py --cost` misst die Ankerlast:** ein Block `entry_load` mit Zeilen und Token je Harness-Anker, Teilbaum-Ankern und Overlays je Befehl; `--trend` gibt dieselben Summen an jedem Template-Release.
+- [recommended] **`template_update.py --dry-run` nennt, was ein Update verlangt:** je Release seit dem installierten die `[required]`-Änderungen und die Zahl der übrigen, dazu die Overlays, deren verankerte Abschnitte das Template geändert hat.
+- [optional] **Release Notes tragen ab diesem Release eine Marke:** jede Änderung ist `[required]`, `[recommended]` oder `[optional]`. `required` heißt Sicherheit, gebrochener Vertrag, Datenverlust oder ein Fehler, der Arbeit blockiert.
+
+**Wirkung.**
+- Steward und Wochenlauf sehen offene Arbeit und Wachstum, nicht nur gemergte Arbeit; ein Update lässt sich bündeln, wenn nichts darin verlangt ist.
+
+**Geänderte Abschnitte.**
+- `optimization.md` (Goals and how they are measured)
+- `releases.md` (Updating the process template)
+- `modules/telemetry.md` (The KPI cockpit)
+- `commands/prime.md`
+
+**Update.**
+- Reines Update. Kein neuer Konfigurationsschlüssel.
+- `outcomes` macht mehr `gh`-Aufrufe (einige Seiten je Lauf); bei einem großen Repository kann ein Lauf mit `complete: false` enden.
+
+Details: [Plan](docs/analysis/2026-11-13-v2.96.md) #411 #412 #413 #414 #415 #417
+
 ## v2.95.0 — Ein Abbruch durch Last ist kein Befund über einen Passagier · 2026-11-11
 
 **Warum.**

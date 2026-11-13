@@ -17,7 +17,7 @@ or compaction may have dropped the always-on rules from context. Then run
 the issue; without it the branch name decides, and on `main` you get only the
 index of all plans and specs (`other_plans`/`other_specs`) — pick one and run
 again with `--issue N`. Add `--cost` when the question is
-what a session start costs in tokens — measure before cutting. One JSON with branch, state
+what a session start costs in tokens — measure before cutting; its `entry_load` block gives lines and tokens per harness anchor, subtree anchors and overlays, and `--trend` the same sums at each template release. One JSON with branch, state
 file, the current work's plans (tier/issue and their `DECISION` ledger — the choices
 made in dialogue that a compaction would have dropped), the next unchecked task, unresolved
 markers, and the inbox size — and read ONLY what it names: the branch state

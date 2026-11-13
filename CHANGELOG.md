@@ -10,6 +10,34 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.96.0 — Steering you can measure: epics, open work, anchor load, required updates · 2026-11-13
+
+**Why.**
+- Comparing Kenni with a second adopter project (#411–#417): the template costs both about the same per commit, yet Kenni moves slower — 65 issues in progress at once, 156 opened against 26 closed in two weeks, 32 template releases in 30 days. The improvement loop measured none of it.
+- `outcomes` read only the 100 most recently updated issues and 50 sub-issues per epic, so a long-running product epic was invisible (#417).
+
+**What changes.**
+- [recommended] **`outcomes` reads every open issue and every issue changed in the window**, paged and under a budget (`rateLimit`, a page cap). Sub-issues are read past 50 and resolved only for a `label:`/`title:` marker. A cut list says `complete: false` and names the cut; an epic whose sub-issues were not all read is `missing`, never usable.
+- [optional] **New reading `process_kpis.py intake`** (telemetry): issues opened and closed per week, the open backlog, and the issues in progress (label and the workers' latest reports, other hosts fetched first) with claim time, days since the claim and growth — commits on their branches and commits landed through their merge events.
+- [optional] **`process_context.py --cost` measures the anchor load:** an `entry_load` block with lines and tokens per harness anchor, subtree anchors and overlays per command; `--trend` gives the same sums at each template release.
+- [recommended] **`template_update.py --dry-run` names what an update requires:** per release since the installed one its `[required]` changes and the counts of the others, and the overlays whose anchored sections the template changed.
+- [optional] **Release notes carry a mark** from this release on: every change is `[required]`, `[recommended]` or `[optional]`. `required` means security, a broken contract, data loss or a defect that blocks work.
+
+**Effect.**
+- The steward and the weekly pass see open work and growth, not only merged work; an update can be batched when nothing in it is required.
+
+**Changed sections.**
+- `optimization.md` (Goals and how they are measured)
+- `releases.md` (Updating the process template)
+- `modules/telemetry.md` (The KPI cockpit)
+- `commands/prime.md`
+
+**Update.**
+- Pure update. No new configuration key.
+- `outcomes` makes more `gh` calls (a few pages per run); on a large repository a run can end `complete: false`.
+
+Details: [Plan](docs/analysis/2026-11-13-v2.96.md) #411 #412 #413 #414 #415 #417
+
 ## v2.95.0 — A load abort is no finding about a passenger · 2026-11-11
 
 **Why.**
