@@ -2969,3 +2969,161 @@ def test_typed_text_that_starts_like_a_list_item_is_the_input_line(render, tmp_p
     text = "1. do this first"
     out, mod, pane = _say_setup(render, tmp_path, monkeypatch, [_tui(), _tui(text), _tui()])
     assert mod.say(out, "w1", text) == 0 and pane.keys == [text, "Enter"]
+
+
+# --- steering: the WIP limit of a first start, the track, the growth note (v2.97 B2-B4) --------
+
+def _steering(out: Path, **steering) -> None:
+    (out / "docs/process/optimization.local.json").write_text(json.dumps({"steering": steering}))
+
+
+def _wip_repo(render, tmp_path, marker: Path | None = None, **steering) -> Path:
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    seen = (f'echo "track=$PROCESS_TRACK sync=$PROCESS_REPORT_SYNC" >> {marker}\n' if marker else "")
+    _fake_command(out, seen + "sleep 30\n")
+    pol = out / "docs/process/model-policy.json"
+    data = json.loads(pol.read_text())
+    data["max_workers"] = 6
+    pol.write_text(json.dumps(data))
+    _steering(out, **steering)
+    return out
+
+
+def _events(out: Path) -> list[dict]:
+    path = out / ".git/process-gate-events.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def _stop_all(out: Path, *branches: str) -> None:
+    for b in branches:
+        _dispatch(out, "stop", b, "--force")
+
+
+def _wait_for(path: Path, lines: int = 1) -> list[str]:
+    deadline = time.time() + 10
+    while time.time() < deadline and (not path.exists() or len(path.read_text().splitlines()) < lines):
+        time.sleep(0.1)
+    return path.read_text().splitlines()
+
+
+TRACKS = {"tracks": {"A": "product", "B": "platform"}, "wip_per_track": 1, "process_issues_in_progress": 1}
+
+
+def test_a_first_start_at_the_tracks_limit_is_refused_and_the_override_recorded(render, tmp_path):
+    marker = tmp_path / "seen"
+    out = _wip_repo(render, tmp_path, marker, **TRACKS)
+    try:
+        r = _dispatch(out, "start", "--issue", "1", "--phase", "plan", "--branch", "b1", "--track", "A")
+        assert r.returncode == 0, r.stderr
+        r = _dispatch(out, "start", "--issue", "2", "--phase", "plan", "--branch", "b2")
+        assert r.returncode == 3 and "--track" in r.stderr and "A, B, process" in r.stderr
+        r = _dispatch(out, "start", "--issue", "2", "--phase", "plan", "--branch", "b2", "--track", "C")
+        assert r.returncode == 3 and "unknown track C" in r.stderr
+        r = _dispatch(out, "start", "--issue", "2", "--phase", "plan", "--branch", "b2", "--track", "A")
+        assert r.returncode == 3, r.stderr
+        assert "track A" in r.stderr and "limit 1" in r.stderr and "#1" in r.stderr
+        assert "may undercount" in r.stdout + r.stderr  # no origin: the other hosts are not read
+        [refused] = _events(out)
+        assert refused["gate"] == "wip" and refused["outcome"] == "refused" and refused["mode"] == "block"
+        # the first phase is checked whatever its name: a brainstorm, a quick execute (dry runs log nothing)
+        for phase, tier in (("brainstorm", "2"), ("execute", "1")):
+            r = _dispatch(out, "start", "--issue", "3", "--phase", phase, "--tier", tier, "--branch", "b3",
+                          "--track", "A", "--dry-run")
+            assert r.returncode == 3 and "track A" in r.stderr, (phase, r.stderr)
+        assert len(_events(out)) == 1
+        # another track has its own limit
+        assert _dispatch(out, "start", "--issue", "4", "--phase", "plan", "--branch", "b4", "--track", "B",
+                         "--dry-run").returncode == 0
+        r = _dispatch(out, "start", "--issue", "2", "--phase", "plan", "--branch", "b2", "--track", "A",
+                      "--over-wip", "owner: the release fix cannot wait")
+        assert r.returncode == 0, r.stderr
+        override = _events(out)[-1]
+        assert {k: override[k] for k in ("gate", "mode", "outcome", "override", "track", "limit", "in_progress",
+                                         "reason", "issue")} == {
+            "gate": "wip", "mode": "block", "outcome": "override", "override": True, "track": "A", "limit": 1,
+            "in_progress": [1], "reason": "owner: the release fix cannot wait", "issue": 2}
+        assert _wait_for(marker)[0] == "track=A sync=1"  # the worker inherits the track and syncs
+    finally:
+        _stop_all(out, "b1", "b2")
+
+
+def test_a_later_phase_and_a_restart_after_stop_are_not_checked_and_keep_the_track(render, tmp_path):
+    marker = tmp_path / "seen"
+    out = _wip_repo(render, tmp_path, marker, **TRACKS)
+    try:
+        assert _dispatch(out, "start", "--issue", "1", "--phase", "plan", "--branch", "b1",
+                         "--track", "A").returncode == 0
+        _wait_for(marker)
+        assert _dispatch(out, "stop", "b1", "--force").returncode == 0  # `idle`: #1 is in progress no more
+        assert _dispatch(out, "start", "--issue", "2", "--phase", "plan", "--branch", "b2", "--track", "A",
+                         "--over-wip", "x").returncode == 0
+        _wait_for(marker, 2)
+        # track A is at its limit with #2; #1 has started before: no check, no --track
+        r = _dispatch(out, "start", "--issue", "1", "--phase", "execute", "--branch", "b1")
+        assert r.returncode == 0, r.stderr
+        rec_dir = out / ".git/process-dispatch"
+        assert json.loads((rec_dir / "b1.json").read_text())["track"] == "A"
+        assert json.loads((rec_dir / "phases/1.json").read_text())["track"] == "A"
+        assert _wait_for(marker, 3)[-1] == "track=A sync=1"
+    finally:
+        _stop_all(out, "b1", "b2")
+
+
+def test_two_first_starts_at_once_do_not_pass_the_limit(render, tmp_path):
+    out = _wip_repo(render, tmp_path, **TRACKS)
+    try:
+        procs = [subprocess.Popen([sys.executable, str(out / "scripts/process/dispatch.py"), "start", "--issue",
+                                   str(n), "--phase", "plan", "--branch", f"b{n}", "--track", "A"],
+                                  cwd=out, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                 for n in (1, 2)]
+        codes = sorted(p.wait(timeout=120) for p in procs)
+        for p in procs:
+            p.communicate()
+        assert codes == [0, 3]
+    finally:
+        _stop_all(out, "b1", "b2")
+
+
+def test_without_steering_or_tracks_no_track_is_asked(render, tmp_path):
+    out = _wip_repo(render, tmp_path)
+    (out / "docs/process/optimization.local.json").unlink()
+    r = _dispatch(out, "start", "--issue", "1", "--phase", "plan", "--branch", "b1", "--dry-run")
+    assert r.returncode == 0 and "wip" not in r.stdout + r.stderr, r.stderr
+    _steering(out, wip_per_track=1)  # a limit without tracks: untracked work counts against none
+    r = _dispatch(out, "start", "--issue", "1", "--phase", "plan", "--branch", "b1", "--dry-run")
+    assert r.returncode == 0, r.stderr
+
+
+def test_the_queue_keeps_the_track_and_waits_on_the_limit(render, tmp_path):
+    out = _wip_repo(render, tmp_path, **TRACKS)
+    try:
+        assert _dispatch(out, "start", "--issue", "1", "--phase", "plan", "--branch", "b1",
+                         "--track", "A").returncode == 0
+        r = _dispatch(out, "queue", "add", "--issue", "2", "--phase", "plan", "--branch", "b2")
+        assert r.returncode != 0 and "--track" in r.stderr  # a first start without a track never queues
+        r = _dispatch(out, "queue", "add", "--issue", "2", "--phase", "plan", "--branch", "b2", "--track", "A")
+        assert r.returncode == 0 and "#2 plan on b2 track A" in r.stdout, r.stderr
+        r = _dispatch(out, "drain")
+        assert "0 started, 1 waiting" in r.stdout
+        assert "#2 plan waits" in r.stderr and "track A" in r.stderr
+        r = _dispatch(out, "queue", "add", "--issue", "3", "--phase", "plan", "--branch", "b3", "--track", "A",
+                      "--over-wip", "owner said so")
+        assert r.returncode == 0, r.stderr
+        r = _dispatch(out, "drain")
+        assert "1 started, 1 waiting" in r.stdout, r.stdout + r.stderr
+        assert _events(out)[-1]["outcome"] == "override" and _events(out)[-1]["issue"] == 3
+    finally:
+        _stop_all(out, "b1", "b2", "b3")
+
+
+def test_the_track_command_writes_the_issues_track(render, tmp_path):
+    out = _wip_repo(render, tmp_path, **TRACKS)
+    r = _dispatch(out, "track", "--issue", "5", "--track", "Z")
+    assert r.returncode == 2 and "unknown track Z" in r.stderr
+    r = _dispatch(out, "track", "--issue", "5", "--track", "process")
+    assert r.returncode == 0, r.stderr
+    assert json.loads((out / ".git/process-dispatch/phases/5.json").read_text())["track"] == "process"
+    # the first start of #5 needs no --track now, and counts against the process track
+    r = _dispatch(out, "start", "--issue", "5", "--phase", "plan", "--branch", "b5", "--dry-run")
+    assert r.returncode == 0 and "track process" in r.stdout, r.stdout + r.stderr

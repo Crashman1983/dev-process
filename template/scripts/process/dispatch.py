@@ -2,13 +2,14 @@
 """dispatch — start, list, watch, message and stop worker sessions per
 phase, with the model the policy assigns.
 
-    uv run scripts/process/dispatch.py start --issue N --phase brainstorm|plan|execute|review [--tier T] [--branch B] [--title "..."] [--stale-plan-ok]
+    uv run scripts/process/dispatch.py start --issue N --phase brainstorm|plan|execute|review [--tier T] [--branch B] [--title "..."] [--stale-plan-ok] [--track NAME] [--over-wip "<reason>"]
+    uv run scripts/process/dispatch.py track --issue N --track NAME   # the issue's track, for work begun before
     uv run scripts/process/dispatch.py list
     uv run scripts/process/dispatch.py log <branch> [--lines N]   # what the worker shows right now
     uv run scripts/process/dispatch.py say <branch> "<text>"      # a line into an interactive worker
     uv run scripts/process/dispatch.py stop <branch> [--force]
     uv run scripts/process/dispatch.py chain [--dry-run]           # next phase from the reports, then drain
-    uv run scripts/process/dispatch.py queue add --issue N --phase P [--tier T] [--branch B] | list
+    uv run scripts/process/dispatch.py queue add --issue N --phase P [--tier T] [--branch B] [--track NAME] [--over-wip "<reason>"] | list
     uv run scripts/process/dispatch.py drain                       # start what the queue may start now
     uv run scripts/process/dispatch.py policy [--tier T]          # what would run
 
@@ -81,6 +82,17 @@ at or above 90% use (`PROCESS_DISK_LIMIT_PCT`) and names `tidy.py
 --apply`: each worktree carries its own venv/node_modules (downstream:
 111 merged worktrees filled the disk). Whether a merged worktree may be
 removed has one owner here (`merged_worktrees`); the train and tidy ask it.
+
+Steering (the mandate's `steering` block, `optimize.steering`): an issue's
+first start — none on this host's phase history, none in progress on any
+host (`tower.in_progress`) — publishes and fetches the reports (15 s each),
+then counts under its own lock (`dispatch-start.lock`) up to the record. Once
+`tracks` is set it needs `--track` (a name there, or `process`); at the
+track's limit it exits 3 naming the issues, unless `--over-wip "<reason>"`;
+refusal and override are `gate_events` rows (`gate="wip"`). The track lives
+in `phases/<issue>.json` and every later record and report inherits it
+(`PROCESS_TRACK`); `track` records it for older work. Workers then publish
+each report (`PROCESS_REPORT_SYNC=1`).
 
 Trust boundary, plainly: the policy's `command` is executed on the
 machine that runs dispatch. It is a repository file — whoever can merge
@@ -1407,6 +1419,8 @@ def _note_phase(phases: Path, issue: int, branch: str, rec: dict) -> None:
             if not entry["starts"] or entry["starts"][-1] != [rec["phase"], started]:
                 entry["starts"].append([rec["phase"], started])
             history.update(phase=rec["phase"], branch=branch)
+            if rec.get("track"):  # the issue's track outlives every record (`stop` deletes one)
+                history["track"] = rec["track"]
             _save_json(path, history)
         with _FileLock(phases / "branches.lock"):
             index = _load_json_dict(phases / BRANCH_INDEX)
@@ -2205,11 +2219,120 @@ def _worker_env(extra: dict[str, str]) -> dict[str, str]:
     return env
 
 
+# --- steering: the WIP limit of a first start, the track, the growth note (v2.97) -------------
+
+START_LOCK = "dispatch-start.lock"  # beside the records; not `_QueueLock`: drain holds that around start
+WIP_GATE = "wip"  # its gate_events rows: no gate with a run time (`process_kpis.py nodes` leaves them out)
+
+
+def steering_settings(root: Path) -> dict:
+    """The mandate's `steering` block (`optimize.steering`, its one reader); its problems are
+    named, and a wrong value sets no limit."""
+    import optimize  # noqa: PLC0415
+    settings, problems = optimize.steering(root)
+    for problem in problems:
+        print(f"dispatch: note: {problem}", file=sys.stderr)
+    return settings
+
+
+def track_refusal(settings: dict, track: str | None) -> str | None:
+    """Why `track` is no track of the mandate — None when it is one, or when no `tracks` are set."""
+    import optimize  # noqa: PLC0415
+    tracks = settings.get("tracks")
+    if track is None or not tracks or track == optimize.PROCESS_TRACK or track in tracks:
+        return None
+    return (f"unknown track {track} — the mandate's steering.tracks names "
+            f"{', '.join([*tracks, optimize.PROCESS_TRACK])}")
+
+
+def report_network(root: Path, *, dry_run: bool) -> tuple[bool | None, bool]:
+    """(synced, fetched) before a count of the work in progress: this host's reports published (not
+    on a dry run; None without a file), the other hosts' fetched — each within the tower's deadline."""
+    import tower  # noqa: PLC0415
+    path = _report.reports_path(root)
+    synced = (None if dry_run or path is None or not path.is_file()
+              else _report.sync_reports(root, timeout=tower.FETCH_TIMEOUT_S))
+    return synced, _report.fetch_reports(root, timeout=tower.FETCH_TIMEOUT_S)
+
+
+def _wip_event(root: Path, *, issue: int, branch: str, track: str, limit: int, members: list[int],
+               outcome: str, reason: str) -> None:
+    import gate_events  # noqa: PLC0415 — the one writer of the gate event log
+    gate_events.append(gate_events.events_path(root), {
+        "gate": WIP_GATE, "mode": "block", "outcome": outcome, "rc": None, "duration_s": 0.0,
+        "override": True if outcome == "override" else None, "track": track, "limit": limit,
+        "in_progress": members, "reason": reason, "issue": issue, "branch": branch,
+        "head": None, "dirty": None, "ci": False})
+
+
+def wip_check(root: Path, *, issue: int, branch: str, track: str | None, over_wip: str | None,
+              settings: dict, net: tuple[bool | None, bool | None], dry_run: bool) -> tuple[str | None, str | None]:
+    """(refusal, track) of a start that may be an issue's first: one not in progress on any host
+    (`tower.in_progress`, as `net` fetched it) — the issue never counts against itself. A started
+    one keeps its track. A first start needs a track once `steering.tracks` is set; at its track's
+    limit (`process_issues_in_progress` for `process`, else `wip_per_track`) it is refused unless
+    `over_wip` gives a reason; both are logged as `gate_events` rows (`gate="wip"`, not on a dry run)."""
+    import optimize  # noqa: PLC0415
+    import tower  # noqa: PLC0415
+    work = tower.in_progress(root, fetch=False)
+    mine = [e for e in work["in_progress"] if e["issue"] == issue]
+    if mine:
+        return None, track or mine[0]["track"]
+    track = track or next((e["track"] for e in work["dormant"] if e["issue"] == issue), None)
+    notes = ([tower.UNDERCOUNT_NOTE] if False in net else []) + list(work["notes"])
+    said = "".join(f"; {n}" for n in notes)
+    tracks = settings.get("tracks")
+    if tracks and not track:
+        return (f"#{issue} starts here first and the mandate's steering.tracks is set — pass --track "
+                f"<{', '.join([*tracks, optimize.PROCESS_TRACK])}> (or record it: dispatch.py track)"), None
+    key = "process_issues_in_progress" if track == optimize.PROCESS_TRACK else "wip_per_track"
+    limit = settings.get(key) if track else None
+    members = sorted(e["issue"] for e in work["in_progress"] if track and e["track"] == track)
+    if limit is None or len(members) < limit:
+        print(f"dispatch: wip — track {track or 'untracked'}: {len(members)} in progress"
+              + (f", limit {limit}" if limit is not None else ", no limit") + said)
+        return None, track
+    what = (f"track {track} at its limit {limit} ({key}): in progress "
+            f"{', '.join(f'#{n}' for n in members)}")
+    if over_wip:
+        if not dry_run:
+            _wip_event(root, issue=issue, branch=branch, track=track, limit=limit, members=members,
+                       outcome="override", reason=over_wip)
+        print(f"dispatch: wip — {what}; started over the limit: {over_wip}{said}", file=sys.stderr)
+        return None, track
+    if not dry_run:
+        _wip_event(root, issue=issue, branch=branch, track=track, limit=limit, members=members,
+                   outcome="refused", reason=f"track {track} at its limit")
+    return (f"wip — {what}; take a track below its limit, finish one of these, or start with "
+            f'--over-wip "<reason>" on the owner\'s DECISION{said}'), track
+
+
 # --- commands ---------------------------------------------------------------------------
 
 def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None, title: str | None,
           dry_run: bool, owner_approved: bool = False, plan_review: bool = False,
-          stale_plan_ok: bool = False, harness: str | None = None, cls: str | None = None) -> int:
+          stale_plan_ok: bool = False, harness: str | None = None, cls: str | None = None,
+          track: str | None = None, over_wip: str | None = None,
+          net: tuple[bool | None, bool | None] | None = None) -> int:
+    """Start a phase. With the mandate's `steering` block, a start the local history has no phase
+    start for may be the issue's first: the reports are published and fetched first (`net`, when
+    `drain` did that once already), outside the start lock; then the lock (`dispatch-start.lock`)
+    holds from the WIP check to the record, so two first starts never pass a limit together."""
+    settings = steering_settings(root)
+    kw = {"issue": issue, "phase": phase, "tier": tier, "branch": branch, "title": title, "dry_run": dry_run,
+          "owner_approved": owner_approved, "plan_review": plan_review, "stale_plan_ok": stale_plan_ok,
+          "harness": harness, "cls": cls, "track": track, "over_wip": over_wip, "settings": settings}
+    if not settings or history_starts(issue_history(root, issue)):
+        return _start(root, **kw, net=None)
+    net = net if net is not None else report_network(root, dry_run=dry_run)
+    with _FileLock(_records_dir(root) / START_LOCK):
+        return _start(root, **kw, net=net)
+
+
+def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None, title: str | None,
+           dry_run: bool, owner_approved: bool, plan_review: bool, stale_plan_ok: bool, harness: str | None,
+           cls: str | None, track: str | None, over_wip: str | None, settings: dict,
+           net: tuple[bool | None, bool | None] | None) -> int:
     history = _records_dir(root) / "phases" / f"{issue}.json"
     try:
         previous = json.loads(history.read_text()) if history.exists() else {}
@@ -2223,6 +2346,11 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         if phase == "execute" or not owner_approved:
             print("dispatch: brainstorm awaits owner approval — start plan with --owner-approved; never jump to execute", file=sys.stderr)
             return 3
+    why = track_refusal(settings, track)
+    if why:
+        print(f"dispatch: not starting — {why}", file=sys.stderr)
+        return 3
+    track = track or history_track(previous if isinstance(previous, dict) else {})
     codex = harness == "codex"
     policy = load_policy(root, harness=harness)
     cell = cell_for(policy, tier, phase, cls)  # the task class picks the cell, as `policy --class` (#270)
@@ -2267,6 +2395,15 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     if full:
         print(f"dispatch: not starting — {full}", file=sys.stderr)
         return 3
+    if net is not None:  # maybe the issue's first start: the WIP limit (start holds the lock)
+        why, track = wip_check(root, issue=issue, branch=branch, track=track, over_wip=over_wip,
+                               settings=settings, net=net, dry_run=dry_run)
+        if why:
+            print(f"dispatch: not starting — {why}", file=sys.stderr)
+            return 3
+    elif settings and not track:
+        import tower  # noqa: PLC0415
+        track = tower.issue_facts(root, issue)[0]  # begun on another host or before the update
     channel = policy.get("decision_channel")
     channel = channel if isinstance(channel, str) and channel.strip() else None
     # the live channel and attest.py are Claude Code's: a local cell on another
@@ -2346,7 +2483,9 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         return 3
     # PROCESS_EFFORT always set, empty without an effort: a stale one from the steward's env must not leak
     worker_vars = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model,
-                   "PROCESS_EFFORT": effort or "", "PROCESS_ISSUE": str(issue)}
+                   "PROCESS_EFFORT": effort or "", "PROCESS_ISSUE": str(issue), "PROCESS_TRACK": track or "",
+                   # with steering, every host counts what the others report: the worker publishes each line
+                   **({"PROCESS_REPORT_SYNC": "1"} if settings else {})}
     codex_binary = None
     if codex:
         import _dispatch_codex as codex_run  # noqa: PLC0415  (the one owner of Codex runs)
@@ -2398,7 +2537,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
         rec = {"branch": branch, "issue": issue, "phase": phase, "tier": tier, "model": model, "effort": effort, "remote": True,
                "started": int(time.time()), "ts": _dt.datetime.now().isoformat(timespec="seconds"),
                "runner": runner, "handover_id": pp["handover_id"], "plan_review": plan_review,
-               **({"quick": True} if quick else {}), **({"cls": cls} if cls else {})}
+               **({"quick": True} if quick else {}), **({"cls": cls} if cls else {}),
+               **({"track": track} if track else {})}
         if runner == "tmux":
             # some hand-over CLIs refuse to start without a terminal (observed
             # downstream: a cloud-session start exited at once when detached) —
@@ -2452,6 +2592,7 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
            "worktree": str(wt), "log": str(log), "started": int(time.time()),
            "ts": _dt.datetime.now().isoformat(timespec="seconds"), "runner": runner, "plan_review": plan_review,
            **({"quick": True} if quick else {}), **({"cls": cls} if cls else {}),
+           **({"track": track} if track else {}),
            **({"status_file": str(wt / status_file)} if status_file else {})}
     if codex:
         rec["harness"] = "codex"
@@ -2499,6 +2640,30 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     _write_record(root, branch, rec)
     _remember_issue(root, issue, branch)
     print(f"dispatch: started {phase} for #{issue} on {branch} with {label} ({where}, log {log.name})")
+    return 0
+
+
+def set_track(root: Path, issue: int, track: str) -> int:
+    """`dispatch.py track`: record the issue's track in its phase history — for work begun before
+    the steering block; every later record and report of the issue inherits it."""
+    why = track_refusal(steering_settings(root), track)
+    if why:
+        print(f"dispatch: {why}", file=sys.stderr)
+        return 2
+    phases = _records_dir(root) / "phases"
+    phases.mkdir(exist_ok=True)
+    with _FileLock(phases / f"{issue}.lock"):
+        path = phases / f"{issue}.json"
+        try:
+            history = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except (OSError, ValueError):
+            history = None
+        if not isinstance(history, dict):
+            print(f"dispatch: the phase history of #{issue} is unreadable — repair it first", file=sys.stderr)
+            return 3
+        history["track"] = track
+        _save_json(path, history)
+    print(f"dispatch: #{issue} is on track {track}")
     return 0
 
 
@@ -2968,6 +3133,11 @@ def _valid_entry(e: object) -> dict | None:
         if not isinstance(e["cls"], str) or not e["cls"]:
             return None
         entry["cls"] = e["cls"]
+    for key in ("track", "over_wip"):  # what `start` gets: the issue's track, an override's reason
+        if e.get(key) is not None:
+            if not isinstance(e[key], str) or not e[key].strip():
+                return None
+            entry[key] = e[key]
     return entry
 
 
@@ -3006,11 +3176,33 @@ def _same_line(a: dict, b: dict) -> bool:
             and bool(a.get("plan_review")) == bool(b.get("plan_review")))
 
 
+def _needs_track(root: Path, issue: int, settings: dict) -> bool:
+    """A line for `issue` would be its first start without a track: `steering.tracks` is set, no
+    phase started here, no track recorded or reported, and no host has it in progress."""
+    if not settings.get("tracks"):
+        return False
+    history = issue_history(root, issue)
+    if history_starts(history) or history_track(history):
+        return False
+    import tower  # noqa: PLC0415
+    if tower.issue_facts(root, issue)[0]:
+        return False
+    return not any(e["issue"] == issue for e in tower.in_progress(root, fetch=False)["in_progress"])
+
+
 def queue_add(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None,
-              plan_review: bool = False, harness: str | None = None, cls: str | None = None) -> None:
+              plan_review: bool = False, harness: str | None = None, cls: str | None = None,
+              track: str | None = None, over_wip: str | None = None) -> None:
     if harness is not None or cls is not None:
         # a line that cannot start is refused now, not at drain: an unknown class too
         cell_for(load_policy(root, harness=harness), tier, phase, cls)
+    settings = steering_settings(root)
+    why = track_refusal(settings, track)
+    if why:
+        raise SystemExit(f"dispatch: not queued — {why}")
+    if track is None and _needs_track(root, issue, settings):
+        raise SystemExit(f"dispatch: not queued — #{issue} would start here first and the mandate's "
+                         f"steering.tracks is set: pass --track")
     with _QueueLock(root):
         entries = queue_load(root)
         entry = {"issue": int(issue), "phase": phase, "tier": tier, "branch": branch}
@@ -3020,27 +3212,50 @@ def queue_add(root: Path, *, issue: int, phase: str, tier: int | None, branch: s
             entry["plan_review"] = True
         if cls is not None:
             entry["cls"] = cls
+        if track is not None:
+            entry["track"] = track
+        if over_wip is not None:
+            entry["over_wip"] = over_wip
         if not any(_same_line(entry, e) for e in entries):  # one line per issue and phase
             entries.append(entry)
             _queue_save(root, entries)
 
 
+def _refusal_of(text: str) -> str:
+    """The last `dispatch:` line a refused start printed, without its prefix — the line's reason."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip().startswith("dispatch:")]
+    if not lines:
+        return "refused (no reason printed)"
+    return lines[-1].removeprefix("dispatch:").strip().removeprefix("not starting —").strip()
+
+
 def drain(root: Path) -> int:
     """Start every queued line the caps and lanes allow now, in order; a
-    refused line stays queued and does not hold the ones behind it. Each
-    start is saved at once, under the queue lock."""
+    refused line stays queued and does not hold the ones behind it, and drain
+    names why it waits. Each start is saved at once, under the queue lock.
+    With the mandate's `steering` block, the reports are published and
+    fetched once per drain; each line counts the work in progress anew."""
+    import contextlib  # noqa: PLC0415
+    import io  # noqa: PLC0415
     with _QueueLock(root):
         entries = queue_load(root)
         started = 0
+        net = report_network(root, dry_run=False) if entries and steering_settings(root) else None
         for e in list(entries):
+            said = io.StringIO()
             try:
-                rc = start(root, issue=e["issue"], phase=e["phase"], tier=e.get("tier"),
-                           branch=e.get("branch"), title=None, dry_run=False,
-                           plan_review=bool(e.get("plan_review")), harness=e.get("harness"),
-                           cls=e.get("cls"))
+                with contextlib.redirect_stderr(said):
+                    rc = start(root, issue=e["issue"], phase=e["phase"], tier=e.get("tier"),
+                               branch=e.get("branch"), title=None, dry_run=False,
+                               plan_review=bool(e.get("plan_review")), harness=e.get("harness"),
+                               cls=e.get("cls"), track=e.get("track"), over_wip=e.get("over_wip"), net=net)
             except SystemExit as exc:
-                print(f"dispatch: queued #{e['issue']} {e['phase']} could not start: {exc}", file=sys.stderr)
+                print(f"dispatch: queued #{e['issue']} {e['phase']} could not start: {exc}", file=said)
                 rc = 1
+            sys.stderr.write(said.getvalue())
+            if rc != 0:
+                print(f"dispatch: queued #{e['issue']} {e['phase']} waits — {_refusal_of(said.getvalue())}",
+                      file=sys.stderr)
             if rc == 0:
                 entries.remove(e)
                 started += 1
@@ -3646,6 +3861,14 @@ def main(argv: list[str]) -> int:
                    help="with --phase review: review the plan before execute, not the code")
     s.add_argument("--stale-plan-ok", action="store_true",
                    help="with --phase execute: start although plan_drift blocks (recorded as an override)")
+    s.add_argument("--track", help="the issue's track of the mandate's steering block (or `process`); "
+                                   "needed for a first start once steering.tracks is set, inherited after")
+    s.add_argument("--over-wip", metavar="REASON",
+                   help="start a first start although its track is at its limit — the reason, on the "
+                        "owner's DECISION (logged as a gate event)")
+    tr = sub.add_parser("track", help="record an issue's track (work begun before the steering block)")
+    tr.add_argument("--issue", type=int, required=True)
+    tr.add_argument("--track", required=True)
     sub.add_parser("list")
     ho = sub.add_parser("handoff", help="verify a finished Codex review, attest it and push")
     ho.add_argument("branch")
@@ -3671,6 +3894,8 @@ def main(argv: list[str]) -> int:
     qa.add_argument("--branch")
     qa.add_argument("--plan-review", action="store_true", help="with --phase review: a plan review")
     qa.add_argument("--class", dest="cls", metavar="CLASS", help="task class, chosen once at queue time")
+    qa.add_argument("--track", help="the issue's track, passed to start")
+    qa.add_argument("--over-wip", metavar="REASON", help="passed to start: over the track's limit, with this reason")
     qsub.add_parser("list")
     sub.add_parser("drain")
     po = sub.add_parser("policy")
@@ -3680,10 +3905,16 @@ def main(argv: list[str]) -> int:
                     help="task class (mechanical, design, …): its row wins over the tier")
     a = p.parse_args(argv)
     root = Path(_out(Path(a.root).resolve(), "rev-parse", "--show-toplevel") or a.root).resolve()
+    for name in ("track", "over_wip"):
+        if getattr(a, name, None) is not None and not getattr(a, name).strip():
+            p.error(f"--{name.replace('_', '-')} needs a value")
     if a.command == "start":
         return start(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch, title=a.title,
                      dry_run=a.dry_run, owner_approved=a.owner_approved, plan_review=a.plan_review,
-                     stale_plan_ok=a.stale_plan_ok, harness=a.harness, cls=a.cls)
+                     stale_plan_ok=a.stale_plan_ok, harness=a.harness, cls=a.cls, track=a.track,
+                     over_wip=a.over_wip)
+    if a.command == "track":
+        return set_track(root, a.issue, a.track)
     if a.command == "handoff":
         return handoff(root, a.branch, a.implementer)
     if a.command == "list":
@@ -3699,11 +3930,14 @@ def main(argv: list[str]) -> int:
     if a.command == "queue":
         if a.queue_command == "add":
             queue_add(root, issue=a.issue, phase=a.phase, tier=a.tier, branch=a.branch,
-                      plan_review=a.plan_review and a.phase == "review", harness=a.harness, cls=a.cls)
+                      plan_review=a.plan_review and a.phase == "review", harness=a.harness, cls=a.cls,
+                      track=a.track, over_wip=a.over_wip)
         for e in queue_load(root):
             print(f"#{e['issue']} {e['phase']}" + (f" tier {e['tier']}" if e.get("tier") is not None else "")
                   + (f" on {e['branch']}" if e.get("branch") else "")
-                  + (f" class {e['cls']}" if e.get("cls") else ""))
+                  + (f" class {e['cls']}" if e.get("cls") else "")
+                  + (f" track {e['track']}" if e.get("track") else "")
+                  + (f" over the WIP limit: {e['over_wip']}" if e.get("over_wip") else ""))
         return 0
     if a.command == "drain":
         return drain(root)

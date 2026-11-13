@@ -1279,6 +1279,35 @@ def test_in_progress_reads_the_other_hosts_published_reports_and_names_their_age
     assert t["hosts"] == {"mac": 14} and "host mac as of 14 min ago" in t["notes"]
 
 
+def test_the_tower_shows_one_wip_line_per_track_with_its_overrides(render, tmp_path, monkeypatch):
+    """v2.97 B3: the tower reads the work in progress per track against the mandate's limits and
+    the WIP overrides dispatch logged in the last 7 days; without a steering block, nothing."""
+    import time
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setenv("PROCESS_HOST", "here")
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    tower = _load_tower(out)
+    assert tower.wip(out) == []
+    (out / "docs/process/optimization.local.json").write_text(json.dumps({"steering": {
+        "tracks": {"A": "a", "B": "b"}, "wip_per_track": 2, "process_issues_in_progress": 1}}))
+    now = time.time()
+    _put_reports(out, {"worker": "w1", "issue": 5, "state": "planned", "epoch": now - 60, "track": "A"},
+                 {"worker": "w2", "issue": 6, "state": "pushed", "epoch": now - 60})
+    old = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    new = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    (_common(out) / "process-gate-events.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (
+        {"ts": old, "gate": "wip", "outcome": "override", "track": "A"},
+        {"ts": new, "gate": "wip", "outcome": "override", "track": "A"},
+        {"ts": new, "gate": "wip", "outcome": "refused", "track": "A"})))
+    rows = {r["track"]: r for r in tower.wip(out)}
+    assert rows["A"] == {"track": "A", "limit": 2, "in_progress": [5], "overrides_7d": 1}
+    assert rows["B"]["in_progress"] == [] and rows["process"]["limit"] == 1
+    assert rows["untracked"] == {"track": "untracked", "limit": None, "in_progress": [6], "overrides_7d": 0}
+    text = _tower(out).stdout
+    assert "wip: A 1/2 (#5, 1 override in 7 d)" in text and "untracked 1 (#6)" in text
+
+
 def test_a_report_carries_its_track_and_the_network_calls_take_a_deadline(render, tmp_path, monkeypatch):
     import importlib.util
     out = render(tmp_path, {"project_name": "d", "modules": {}})

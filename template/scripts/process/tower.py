@@ -26,6 +26,9 @@ What it assembles (all from state the process already keeps):
   reports    — the latest state each worker reported (`report.py`)
   holds      — the branches the train holds (`train_holds`, the train's own
                rule), for live local branches ahead of the integration branch
+  wip        — with the mandate's `steering` block: per track its limit, the
+               issues in progress on it (`in_progress`, every host as last
+               fetched; dormant ones apart) and dispatch's WIP overrides of 7 days
   findings   — deterministic, each with a because: overlaps, a Tier 2+ plan
                without an issue, a plan without a Decisions ledger, a gate
                red for days, a worker with no report and no commit for an
@@ -46,6 +49,7 @@ import shlex
 import subprocess
 import sys
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -566,6 +570,27 @@ def _track_of(value: object) -> str | None:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def issue_facts(root: Path, issue: int, *, reports: list[dict] | None = None,
+                recs: list[dict] | None = None) -> tuple[str | None, float | None]:
+    """(track, claim) of one issue, the one rule for `in_progress` and dispatch. The track: the phase
+    history `phases/<issue>.json`, else the newest report or dispatch record of the issue that names
+    one, else None (untracked). The claim: the earliest phase start of any branch in the history,
+    else the issue's earliest report (every host's, as last fetched), else None; no `gh`.
+    `reports` and `recs` are the issue's own, when the caller has read them."""
+    import dispatch as _dispatch  # noqa: PLC0415 — the phase histories' owner
+    if reports is None:
+        reports = [r for r in _report.read_reports(root, remote=True) if _issue_number(r.get("issue")) == issue]
+    if recs is None:
+        recs = [r for r in _dispatch._record_files(root) if _issue_number(r.get("issue")) == issue]
+    history = _dispatch.issue_history(root, issue)
+    named = [(_epoch_of(r.get("epoch")), t) for r in reports if (t := _track_of(r.get("track")))] + [
+        (_epoch_of(r.get("started")), t) for r in recs if (t := _track_of(r.get("track")))]
+    track = _dispatch.history_track(history) or (max(named, key=lambda x: x[0])[1] if named else None)
+    starts = _dispatch.history_starts(history)
+    claimed = min(starts) if starts else (min(_epoch_of(r.get("epoch")) for r in reports) if reports else None)
+    return track, claimed
+
+
 def in_progress(root: Path, *, fetch: bool = True, now: float | None = None,
                 timeout: float = FETCH_TIMEOUT_S) -> dict:
     """The issues in progress over every host, the one rule (v2.97; it replaces the reading of
@@ -620,12 +645,7 @@ def in_progress(root: Path, *, fetch: bool = True, now: float | None = None,
         theirs = [r for r in recs if _issue_number(r.get("issue")) == n]
         last = max([_epoch_of(r.get("epoch")) for r in mine] + [_epoch_of(r.get("started")) for r in theirs]
                    + [word[n]["last"]])
-        history = _dispatch.issue_history(root, n)
-        named = [(_epoch_of(r.get("epoch")), t) for r in mine if (t := _track_of(r.get("track")))] + [
-            (_epoch_of(r.get("started")), t) for r in theirs if (t := _track_of(r.get("track")))]
-        track = _dispatch.history_track(history) or (max(named, key=lambda x: x[0])[1] if named else None)
-        starts = _dispatch.history_starts(history)
-        claimed = min(starts) if starts else (min(_epoch_of(r.get("epoch")) for r in mine) if mine else None)
+        track, claimed = issue_facts(root, n, reports=mine, recs=theirs)
         entry = {"issue": n, "track": track, **word[n], "claimed": claimed, "last": last}
         (dormant if now - last > DORMANT_DAYS * 86400 else counted).append(entry)
     hosts: dict[str, int] = {}
@@ -636,6 +656,56 @@ def in_progress(root: Path, *, fetch: bool = True, now: float | None = None,
     notes = [UNDERCOUNT_NOTE] if fetched is False else []
     notes += [f"host {h} as of {m} min ago" for h, m in sorted(hosts.items())]
     return {"in_progress": counted, "dormant": dormant, "fetched": fetched, "hosts": hosts, "notes": notes}
+
+
+WIP_OVERRIDE_DAYS = 7
+
+
+def _wip_overrides(root: Path, days: int = WIP_OVERRIDE_DAYS) -> Counter:
+    """The WIP overrides dispatch logged (`gate_events`, `gate="wip"`) in the last `days`, per track."""
+    import gate_events  # noqa: PLC0415
+    path = gate_events.events_path(root)
+    since = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)
+    out: Counter = Counter()
+    for name in ((path.name + ".1", path.name) if path else ()):
+        try:
+            lines = (path.parent / name).read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = json.loads(line)
+                when = _dt.datetime.fromisoformat(str(row.get("ts")))
+            except (ValueError, AttributeError):
+                continue
+            if (row.get("gate") == "wip" and row.get("outcome") == "override" and when.tzinfo
+                    and when >= since and isinstance(row.get("track"), str)):
+                out[row["track"]] += 1
+    return out
+
+
+def wip(root: Path) -> list[dict]:
+    """One row per track of the mandate's `steering` block — its limit, the issues in progress on it
+    (`in_progress`, as last fetched) and the WIP overrides of the last 7 days — plus `untracked`
+    when work carries no track. [] without the block. The tower decides nothing: dispatch refuses."""
+    import optimize  # noqa: PLC0415 — the steering block's one reader
+    settings, _problems = optimize.steering(root)
+    if not settings:
+        return []
+    work = in_progress(root, fetch=False)["in_progress"]
+    overrides = _wip_overrides(root)
+    names = list(dict.fromkeys([*(settings.get("tracks") or {}), optimize.PROCESS_TRACK,
+                                *sorted(e["track"] for e in work if e["track"])]))
+    rows = []
+    for name in names:
+        key = "process_issues_in_progress" if name == optimize.PROCESS_TRACK else "wip_per_track"
+        rows.append({"track": name, "limit": settings.get(key),
+                     "in_progress": sorted(e["issue"] for e in work if e["track"] == name),
+                     "overrides_7d": overrides.get(name, 0)})
+    loose = sorted(e["issue"] for e in work if not e["track"])
+    if loose:
+        rows.append({"track": "untracked", "limit": None, "in_progress": loose, "overrides_7d": 0})
+    return rows
 
 
 # --- the train's hold (#326): one owner, read by the train and shown here (#336) -----------
@@ -1259,6 +1329,7 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False,
         "balance": balance(root, ref),
         "reports": latest_reports(root, remote=remote),
         "holds": live_holds(root, ref),
+        "wip": wip(root),
         "remote_fetched": fetch_ok if remote else None,
     }
     table["findings"] = (findings(table, stale_minutes, prompt_minutes, share_max=process_share_limit(root)[0])
@@ -1320,6 +1391,15 @@ def render(table: dict) -> str:
         lines.append("reports: " + "; ".join(
             f"{r['worker']}@{r.get('host', '?')} {r['state']}{' #' + str(r['issue']) if r.get('issue') else ''} ({r['minutes_ago']} min)"
             for r in table["reports"][:12]))
+    if table.get("wip"):
+        def _wip_row(w: dict) -> str:
+            n = len(w["in_progress"])
+            said = [", ".join(f"#{i}" for i in w["in_progress"])] if n else []
+            if w["overrides_7d"]:
+                said.append(f"{w['overrides_7d']} override{'s' if w['overrides_7d'] > 1 else ''} in 7 d")
+            return (f"{w['track']} {n}" + (f"/{w['limit']}" if w["limit"] is not None else "")
+                    + (f" ({', '.join(said)})" if said else ""))
+        lines.append("wip: " + "; ".join(_wip_row(w) for w in table["wip"]))
     if table.get("holds"):
         lines.append("train holds: " + "; ".join(f"{r['worker']} ({r['minutes_ago']} min)" for r in table["holds"]))
     if table["findings"]:
