@@ -407,6 +407,71 @@ def load_mandate(root: Path) -> tuple[dict | None, str | None]:
     return out, None
 
 
+# the mandate's `steering` block (v2.97): key → (what it must be, its test). The names are the
+# ones Kenni's mandate already carries, so that file holds as it is.
+PROCESS_TRACK = "process"  # the fixed track of process work; its limit is process_issues_in_progress
+
+
+def _count(v: object, low: int) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= low
+
+
+def _real(v: object) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and v == v and v != float("inf")
+
+
+STEERING_KEYS: dict[str, tuple[str, object]] = {
+    "wip_per_track": ("a non-negative integer", lambda v: _count(v, 0)),
+    "process_issues_in_progress": ("a non-negative integer", lambda v: _count(v, 0)),
+    "process_share_max": ("a number from 0 to 1", lambda v: _real(v) and 0 <= v <= 1),
+    "process_share_window_weeks": ("a positive integer", lambda v: _count(v, 1)),
+    "kit_update_cadence_days": ("a positive integer", lambda v: _count(v, 1)),
+    "growth_max_commits": ("a positive integer", lambda v: _count(v, 1)),
+    "growth_max_days": ("a positive number", lambda v: _real(v) and v > 0),
+}
+
+
+def steering(root: Path) -> tuple[dict, list[str]]:
+    """(the mandate's steering settings, problems) — the one reader of the block. Only keys that
+    are set and valid are in the settings: a missing key is no limit, a wrong one is a problem
+    and no limit, never a guess. `tracks` maps a track's name to its description; `process` is
+    the fixed name of process work and no entry there. Readers: dispatch.py (the WIP limit of a
+    first start, the growth note), tower.py (in progress per track)."""
+    problems: list[str] = []
+    mandate, problem = load_mandate(root)
+    if problem:
+        return {}, [problem]
+    raw = (mandate or {}).get("steering")
+    if raw is None:
+        return {}, []
+    if not isinstance(raw, dict):
+        return {}, ["steering must be a mapping — no limit applies"]
+    out: dict = {}
+    if "tracks" in raw:
+        tracks = raw["tracks"]
+        if not isinstance(tracks, dict):
+            problems.append("steering.tracks must map a track's name to its description — no track applies")
+        else:
+            kept = {}
+            for name, text in tracks.items():
+                if name == PROCESS_TRACK:
+                    problems.append(f"steering.tracks names `{PROCESS_TRACK}`, the fixed track of process "
+                                    "work (limit: process_issues_in_progress) — that entry is ignored")
+                elif not (isinstance(name, str) and name.strip() and isinstance(text, str)):
+                    problems.append(f"steering.tracks: {name!r} must be a name with a text description — ignored")
+                else:
+                    kept[name] = text
+            if kept:
+                out["tracks"] = kept
+    for key, (what, ok) in STEERING_KEYS.items():
+        if key in raw:
+            if ok(raw[key]):  # type: ignore[operator]
+                out[key] = raw[key]
+            else:
+                problems.append(f"steering.{key} must be {what} — no limit applies")
+    return out, problems
+
+
 def may_move(who: str, state: str, rec: dict, steward_may: list[str], from_state: str) -> str | None:
     """Why `who` may not move the record to `state` under the delegated
     `steward_may` (concept: decision rights); None when allowed. Roles are

@@ -723,3 +723,67 @@ def test_one_live_trial_per_project_whatever_its_name(opt):
                      .replace("flag: scoped-handover", "flag: routing"))
     m.review(other, "reviewer", "pass", "ok", today=TODAY)
     assert "one live trial per project" in m.move(out, other, "piloting", "steward", "go", today=TODAY)
+
+
+# --- the steering block (v2.97 B1) ---------------------------------------------------
+
+KENNI_STEERING = {"tracks": {"A": "Kundenarbeit", "B": "Plattform"}, "wip_per_track": 2,
+                  "process_issues_in_progress": 1, "process_share_max": 0.4,
+                  "process_share_window_weeks": 4, "kit_update_cadence_days": 14}
+
+
+def test_steering_reads_kennis_block_without_a_problem(opt):
+    out, m = opt
+    _mandate(out, {**MANDATE, "steering": KENNI_STEERING})
+    got, problems = m.steering(out)
+    assert problems == [] and got == KENNI_STEERING
+    _mandate(out, {**MANDATE, "steering": {**KENNI_STEERING, "growth_max_commits": 40, "growth_max_days": 10}})
+    got, problems = m.steering(out)
+    assert problems == [] and got["growth_max_commits"] == 40 and got["growth_max_days"] == 10
+
+
+def test_steering_without_the_block_or_the_mandate_sets_no_limit(opt):
+    out, m = opt
+    assert m.steering(out) == ({}, [])  # no mandate at all
+    _mandate(out, MANDATE)
+    assert m.steering(out) == ({}, [])
+    _mandate(out, {**MANDATE, "steering": {"wip_per_track": 2}})
+    assert m.steering(out) == ({"wip_per_track": 2}, [])  # a missing key is no limit
+
+
+@pytest.mark.parametrize("key,value", [
+    ("tracks", ["A", "B"]), ("tracks", {"A": 1}), ("tracks", {"": "x"}), ("wip_per_track", "2"),
+    ("wip_per_track", True), ("wip_per_track", -1), ("process_issues_in_progress", 1.5),
+    ("process_share_max", 1.2), ("process_share_max", "0.4"), ("process_share_window_weeks", 0),
+    ("kit_update_cadence_days", None), ("growth_max_commits", 0), ("growth_max_days", "ten")])
+def test_a_wrong_type_is_a_problem_and_no_limit(opt, key, value):
+    out, m = opt
+    _mandate(out, {**MANDATE, "steering": {**KENNI_STEERING, key: value}})
+    got, problems = m.steering(out)
+    assert key not in got or got[key] != value  # ignored, never guessed
+    assert any(p.startswith(f"steering.{key}") for p in problems), problems
+    other = "wip_per_track" if key == "kit_update_cadence_days" else "kit_update_cadence_days"
+    assert got[other] == KENNI_STEERING[other]  # the rest of the block still holds
+
+
+def test_a_steering_block_that_is_no_mapping_or_a_broken_mandate_is_a_problem(opt):
+    out, m = opt
+    _mandate(out, {**MANDATE, "steering": [1, 2]})
+    got, problems = m.steering(out)
+    assert got == {} and problems == ["steering must be a mapping — no limit applies"]
+    _mandate(out, {**MANDATE, "max_pilot_days": 0, "steering": KENNI_STEERING})
+    got, problems = m.steering(out)
+    assert got == {} and "max_pilot_days" in problems[0]
+    _mandate(out, {**MANDATE, "steering": {"tracks": {"A": "a", "process": "p"}}})
+    got, problems = m.steering(out)
+    assert got == {"tracks": {"A": "a"}} and "`process`" in problems[0]
+
+
+def test_the_example_mandate_shows_the_steering_block_and_names_its_readers(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    example = json.loads((out / "docs/process/optimization.example.json").read_text(encoding="utf-8"))
+    assert set(KENNI_STEERING) <= set(example["steering"])
+    assert {"growth_max_commits", "growth_max_days"} <= set(example["steering"])
+    assert "`steering`" in example["_comment"] and "dispatch.py" in example["_comment"]
+    (out / "docs/process/optimization.local.json").write_text(json.dumps(example), encoding="utf-8")
+    assert _load(out).steering(out)[1] == []
