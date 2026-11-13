@@ -1526,6 +1526,22 @@ def test_flow_carries_the_last_plan_drift_verdict_per_issue(render, tmp_path):
                                 "quality": "measured"}  # a skipped run is no verdict
 
 
+def test_nodes_leave_out_the_wip_rows_of_dispatch(render, tmp_path):
+    """v2.97 B3: dispatch logs a WIP refusal or override as a gate event (`gate="wip"`); it is no
+    gate with a run time, so the check graph does not show it as a node."""
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    now = datetime(2026, 10, 2, tzinfo=timezone.utc)
+    rows = [{"ts": "2026-10-01T11:59:00+00:00", "gate": "wip", "mode": "block", "outcome": "override",
+             "rc": None, "duration_s": 0.0, "override": True, "track": "A", "limit": 2, "in_progress": [3, 4],
+             "reason": "owner", "issue": 5, "head": None, "dirty": None},
+            {"ts": "2026-10-01T12:00:00+00:00", "gate": "ruff", "mode": "block", "outcome": "pass",
+             "duration_s": 1.5, "head": "abc", "dirty": False}]
+    (out / ".git/process-gate-events.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert [n["gate"] for n in m.nodes_table(out, days=7, now=now)["nodes"]] == ["ruff"]
+
+
 FINDINGS_REPORTS = {
     "a.md": ("review: a\nwork: #1\npublish-waived: test\n\n"
              "FINDING sev=blocker action=fix issue=- class=testable rule=mutation weak assert\n"

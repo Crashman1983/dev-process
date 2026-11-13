@@ -4391,6 +4391,8 @@ def nodes_table(root: Path, *, days: int = _NODE_DAYS, now: datetime | None = No
     triage, problems = gate_triage(root)
     by_gate: dict[str, list[dict]] = defaultdict(list)
     for row in events:
+        if row["gate"] == "wip":  # dispatch's WIP refusal or override (v2.97): no gate with a run time
+            continue
         by_gate[row["gate"]].append(row)
 
     def _input(row: dict) -> str | None:
