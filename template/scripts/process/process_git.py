@@ -8,6 +8,26 @@ from pathlib import Path
 # it repairs. One grammar for both readers — the train must not take #N for
 # an issue of the fix's branch, the telemetry flow counts it as an escape of
 # #N. Only a well-formed trailer line counts: refs and commas, nothing else.
+# One reader of "is this a release": a bare ref (`v2.95.0`, `2.95.0`) or the
+# `_commit:` line of `.copier-answers.yml`. A SHA, `vX.Y.Z.postN…` or
+# `vX.Y.Z-N-g<sha>` is no release — unknown, never an old version.
+_RELEASE = r"v?(\d+)\.(\d+)\.(\d+)"
+_RELEASE_REF = re.compile(rf"^{_RELEASE}$")
+_RELEASE_LINE = re.compile(rf"^_commit:[ \t]*['\"]?{_RELEASE}['\"]?[ \t]*$", re.MULTILINE)
+
+
+def release_of(ref: str | None) -> tuple[int, int, int] | None:
+    """(major, minor, patch) when `ref` names a release, else None."""
+    m = _RELEASE_REF.match((ref or "").strip())
+    return (int(m[1]), int(m[2]), int(m[3])) if m else None
+
+
+def answers_release(text: str) -> tuple[int, int, int] | None:
+    """The release `.copier-answers.yml` text names in `_commit`, else None."""
+    m = _RELEASE_LINE.search(text or "")
+    return (int(m[1]), int(m[2]), int(m[3])) if m else None
+
+
 _REF = r"(?:#\d+|[\w.-]+/[\w.-]+#\d+)"
 REGRESSION_TRAILER = re.compile(rf"(?im)^[ \t]*Regression-of:[ \t]*({_REF}(?:[ \t]*,[ \t]*{_REF})*)[ \t]*$")
 

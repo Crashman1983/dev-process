@@ -1739,7 +1739,6 @@ def _cost_text(c: dict) -> str:
     return f"{c['median']:,.0f} tokens ({c['known']})" + (f", unknown {c['unknown']}" if c["unknown"] else "")
 
 
-_RELEASE_TAG = re.compile(r"^_commit:[ \t]*['\"]?v?(\d+)\.(\d+)\.(\d+)['\"]?[ \t]*$", re.MULTILINE)
 _DUTY_FROM = {"root-cause": (2, 77, 0), "replan": (2, 77, 0), "kind": (2, 70, 0)}  # CHANGELOG
 
 
@@ -1748,6 +1747,8 @@ def _versions_at(root: Path, shas: set[str]) -> dict[str, tuple[int, int, int] |
     `git cat-file --batch`. None — unknown, never "old" — when the file is missing or its
     `_commit` is no release tag (a SHA, `vX.Y.Z.postN…`, `vX.Y.Z-N-g<sha>`)."""
     import os  # noqa: PLC0415
+
+    from process_git import answers_release  # noqa: PLC0415 — the release grammar's owner
     got: dict[str, tuple[int, int, int] | None] = dict.fromkeys(shas)
     if not shas:
         return got
@@ -1769,8 +1770,7 @@ def _versions_at(root: Path, shas: set[str]) -> dict[str, tuple[int, int, int] |
             size = int(head[2])
             body = data[pos:pos + size].decode("utf-8", "replace")
             pos += size + 1
-            m = _RELEASE_TAG.search(body)
-            got[sha] = tuple(int(x) for x in m.groups()) if m else None
+            got[sha] = answers_release(body)
     return got
 
 
