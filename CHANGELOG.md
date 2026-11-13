@@ -10,7 +10,7 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
-## v2.96.0 — Steering you can measure: epics, open work, anchor load, required updates · 2026-11-13
+## v2.96.0 — Steering with limits: open work measured and held, lanes for heavy runs · 2026-11-13
 
 **Why.**
 - Comparing Kenni with a second adopter project (#411–#417): the template costs both about the same per commit, yet Kenni moves slower — 65 issues in progress at once, 156 opened against 26 closed in two weeks, 32 template releases in 30 days. The improvement loop measured none of it.
@@ -22,21 +22,33 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 - [optional] **`process_context.py --cost` measures the anchor load:** an `entry_load` block with lines and tokens per harness anchor, subtree anchors and overlays per command; `--trend` gives the same sums at each template release.
 - [recommended] **`template_update.py --dry-run` names what an update requires:** per release since the installed one its `[required]` changes and the counts of the others, and the overlays whose anchored sections the template changed.
 - [optional] **Release notes carry a mark** from this release on: every change is `[required]`, `[recommended]` or `[optional]`. `required` means security, a broken contract, data loss or a defect that blocks work.
+- [required] **Work-in-progress limits from the mandate.** A new `steering` block (`optimization.md`; the key names of an existing project's block are kept): `dispatch.py start` holds an issue's first start to its track's limit (`wip_per_track`, `process_issues_in_progress` for the track `process`), exits 3 at the limit and names it; `--over-wip "<reason>"` starts anyway and records it. Once `tracks` is set, a first start needs `--track <name>` — a steward that starts work without it is refused. In progress counts both hosts (reports published and fetched on a first start; the train and `finish` publish their `done`); silent work is `dormant` after 14 days. A grown issue (`growth_max_commits`, `growth_max_days`) gets a "split or finish" note.
+- [recommended] **The process share has a limit.** `share` and the tower judge the process-only share against `steering.process_share_max` over its weeks (default 40 % over 4); the weekly pass ranks an action when it is over.
+- [optional] **Update cadence.** `template_update.py --dry-run` names the last update and, with `steering.kit_update_cadence_days`, whether the next is due, due now (a `[required]` change) or can wait.
+- [recommended] **`finish --tests` and the train hold lane `full`.** Two heavy runs on one host no longer overlap; the train holds it from after the preboard to before its push. A train that cannot take it ends `lane-held`, nobody blamed. Only with the template's `lane.py`.
+- [recommended] **`report.py` refuses a worker that is no branch** (or a detached `HEAD`): the train and the tower match reports by branch. `done` and `idle` may name a known branch already deleted after its merge.
 
 **Effect.**
-- The steward and the weekly pass see open work and growth, not only merged work; an update can be batched when nothing in it is required.
+- The steward and the weekly pass see open work and growth, not only merged work, and the steward starts nothing in a full track; an update can be batched when nothing in it is required.
 
 **Changed sections.**
-- `optimization.md` (Goals and how they are measured)
+- `optimization.md` (Goals and how they are measured; The process as a check graph)
+- `improvement-weekly.md` (Inputs; Steps; Report)
 - `releases.md` (Updating the process template)
+- `testing.md` (Test economy)
+- `tower.md` (Dispatch and the model policy)
+- `train.md` (Departure; The run; Red, undefined, aborted)
+- `modules/github-issues.md` (Example label schema)
 - `modules/telemetry.md` (The KPI cockpit)
-- `commands/prime.md`
+- `commands/prime.md`, `commands/report.md`, `commands/steward.md` (Loop; Housekeeping)
 
 **Update.**
-- Pure update. No new configuration key.
+- New optional configuration: the mandate's `steering` block. Without it nothing changes in dispatch.
+- **With `steering.tracks` set**, every first start needs `--track <name>`: update the steward's overlay and any script that calls `dispatch.py start` or `queue add`; file work already running with `dispatch.py track --issue N --track <name>`.
+- A report under a name that is no branch now exits 2.
 - `outcomes` makes more `gh` calls (a few pages per run); on a large repository a run can end `complete: false`.
 
-Details: [Plan](docs/analysis/2026-11-13-v2.96.md) #411 #412 #413 #414 #415 #417
+Details: [Plan v2.96](docs/analysis/2026-11-13-v2.96.md), [Plan v2.97](docs/analysis/2026-11-13-v2.97.md) #411 #412 #413 #414 #415 #416 #417
 
 ## v2.95.0 — A load abort is no finding about a passenger · 2026-11-11
 

@@ -406,6 +406,33 @@ it, each model's share of the dispatched sessions' tokens, subagents
 included (from the policy's `transcripts`): whether `[mechanical]` steps
 really moved to the smaller model.
 
+### Work-in-progress limits (`steering`)
+
+With a `steering` block in the mandate (`optimization.md`), `dispatch.py start`
+holds an issue's **first** start (no `starts` in `phases/<issue>.json` yet —
+brainstorm, plan or a quick execute) to its track's limit: `--track <name>` is
+required once `tracks` is set, `process` is the fixed track of process work
+(limit `process_issues_in_progress`), every other track has `wip_per_track`.
+At the limit `start` exits 3 and names the limit, the track and its issues;
+`--over-wip "<reason>"` starts anyway. Both write a `gate="wip"` row to the gate
+events (`outcome` `refused` or `override`), which the tower's `wip:` line shows
+for the last seven days. A later phase or a restart after `stop` is not checked;
+the track stays in the phase history and every later worker inherits it
+(`PROCESS_TRACK`). `dispatch.py track --issue N --track <name>` files work that
+began before the limit. `queue add` takes `--track` and `--over-wip` too; a
+line refused for its limit waits.
+
+In progress (`tower.in_progress`, the one rule): the issue of each worker's
+latest report that is not `done`, `idle` or `failed` (`review-pass` counts),
+or a dispatch record no report followed, including a hand-over to another host.
+Before counting, a first start publishes this host's reports and fetches the
+others' (15 s each); the result names each other host's age and says "may
+undercount" when that failed. Work silent for 14 days is `dormant`: shown, not
+counted. The train and `finish` publish their `done` under a `steering` block.
+On a plan or execute start, an issue over `growth_max_commits` (its branch
+commits) or `growth_max_days` (since its claim) gets a "split or finish" note in
+the worker's prompt and a line for the steward; it never refuses.
+
 ## What the tower is not
 
 It decides nothing and speaks to nobody. It is the input an orchestrating

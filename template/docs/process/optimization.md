@@ -124,6 +124,16 @@ the start until the plan is refreshed (the plan phase), or the steward
 passes `--stale-plan-ok`, which the event records. The mandate is the
 owner's file, so the owner turns the node up — on the shadow evidence.
 
+**Steering** (`steering` in the mandate) sets the limits the steward and the
+weekly pass apply to the flow of work, each optional — a missing key is no
+limit, a wrong one is named and ignored (`optimize.steering`, the one reader):
+`tracks` (name → description; `process` is the fixed track of process work),
+`wip_per_track`, `process_issues_in_progress`, `process_share_max` and
+`process_share_window_weeks` (read by `share` and the tower), `kit_update_cadence_days`
+(read by `template_update.py --dry-run`), `growth_max_commits` and
+`growth_max_days` (the "split or finish" note). `dispatch.py start` holds a
+first start to its track's limit (`tower.md`, "Work-in-progress limits").
+
 Two briefs run the loop, in any harness: `improvement-weekly.md` (the
 steward's weekly pass: last prognosis, a few triaged blocks, blind spots,
 one ranked action) and `improvement-monthly.md` (a fresh, advisory review

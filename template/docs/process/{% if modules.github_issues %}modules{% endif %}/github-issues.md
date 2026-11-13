@@ -91,6 +91,8 @@ A starting point, not enforced by any gate:
 - `type:{feature,bug,chore,finding}` (the finding template sets `type:finding`)
 - `status:in-progress` — claimed and being worked (`status:{review,handoff,blocked}`
   for finer states).
+- `track:<name>` — the steering track an issue belongs to, where the mandate sets
+  `steering.tracks` (`optimization.md`); the steward names it on the first start.
 - Bug origin, two axes (read by `process_kpis.py outcomes` when the telemetry
   module is on):
   - `cause:{regression,preexisting,unknown}` — a regression also names the

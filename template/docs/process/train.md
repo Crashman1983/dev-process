@@ -151,7 +151,11 @@ The train departs when at least `--min-candidates` (default 3) are aboard,
 or the oldest has waited longer than `--max-wait-hours` (default 4), and
 no lane but `scoped` is held where the project has a lane script (see
 `tower.md`, lanes). The suite runs on `full`, niced beside the short
-`scoped` runs; a train that waited for every pre-push to finish left once
+`scoped` runs. The train holds `full` itself from after the preboard to
+before its push, so no other heavy run comes and goes between two of its
+suite runs; its children get its lane directory (`PROCESS_LANE_DIR`). If
+`full` stays held, the round ends `result="environment"`,
+`red_path="lane-held"`, nobody blamed, nothing merged; a train that waited for every pre-push to finish left once
 a day downstream, with five reviewed candidates waiting.
 `--force` departs with whatever boarded. Environment:
 `PROCESS_TRAIN_MIN`, `PROCESS_TRAIN_MAX_WAIT_H`.
@@ -300,7 +304,8 @@ per round: the first, and one more after each drop. Each entry has:
 - `red_path`, how the round ended: `green`, `flaky`, `gate-flaky`,
   `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`,
   `environment`, `suite-aborted` (a suite run aborted and nobody could be
-  blamed), `push-rejected` or `aborted` (the train itself crashed or was
+  blamed), `lane-held` (the train could not take lane `full`; nothing ran,
+  nobody blamed), `push-rejected` or `aborted` (the train itself crashed or was
   interrupted).
 - `runs`, every run of the round by kind (`first`, `retry_gates`,
   `retry_failed`, `retry_full`, `base`, `probe`, `retry_abort`), each with
@@ -410,7 +415,7 @@ The wait is the phase `abort_wait`. Each round's `aborts` lists every aborted
 run: `reason` (the marker's first line), `wait_s` (the wait before its
 repeat) and `ended` (`load`, `budget`, `unread`, or null when nothing was
 repeated after it); a round that ends green keeps them. `train-phases`
-counts `suite-aborted` apart from the preflight and names the line the
+counts `suite-aborted` and `lane-held` apart from the preflight and names the line the
 latest one stopped on, with the number of trains in a row that ended on
 the same kind and subject (its first two words: `lane-busy full`,
 `watchdog <nodeid>`; pids, times and loads vary) — a test or a lane that
