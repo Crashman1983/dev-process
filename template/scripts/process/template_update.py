@@ -21,6 +21,9 @@ makes the owner list explicit and the port mechanical:
 `[required]` items of every release between the installed one and the target
 (`changelog.py`) and the overlays whose anchored section the template changed
 (`check_overlays.section_changes`) — the work an update brings, before it runs.
+It names the last update, and with the mandate's `steering.kit_update_cadence_days`
+whether the next is due: due now when a `[required]` change is pending, else by
+the cadence.
 
 Stdlib plus the `copier` CLI on PATH (uvx copier works; PyYAML, copier's
 own dependency, is used when importable). The two extra
@@ -30,6 +33,7 @@ Usage: template_update.py [root] [--ref <tag-or-sha>] [--dry-run] | --verify …
 """
 from __future__ import annotations
 
+import datetime as _dt
 import difflib
 import fnmatch
 import re
@@ -302,10 +306,14 @@ def _latest_release(clone: Path) -> str | None:
     return max(released)[1] if released else None
 
 
-def _notes_lines(text: str, installed: tuple[int, int, int], target: tuple[int, int, int]) -> list[str]:
+def _notes_lines(text: str, installed: tuple[int, int, int],
+                 target: tuple[int, int, int]) -> tuple[list[str], bool | None]:
+    """The lines for every release above `installed` up to `target`, and whether a
+    `[required]` item is among them: True, False, or None when an unmarked item may be one."""
     from changelog import entries, marks  # noqa: PLC0415
     from process_git import release_of  # noqa: PLC0415
     lines = []
+    required, unknown = False, False
     for version, title, body in entries(text):
         number = release_of(version)
         if number is None or not installed < number <= target:
@@ -315,12 +323,15 @@ def _notes_lines(text: str, installed: tuple[int, int, int], target: tuple[int, 
         if not graded:
             before = " (before v2.96)" if number < MARKED_SINCE else ""
             lines.append(f"  {version} — {title}: not marked{before}")
+            unknown = unknown or bool(found) or number < MARKED_SINCE
             continue
         counts = ", ".join(f"{graded.count(m)} {m}" for m in ("required", "recommended", "optional"))
         unmarked = len(found) - len(graded)
+        unknown = unknown or bool(unmarked)
         lines.append(f"  {version} — {title}: {counts}" + (f", {unmarked} not marked" if unmarked else ""))
+        required = required or "required" in graded
         lines += [f"    [required] {line}" for m, line in found if m == "required"]
-    return lines
+    return lines, (True if required else None if unknown else False)
 
 
 def _overlay_lines(root: Path, clone: Path, old_sha: str, new_sha: str) -> list[str]:
@@ -342,29 +353,31 @@ def _overlay_lines(root: Path, clone: Path, old_sha: str, new_sha: str) -> list[
     return lines
 
 
-def release_report(root: Path, src: str, installed: str, ref: str | None) -> list[str]:
+def release_report(root: Path, src: str, installed: str, ref: str | None) -> tuple[list[str], bool | None]:
     """What `--dry-run` says past its first line, read from a clone of the template
     source: the `[required]` items of every release above the installed one up to the
     target (`--ref`, else the highest `vN.N.N` tag) and the overlays whose anchored
-    section changed. Never raises: unreadable is one line, and the dry run stays 0."""
+    section changed; with it whether a `[required]` item is pending (None: the notes
+    were not read). Never raises: unreadable is one line, and the dry run stays 0."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from process_git import release_of  # noqa: PLC0415
     import template_verify as tv  # noqa: PLC0415
     for name in (installed, ref):
         if name is not None and release_of(name) is None:
-            return [f"template-update: release notes unreadable: {name} is no release"]
+            return [f"template-update: release notes unreadable: {name} is no release"], None
     lines: list[str] = []
+    required: bool | None = None
     try:
         clone = tv._clone(src, ref or "the latest release")
         target = ref or _latest_release(clone)
         if target is None:
-            return ["template-update: release notes unreadable: the template source has no release tag"]
+            return ["template-update: release notes unreadable: the template source has no release tag"], None
         new_sha = tv._release(src, target)
         notes = _blob(clone, new_sha, "CHANGELOG.md")
         if notes is None:
             lines.append(f"template-update: release notes unreadable: no CHANGELOG.md at {target}")
         else:
-            found = _notes_lines(notes, release_of(installed), release_of(target))
+            found, required = _notes_lines(notes, release_of(installed), release_of(target))
             lines.append(f"template-update: release notes from {installed} to {target}"
                          + (f" (CHANGELOG.md at {target}):" if found else ": no release in between"))
             lines += found
@@ -377,7 +390,59 @@ def release_report(root: Path, src: str, installed: str, ref: str | None) -> lis
         what = "overlays" if lines else "release notes and overlays"
         reason = str(exc).removesuffix(" — verification fails closed")  # template_verify's wording
         lines.append(f"template-update: {what} unreadable: {reason}")
-    return lines
+    return lines, required
+
+
+def last_update(root: Path) -> _dt.date | None:
+    """The date of the last commit that changed `_commit` in the answers file: the last
+    update (or the install). None when git names none."""
+    r = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%cs", "-G", r"^_commit:",
+                        "--", ANSWERS], capture_output=True, text=True)
+    try:
+        return _dt.date.fromisoformat(r.stdout.strip()) if r.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def update_cadence(root: Path) -> tuple[int | None, str | None]:
+    """(days, problem): `steering.kit_update_cadence_days` from the mandate; no key, no
+    cadence. A wrong type is named and ignored, never guessed."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from optimize import load_mandate  # noqa: PLC0415 — stdlib-only sibling
+    mandate, _problem = load_mandate(root)
+    steering = (mandate or {}).get("steering")
+    if not isinstance(steering, dict) or "kit_update_cadence_days" not in steering:
+        return None, None
+    days = steering["kit_update_cadence_days"]
+    if isinstance(days, int) and not isinstance(days, bool) and days >= 1:
+        return days, None
+    return None, "steering.kit_update_cadence_days must be a positive integer — ignored"
+
+
+def cadence_lines(root: Path, required: bool | None, today: _dt.date | None = None) -> list[str]:
+    """The last update and, with the mandate's cadence, whether the next is due: a pending
+    `[required]` change makes it due now; otherwise the cadence decides, and the update
+    waits for the date only when the notes said no `[required]` change is pending."""
+    last = last_update(root)
+    lines = [f"template-update: last update {last.isoformat() if last else 'unknown'} "
+             f"(the last commit that changed _commit in {ANSWERS})"]
+    days, problem = update_cadence(root)
+    if problem:
+        return [*lines, f"template-update: {problem}"]
+    if days is None:
+        return lines
+    head = f"template-update: cadence {days} days"
+    if required:
+        return [*lines, f"{head} — due now: a [required] change is pending"]
+    if last is None:
+        return [*lines, f"{head} — due: no last update to count from"]
+    due = last + _dt.timedelta(days=days)
+    if (today or _dt.date.today()) >= due:
+        return [*lines, f"{head} — due (since {due.isoformat()})"]
+    if required is None:
+        return [*lines, f"{head} — defer until {due.isoformat()}; a [required] change may be pending "
+                        "— the release notes did not say"]
+    return [*lines, f"{head} — defer until {due.isoformat()}: no required change pending"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -394,7 +459,8 @@ def main(argv: list[str] | None = None) -> int:
                                  description=__doc__.split("\n\n")[0].split(": ", 1)[-1])
     ap.add_argument("root", nargs="?", default=".", help="the project to update (default: the current directory)")
     ap.add_argument("--ref", help="the release tag or commit to update to (default: the latest release)")
-    ap.add_argument("--dry-run", action="store_true", help="check and report the required items and the overlays to re-check; change nothing")
+    ap.add_argument("--dry-run", action="store_true", help="check and report the required items, the overlays to re-check and whether an update "
+                         "is due; change nothing")
     ns = ap.parse_args(args)
     ref: str | None = ns.ref
     dry = ns.dry_run
@@ -428,7 +494,8 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
     if dry:
-        for line in release_report(root, src, old_ref, ref):
+        lines, required = release_report(root, src, old_ref, ref)
+        for line in lines + cadence_lines(root, required):
             print(line)
         return 0
     try:

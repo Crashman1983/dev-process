@@ -2,7 +2,10 @@
 `[required]` items of every release between the installed one and the target, and the
 overlays whose anchored template section changed — read from a clone of the template
 source, before anything is written."""
+import datetime
+import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -168,3 +171,114 @@ def test_offline_is_one_line_and_exit_zero(repos):
     assert r.returncode == 0, r.stderr
     said = [ln for ln in r.stdout.splitlines() if "unreadable" in ln or "re-check" in ln or "[required]" in ln]
     assert len(said) == 1 and "unreachable" in said[0] and "fails closed" not in said[0], r.stdout
+
+
+# --- v2.97 B6 (#415 AC-3/4): the last update and the cadence -----------------------------
+
+CHANGELOG_LATER = ("# Changelog\n\n## v2.97.0 — Later · 2026-11-20\n\n**What changes.**\n"
+                   "- [recommended] Nicer output.\n- [optional] Another flag.\n\n"
+                   + CHANGELOG_NEW.split("\n", 2)[2])
+TODAY = datetime.date.today()
+NOW = datetime.datetime.now()
+
+
+def commit_at(root: Path, when: datetime.datetime) -> None:
+    git(root, "add", "-A")
+    stamp = when.strftime("%Y-%m-%dT%H:%M:%S")
+    env = dict(os.environ, GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=root, check=True, capture_output=True, env=env)
+
+
+def mandate(project: Path, steering: dict | None) -> None:
+    write(project, "docs/process/optimization.local.json",
+          json.dumps({} if steering is None else {"steering": steering}))
+    commit(project)
+
+
+def install(project: Path, version: str, when: datetime.datetime) -> None:
+    answers = project / ".copier-answers.yml"
+    answers.write_text(re.sub(r"_commit: \S+", f"_commit: {version}", answers.read_text()))
+    commit_at(project, when)
+
+
+def later_release(source: Path) -> None:
+    """v2.97.0 above v2.96.0, nothing `[required]` in it."""
+    write(source, "CHANGELOG.md", CHANGELOG_LATER)
+    commit(source)
+    git(source, "tag", "v2.97.0")
+
+
+def cadence_line(out: str) -> str:
+    return next(ln for ln in out.splitlines() if "cadence" in ln)
+
+
+def test_the_dry_run_names_the_last_update_and_no_cadence_without_one(repos):
+    _, project = repos
+    install(project, "v2.94.0", NOW - datetime.timedelta(days=40))
+    install(project, "v2.93.0", NOW - datetime.timedelta(days=10))  # the last change of _commit
+    answers = project / ".copier-answers.yml"
+    answers.write_text(answers.read_text().replace("project_name: demo", "project_name: other"))
+    commit(project)  # another answer changed today: no update
+    r = dry(project)
+    assert r.returncode == 0, r.stderr
+    last = (TODAY - datetime.timedelta(days=10)).isoformat()
+    assert f"template-update: last update {last}" in r.stdout, r.stdout
+    assert "cadence" not in r.stdout and "defer" not in r.stdout and "due" not in r.stdout
+    mandate(project, None)  # a mandate without the key: still no cadence
+    assert "cadence" not in dry(project).stdout
+
+
+def test_a_pending_required_change_is_due_now_whatever_the_cadence(repos):
+    _, project = repos
+    mandate(project, {"kit_update_cadence_days": 14})
+    r = dry(project)  # installed today; v2.96.0 carries a [required] item
+    assert r.returncode == 0, r.stderr
+    line = cadence_line(r.stdout)
+    assert "due now" in line and "[required]" in line, line
+
+
+def test_without_a_required_change_the_cadence_defers_until_due(repos):
+    source, project = repos
+    later_release(source)
+    install(project, "v2.96.0", NOW - datetime.timedelta(days=3))
+    mandate(project, {"kit_update_cadence_days": 14})
+    r = dry(project)
+    assert r.returncode == 0, r.stderr
+    assert "v2.96.0 to v2.97.0" in r.stdout and "[required]" not in r.stdout, r.stdout
+    until = (TODAY - datetime.timedelta(days=3) + datetime.timedelta(days=14)).isoformat()
+    line = cadence_line(r.stdout)
+    assert f"defer until {until}: no required change pending" in line, line
+    assert "due" not in line
+
+
+def test_past_the_cadence_the_update_is_due(repos):
+    source, project = repos
+    later_release(source)
+    install(project, "v2.96.0", NOW - datetime.timedelta(days=20))
+    mandate(project, {"kit_update_cadence_days": 14})
+    r = dry(project)
+    line = cadence_line(r.stdout)
+    assert "— due" in line and "due now" not in line and "defer" not in line, line
+    assert f"last update {(TODAY - datetime.timedelta(days=20)).isoformat()}" in r.stdout, r.stdout
+
+
+def test_a_wrong_cadence_is_named_and_judges_nothing(repos):
+    _, project = repos
+    for bad in ("14", True, 0, 2.5):
+        mandate(project, {"kit_update_cadence_days": bad})
+        r = dry(project)
+        assert r.returncode == 0, r.stderr
+        assert "kit_update_cadence_days must be a positive integer — ignored" in r.stdout, (bad, r.stdout)
+        assert "due" not in r.stdout and "defer" not in r.stdout, bad
+
+
+def test_unreadable_notes_never_say_no_required_change(repos):
+    source, project = repos
+    install(project, "v2.94.0", NOW - datetime.timedelta(days=3))
+    mandate(project, {"kit_update_cadence_days": 14})
+    source.rename(source.with_name("gone"))
+    r = dry(project)
+    assert r.returncode == 0, r.stderr
+    line = cadence_line(r.stdout)
+    assert "defer until" in line and "no required change pending" not in line, line
+    assert "may be pending" in line, line
