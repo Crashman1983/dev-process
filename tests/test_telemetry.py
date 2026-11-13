@@ -1141,6 +1141,29 @@ def test_gh_issues_stops_at_the_rate_floor_or_the_page_limit(render, tmp_path, m
     assert {c["kind"] for c in calls()} == {"closed", "open", "late"}
 
 
+def test_gh_issues_a_page_without_paging_facts_is_a_cut_not_the_end(render, tmp_path, monkeypatch):
+    """A partial answer (exit 1 with `data`) can carry the list's nodes but no `pageInfo`: the list
+    may go on, so it is a cut — never `complete` — named after that list."""
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    _fake_gh(tmp_path, monkeypatch, _gh_scenario())
+    real = m._gh_graphql
+
+    def no_page_info(gh, root, query, args):
+        data, why = real(gh, root, query, args)
+        issues = ((data or {}).get("repository") or {}).get("issues")
+        if isinstance(issues, dict):
+            issues.pop("pageInfo", None)
+        return data, why
+
+    monkeypatch.setattr(m, "_gh_graphql", no_page_info)
+    issues, why, cut = m._gh_issues(out, _gh_since(), resolve_subs=False)
+    assert why is None and cut is not None and cut["list"] == "closed" and "pageInfo" in cut["reason"]
+    assert m._cut_text(cut).startswith("cut after 1 page(s) of the closed list")
+    assert m._cut_text({"pages": 40, "reason": "page limit (40)", "list": "before late"}) \
+        == "cut after 40 page(s), late list not read (page limit (40))"
+
+
 def test_outcomes_asks_for_sub_issues_only_for_a_label_or_title_marker(render, tmp_path):
     from datetime import datetime, timedelta, timezone
     out = _flow_repo(render, tmp_path)
