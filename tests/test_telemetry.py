@@ -241,6 +241,46 @@ def test_share_prints_process_against_product_week_by_week(render, tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "week -0:    4 commits — process only  50%" in r.stdout, r.stdout
     assert "week -1:    0 commits" in r.stdout and "confidence: low" in r.stdout
+    # no mandate: the limit of before, 40 %
+    assert "over the limit (50 % > 40 % over 2 weeks)" in r.stdout, r.stdout
+
+
+def _share_repo(out: Path) -> None:
+    """Four commits on main, two of them process only (50 %)."""
+    for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "t"],
+                 ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=out, check=True, capture_output=True)
+    for i, rel in enumerate([".process-work/journal/a.md", ".process-work/journal/a.md", "src/x.py"]):
+        p = out / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"{i}\n")
+        subprocess.run(["git", "add", "-A"], cwd=out, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", f"c{i}"], cwd=out, check=True)
+
+
+def test_share_judges_the_mandate_limit_over_the_mandate_weeks(render, tmp_path):
+    """v2.97 B5 (#416): `share` reads `steering.process_share_max` and
+    `process_share_window_weeks`; `--weeks` still wins over the mandate's weeks."""
+    out = _render(render, tmp_path)
+    _share_repo(out)
+    r = _kpis(out, "share")  # no mandate: four weeks, as before
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "week -3:" in r.stdout and "week -4:" not in r.stdout, r.stdout
+    assert "over the limit (50 % > 40 % over 4 weeks)" in r.stdout, r.stdout
+    mandate = out / "docs/process/optimization.local.json"
+    mandate.write_text(json.dumps({"steering": {"process_share_max": 0.6, "process_share_window_weeks": 3}}))
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "share"],
+                       cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "week -2:" in r.stdout and "week -3:" not in r.stdout, r.stdout
+    assert "within the limit (50 % ≤ 60 % over 3 weeks)" in r.stdout, r.stdout
+    assert "over the limit" not in r.stdout
+    mandate.write_text(json.dumps({"steering": {"process_share_max": 0.25, "process_share_window_weeks": 3}}))
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "share", "--weeks", "1"],
+                       cwd=out, capture_output=True, text=True)
+    assert "week -1:" not in r.stdout, r.stdout  # --weeks wins
+    assert "over the limit (50 % > 25 % over 1 week)" in r.stdout, r.stdout
+    assert "25 %" in r.stdout.splitlines()[-1]  # the action names the limit it judged
 
 
 # --- hygiene -----------------------------------------------------------------

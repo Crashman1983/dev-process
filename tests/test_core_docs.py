@@ -516,6 +516,19 @@ def test_releases_doc_carries_the_ritual(render, tmp_path):
     assert "docs/process/releases.md" in commits
 
 
+def test_the_weekly_pass_weighs_the_process_share_against_its_limit(render, tmp_path):
+    # v2.97 B5 (#416): the mandate's limit reaches the one action of the week
+    out = render(tmp_path, {"project_name": "demo"})
+    weekly = (out / "docs/process/improvement-weekly.md").read_text()
+    inputs = " ".join(weekly.split("## Inputs", 1)[1].split("## Steps", 1)[0].split())
+    assert "process_kpis.py share" in inputs and "process_kpis.py intake" in inputs
+    assert "steering.process_share_max" in inputs and "process_share_window_weeks" in inputs
+    step4 = " ".join(weekly.split("4. **Rank one action.**", 1)[1].split("5. **", 1)[0].split())
+    assert "over the limit" in step4 and "why not" in step4, step4
+    seen = next(ln for ln in weekly.splitlines() if ln.startswith("- Seen:"))
+    assert "share" in seen and "weeks" in seen, seen
+
+
 def test_threat_question_at_tier3(render, tmp_path):
     out = render(tmp_path, {"project_name": "demo"})
     checklist = (out / "docs/process/review-checklist.md").read_text()

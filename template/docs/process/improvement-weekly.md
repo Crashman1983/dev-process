@@ -22,6 +22,12 @@ Read, do not change:
   its blocks; flips; triage so far.
 - `uv run scripts/process/process_kpis.py outcomes` — epics to usable,
   disruptive bugs to fixed, bug-origin coverage (needs `gh`).
+- `uv run scripts/process/process_kpis.py share` — the process-only share of
+  the commits, week by week, over or within the mandate's limit
+  (`steering.process_share_max` over `process_share_window_weeks`; without
+  them 40 % over four weeks).
+- `uv run scripts/process/process_kpis.py intake` — issues opened, closed
+  and in progress per week, with each one's days and commits (needs `gh`).
 - `uv run scripts/process/process_kpis.py flow`, `rounds`, `clusters` where a
   number needs its issues behind it.
 - `uv run scripts/process/gate_modes.py status` and `optimize.py status` —
@@ -67,6 +73,10 @@ say what you could not see.
      process loss explains it — missing data means "unknown", then the
      action is to close the gap;
    - nothing, when nothing pays back within about four weeks.
+
+   When `share` says the process-only share is over the limit, the one
+   action works against it, or the report says why not (a migration week,
+   an action already on trial).
 5. **Write the report** (below) and commit it with the triage lines. A
    report that answers a milestone carries the line `milestone: <id>`.
 6. **Render the news** (`git fetch`, then `uv run scripts/process/news.py render`, where the
@@ -93,7 +103,7 @@ working language:
 # Improvement YYYY-Www
 - Ran by: <harness>/<model family> · role: steward | session for the steward
 - Last prognosis: <what it said> → <what happened | not measurable yet>
-- Seen: losses <one line> · nodes <one line> · outcomes <one line> · not visible: <…>
+- Seen: losses <one line> · nodes <one line> · outcomes <one line> · share <over|within> (<x> % against <max> % over <n> weeks) · intake <one line> · not visible: <…>
 - Triage: <n> blocks (<gate>: <category>, …)
 - Blind spots: <question + evidence + who needs it | none>
 - Action: <the one action> · cost: <agent h / owner min> · prognosis: <what should change, by when>
