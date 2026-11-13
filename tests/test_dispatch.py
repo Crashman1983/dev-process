@@ -3070,8 +3070,9 @@ def test_a_first_start_reports_its_claim_so_the_other_host_can_count_it(render, 
 
 
 def test_work_begun_on_another_host_is_no_first_start_and_keeps_its_track(render, tmp_path):
-    """The other host's reports (as fetched) name the issue: a continuation here is not checked
-    against the limit and inherits the track those reports carry, even after a `stop` there."""
+    """The other host's `started` claim (as fetched) marks the issue begun: a continuation here is
+    not checked against the limit and inherits its track, even after a `stop` there. A `done` or
+    another report merely naming an issue is no beginning."""
     import importlib.util
     out = _wip_repo(render, tmp_path, None, **TRACKS)
     try:
@@ -3080,16 +3081,21 @@ def test_work_begun_on_another_host_is_no_first_start_and_keeps_its_track(render
         spec = importlib.util.spec_from_file_location("rep_other", out / "scripts/process/report.py")
         rep = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(rep)
-        # another host's `idle` for #2 on track A, as a fetched report (written under its host name)
         import os
         os.environ["PROCESS_HOST"] = "other-host"
         try:
-            rep.write_report(out, "idle", issue=2, note="stopped there", worker="b1", track="A")
+            # a `done` or a steward's report naming #3 is no beginning: #3 still needs its track
+            rep.write_report(out, "done", issue=3, note="mentioned in a commit", worker="b1")
+            # another host's claim on #2 (its first start there), then its `idle` after a stop
+            rep.write_report(out, "started", issue=2, note="first start (dispatch)", worker="b2", track="A")
+            rep.write_report(out, "idle", issue=2, note="stopped there", worker="b2", track="A")
         finally:
             del os.environ["PROCESS_HOST"]
         r = _dispatch(out, "start", "--issue", "2", "--phase", "execute", "--tier", "1", "--branch", "b2",
                       "--dry-run")
         assert r.returncode == 0, r.stderr  # no --track asked, no limit applied
+        r = _dispatch(out, "start", "--issue", "3", "--phase", "plan", "--branch", "b3", "--dry-run")
+        assert r.returncode == 3 and "--track" in r.stderr
     finally:
         _stop_all(out, "b1")
 

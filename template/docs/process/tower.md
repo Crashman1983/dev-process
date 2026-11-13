@@ -422,8 +422,9 @@ for the last seven days. A later phase or a restart after `stop` is not checked;
 the track stays in the phase history and every later worker inherits it
 (`PROCESS_TRACK`). `dispatch.py track --issue N --track <name>` files work that
 began before the limit — on the host where it runs; workers already running keep
-no track until their next phase. An issue whose reports (any host's, as fetched)
-already name it is never a first start here: a continuation keeps its track. `queue add` takes `--track` and `--over-wip` too; a
+no track until their next phase. An issue another host already claimed (its `started`
+report, as fetched) is never a first start here: a continuation keeps its
+track. A `done` or another report merely naming an issue is no beginning. `queue add` takes `--track` and `--over-wip` too; a
 line refused for its limit waits.
 
 In progress (`tower.in_progress`, the one rule): the issue of each worker's
@@ -436,8 +437,9 @@ counted. The train and `finish` publish their `done` under a `steering` block.
 On a plan or execute start, an issue over `growth_max_commits` (its branch
 commits) or `growth_max_days` (since its claim) gets a "split or finish" note in
 the worker's prompt and a line for the steward; it never refuses. A first start
-writes a `started` report and publishes it at once, so the other host counts it
-before the worker's first report.
+writes a `started` report and publishes it at once (also when the phase is handed
+to another host), so the other host counts it before the worker's first report;
+`dispatch.py stop` publishes its `idle` the same way.
 
 ## What the tower is not
 
