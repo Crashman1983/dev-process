@@ -8,7 +8,7 @@ from pathlib import Path
 # it repairs. One grammar for both readers — the train must not take #N for
 # an issue of the fix's branch, the telemetry flow counts it as an escape of
 # #N. Only a well-formed trailer line counts: refs and commas, nothing else.
-# One reader of "is this a release": a bare ref (`v2.95.0`, `2.95.0`) or the
+# One reader of "is this a release": a bare ref (`v1.2.3`, `1.2.3`) or the
 # `_commit:` line of `.copier-answers.yml`. A SHA, `vX.Y.Z.postN…` or
 # `vX.Y.Z-N-g<sha>` is no release — unknown, never an old version.
 _RELEASE = r"v?(\d+)\.(\d+)\.(\d+)"
