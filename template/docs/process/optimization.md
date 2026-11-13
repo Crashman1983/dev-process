@@ -29,7 +29,8 @@ The goals are never folded into one score. Security, correctness and
 acceptance are the floor; time, tokens and owner effort are optimized above
 it. Building, running and maintaining the optimization counts as cost too.
 
-Every number states whether it is **measured**, **estimated** or **missing**,
+Every number states whether it is **measured**, **estimated** or **missing**
+(a reading whose source was cut says so beside it — `complete: false` — and keeps that quality),
 and the cockpit's honest ceiling applies (telemetry module): within one
 project only, trends over absolutes, events over rates.
 

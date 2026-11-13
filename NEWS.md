@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.96.0 — Steering you can measure: epics, open work, anchor load, required updates
+
+The improvement loop now sees open work, not only merged work: how many issues are in progress at once, how long each has run and how much it keeps growing, and whether new issues outrun closed ones. The value reading finds long-running product epics it used to miss. A session's start load per harness is measured, and a dry run of a template update says which changes a project must take now; from this release every change in the notes is marked required, recommended or optional.
+
 ## v2.95.0 — A load abort is no finding about a passenger
 
 When a test run stops because the machine is overloaded or a lane stays busy, the merge train no longer searches for a culprit among the queued works and drops an innocent one. It waits for the load to fall, runs once more, and only if that also stops does a fresh run of the main line decide. A test that hangs every time is still found and its work taken off the train. A project's own watchdog can report such an abort by writing one line to a file the train names.
