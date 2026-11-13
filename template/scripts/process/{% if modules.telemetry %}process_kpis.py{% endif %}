@@ -2258,12 +2258,17 @@ def train_phases(runs: int = 20) -> int:
     results = [row.get("result") for row in rows]
     # `preboard`: the preboard check dropped every candidate — no red train, nothing built
     stopped = results.count("preboard")
-    # `environment` is two stops (v2.95): the preflight, and a suite run that aborted with
-    # nobody to blame (its last round `suite-aborted`)
+    # `environment` is three stops (v2.95, v2.97 B7): the preflight, a suite run that aborted
+    # with nobody to blame (its last round `suite-aborted`), and a train that found its lane
+    # `full` held (its one round `lane-held`) — nothing ran
     aborted = sum(1 for row in rows if row.get("result") == "environment" and _abort_line(row) is not None)
+    lane_held = sum(1 for row in rows if row.get("result") == "environment"
+                    and (_ending(row) or {}).get("red_path") == "lane-held")
     print(f"  {results.count('red')}/{len(rows)} runs ended red, "
-          f"{results.count('environment') - aborted} stopped by the preflight (the host, not a passenger)"
+          f"{results.count('environment') - aborted - lane_held} stopped by the preflight "
+          f"(the host, not a passenger)"
           + (f", {aborted} suite aborted, nobody blamed" if aborted else "")
+          + (f", {lane_held} held at the lane full (another run held it), nobody blamed" if lane_held else "")
           + (f", {stopped} ended at the preboard check (every candidate dropped)" if stopped else ""))
     for line in _suite_abort_lines(every, rows):
         print(line)

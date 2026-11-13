@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -4998,3 +4999,173 @@ def test_train_phases_counts_trains_in_a_row_on_the_kind_and_its_subject(render,
     rows += [aborted("watchdog tests/t.py::test_a 10 8.2"), aborted("watchdog tests/t.py::test_a 10 9.7")]
     out = _train_phases(render, tmp_path / "b", rows)
     assert 'suite aborted on "watchdog tests/t.py::test_a 10 9.7" — 2 trains in a row' in out, out
+
+
+# --- v2.97 B7: the train holds `full` from after the preboard to before the push ------------
+
+_LANE_SUITE = """\
+import json, os, subprocess, sys, time
+seen, red_first, stranger = sys.argv[1], sys.argv[2] == "1", sys.argv[3]
+os.makedirs(seen, exist_ok=True)
+n = len(os.listdir(seen)) + 1
+started = time.time()
+lane = [sys.executable, "scripts/process/lane.py"]
+status = subprocess.run([*lane, "status"], capture_output=True, text=True).stdout
+nested = subprocess.run([*lane, "run", "--lane", "full", "--wait", "0", "--", sys.executable, "-c", "pass"]).returncode
+if stranger and n == 1:
+    # another heavy run of the host, outside the train's process tree: it queues on `full`
+    env = {k: v for k, v in os.environ.items() if k not in ("PROCESS_LANE_HELD", "PROCESS_SUITE_ABORT")}
+    code = f"import time; open({stranger!r}, 'w').write(repr(time.time()))"
+    # outside the staging worktree, which the train removes after the merge
+    subprocess.Popen([sys.executable, os.path.abspath(lane[1]), "run", "--lane", "full", "--wait", "60",
+                      "--label", "stranger", "--no-nice", "--", sys.executable, "-c", code],
+                     cwd=os.path.dirname(seen), env=env, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    time.sleep(0.5)
+rc = 1 if red_first and n == 1 else nested
+with open(os.path.join(seen, f"run-{n}.json"), "w") as fh:
+    json.dump({"started": started, "ended": time.time(), "status": status, "nested": nested}, fh)
+sys.exit(rc)
+"""
+
+
+def _lane_train(render, tmp_path, *, lane_dir: Path | None = None, full_wait: float = 60,
+                own_script: bool = False, red_first: bool = False, stranger: Path | None = None,
+                passenger_lane_dir: Path | None = None) -> tuple[Path, Path]:
+    """A train repo with lanes configured (the template's lane script holds them) and one
+    passenger, `alpha`; the suite is `_LANE_SUITE`, which writes one record per run."""
+    script = tmp_path / "lane_suite.py"
+    script.write_text(_LANE_SUITE)
+    seen = tmp_path / "seen"
+    suite = f"{sys.executable} {script} {seen} {int(red_first)} {shlex.quote(str(stranger or ''))}"
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    config = {"merge_suite": suite, "lanes": {"scoped": {"wait": 5}, "full": {"wait": full_wait}}}
+    if lane_dir is not None:
+        config["lane_dir"] = str(lane_dir)
+    (out / "docs/process/testing.local.json").write_text(json.dumps(config))
+    if own_script:
+        (out / "scripts/lane.py").write_text("print('scoped: free')\nprint('full: free')\n")
+    _repo(out)
+    files = {"src/a.py": "a\n"}
+    if passenger_lane_dir is not None:
+        files["docs/process/testing.local.json"] = json.dumps({**config, "lane_dir": str(passenger_lane_dir)})
+    _branch(out, "alpha", files)
+    return out, seen
+
+
+def _lane_runs(seen: Path) -> list[dict]:
+    return [json.loads((seen / f"run-{n}.json").read_text()) for n in range(1, len(list(seen.iterdir())) + 1)] \
+        if seen.exists() else []
+
+
+def _holding(out: Path, lanes: Path, seconds: float = 60):
+    holder = subprocess.Popen([sys.executable, str(out / "scripts/process/lane.py"), "run", "--lane", "full",
+                               "--label", "other-holder", "--no-nice", "--", sys.executable, "-c",
+                               f"import time; time.sleep({seconds})"], cwd=out,
+                              env={**os.environ, "PROCESS_LANE_DIR": str(lanes), "PYTHONDONTWRITEBYTECODE": "1"})
+    for _ in range(200):
+        if (lanes / "test-lane-full.status").exists():
+            return holder
+        time.sleep(0.05)
+    holder.kill()
+    raise AssertionError("the holder never took the lane")
+
+
+def test_the_train_holds_full_over_its_suite_and_its_childs_lane_call_runs_through(render, tmp_path,
+                                                                                  monkeypatch):
+    """B7 (r2 n14): the suite runs under the train's `full`; `lane.py run --lane full` in it
+    passes through — also when a passenger moves `lane_dir`: the child gets the train's lane
+    directory (`PROCESS_LANE_DIR`) and meets the same lock."""
+    monkeypatch.delenv("PROCESS_LANE_DIR", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    out, seen = _lane_train(render, tmp_path, lane_dir=tmp_path / "lanes-main",
+                            passenger_lane_dir=tmp_path / "lanes-passenger")
+    r = _train(out, "run", "--force")
+    assert r.returncode == 0, r.stdout + r.stderr
+    (run,) = _lane_runs(seen)
+    assert run["nested"] == 0, run
+    assert "full: held by" in run["status"] and "train " in run["status"], run["status"]
+    assert _git(out, "show", "main:src/a.py").stdout == "a\n"
+    status = subprocess.run([sys.executable, str(out / "scripts/process/lane.py"), "status"], cwd=out,
+                            capture_output=True, text=True).stdout
+    assert "full: free" in status, status  # let go before the push and the cleanup
+
+
+def test_the_train_holds_nothing_where_the_project_has_its_own_lane_script(render, tmp_path):
+    """B7: the rule of `test_select.run` — a project's own `scripts/lane.py` holds its lanes."""
+    out, seen = _lane_train(render, tmp_path, own_script=True)
+    r = _train(out, "run", "--force")
+    assert r.returncode == 0, r.stdout + r.stderr
+    (run,) = _lane_runs(seen)
+    assert "full: free" in run["status"], run["status"]
+
+
+def test_a_train_whose_lane_is_held_ends_lane_held_and_blames_nobody(render, tmp_path):
+    """B7 (r2 m5; r3 n8): `full` stays held past the train's wait — a round that ends
+    `lane-held`, result `environment`, nobody blamed, nothing built or merged."""
+    lanes = Path(os.environ["PROCESS_LANE_DIR"])
+    out, seen = _lane_train(render, tmp_path, full_wait=1)
+    head = _git(out, "rev-parse", "main").stdout
+    holder = _holding(out, lanes)
+    try:
+        r = _train(out, "run", "--force")
+    finally:
+        holder.kill()
+        holder.wait()
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "other-holder" in r.stderr and "nobody is blamed" in r.stderr and "dropping" not in r.stdout, r.stderr
+    assert _lane_runs(seen) == []
+    assert _git(out, "rev-parse", "main").stdout == head
+    branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert "alpha" in branches and not [b for b in branches if b.startswith("train/")], branches
+    row = _phases(out)[-1]
+    assert row["result"] == "environment" and [x["red_path"] for x in row["rounds"]] == ["lane-held"], row
+    assert not (out.parent / f"{out.name}-train").exists()
+    reports = out / ".git/process-tower/reports.jsonl"
+    assert not reports.exists() or "blocked" not in reports.read_text()
+
+
+def test_the_trains_push_runs_its_pre_push_lane_without_blocking_itself(render, tmp_path):
+    """B7 (r2 m6): the train lets go of `full` before the push; the pre-push hook, which takes
+    `full` without a certificate, gets it at once."""
+    out, seen = _lane_train(render, tmp_path)
+    bare = tmp_path / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    hook_rc = tmp_path / "hook-rc"
+    hook = out / ".git/hooks/pre-push"
+    hook.write_text(f"#!/bin/sh\n{sys.executable} scripts/process/lane.py run --lane full --wait 0 -- true\n"
+                    f"rc=$?\necho $rc > {hook_rc}\nexit $rc\n")
+    hook.chmod(0o755)
+    r = _train(out, "run", "--force", "--push")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert hook_rc.read_text().strip() == "0"
+    assert _git(bare, "show", "main:src/a.py").stdout == "a\n"
+
+
+def test_a_holder_between_two_suite_runs_waits_for_the_end_of_the_loop(render, tmp_path):
+    """B7 (r2 m6): the train holds `full` once, not per run — another heavy run that asks for
+    the lane during the first run gets it only after the last run of the loop."""
+    got = tmp_path / "stranger-got-the-lane"
+    out, seen = _lane_train(render, tmp_path, red_first=True, stranger=got)
+    r = _train(out, "run", "--force")
+    assert r.returncode == 0 and "FLAKY" in r.stderr, r.stdout + r.stderr
+    first, second = _lane_runs(seen)
+    assert "full: held by" in second["status"] and "train " in second["status"], second["status"]
+    for _ in range(400):
+        if got.exists() and got.read_text():
+            break
+        time.sleep(0.05)
+    assert float(got.read_text()) >= second["ended"] > first["ended"], (got.read_text(), first, second)
+
+
+def test_train_phases_counts_lane_held_apart_from_the_preflight(render, tmp_path):
+    """B7: `lane-held` is neither the preflight nor a suite abort."""
+    def row(red_path):
+        return {"result": "environment", "rounds": [{"red_path": red_path, "runs": {}}]}
+    rows = [row("lane-held"), row("environment"), row("lane-held"), {"result": "green", "rounds": []}]
+    out = _train_phases(render, tmp_path, rows)
+    assert ("0/4 runs ended red, 1 stopped by the preflight (the host, not a passenger), "
+            "2 held at the lane full (another run held it), nobody blamed") in out, out
