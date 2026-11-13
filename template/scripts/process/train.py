@@ -65,6 +65,12 @@ names the first offender, drops it, and the rest is rebuilt.
 A suite run that marks itself aborted (a line in `$PROCESS_SUITE_ABORT`, or
 exit 75 of the command) measured nothing: it is repeated once after the load
 falls, and an abort alone never blames a passenger (v2.95, train.md).
+The train holds the lane `full` once, from after the preboard check to
+before the push (v2.97 B7), where the template's lane script is the
+project's: another heavy run of the host waits for the whole loop, the
+suite's own `lane.py run --lane full` passes through, and the push's hook
+takes the lane itself. A lane still held after at most 60 s ends the run
+in a round `lane-held`: nothing ran, nobody is blamed.
 Every tree of a run — first, retry, base, probe, rebuild, preboard — is
 the SHAs boarding judged on the base's SHA, from one snapshot (#391): a
 commit after boarding rides a later train, a fetch moves no run. After
@@ -1604,6 +1610,61 @@ class BaseRed(Exception):
     an environment stop."""
 
 
+class LaneHeld(EnvironmentRed):
+    """The lane `full` stayed held past the train's wait: nothing ran, nobody is blamed,
+    nothing merges (`red_path` "lane-held"; "lane-busy" is a kind of abort-marker line)."""
+
+
+TRAIN_LANE = "full"
+# the train's own wait for `full`: at most this, never the lane's `wait` (3600 s by
+# default) — a train that cannot start says so and departs later (v2.97 B7, r3 n8)
+TRAIN_LANE_WAIT_S = 60.0
+
+
+def _restore_env(name: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+
+
+def _hold_full(root: Path, stamp: str, log) -> contextlib.ExitStack:
+    """The train's hold of `full` (v2.97 B7), taken once after the preboard and let go
+    before the push (`.close()`): no other holder comes and goes between two suite runs,
+    the abort rule (v2.95) never sees the train's own lane, and the push's pre-push hook,
+    which takes `full` itself, does not wait for the train. The rule of `test_select.run`:
+    held where the template's lane script is the project's — a project that kept its own
+    `scripts/lane.py` holds its lanes in its commands; a configuration without `full`
+    has nothing to hold. Every child inherits the hold (`PROCESS_LANE_HELD`, so `lane.py run
+    --lane full` in the suite passes through) and this lane directory (`PROCESS_LANE_DIR`,
+    so a passenger that moves `lane_dir` meets the same lock). Raises LaneHeld past
+    `TRAIN_LANE_WAIT_S` (or the lane's shorter wait)."""
+    import lane as _lane  # noqa: PLC0415
+    import testing_config  # noqa: PLC0415
+
+    held = contextlib.ExitStack()
+    if testing_config.lane_script(root) != root / "scripts/process/lane.py":
+        return held
+    try:
+        settings = _lane.config(root)
+    except testing_config.ConfigError as exc:  # main() refused it already; a caller from outside
+        log(f"lane {TRAIN_LANE} not held — {exc}")
+        return held
+    if TRAIN_LANE not in settings["lanes"]:
+        return held
+    wait = min(TRAIN_LANE_WAIT_S, settings["lanes"][TRAIN_LANE]["wait"])
+    try:
+        held.enter_context(_lane.hold(TRAIN_LANE, wait=wait, label=f"train {stamp}", settings=settings))
+    except _lane.LaneBusy as busy:
+        log(f"lane {busy} — the train waited {wait:g} s; nothing ran")
+        raise LaneHeld(f"the lane {busy} — waited {wait:g} s") from None
+    where = str(settings["dir"])
+    held.callback(_restore_env, _lane.DIR_ENV, os.environ.get(_lane.DIR_ENV))
+    os.environ[_lane.DIR_ENV] = where
+    log(f"lane {TRAIN_LANE} held by this train ({where}) until before the push")
+    return held
+
+
 def stage_markers(wt: Path) -> dict[str, tuple[int, int, int] | None] | None:
     """The `<stage>.time` markers the merge suite left in the merge-suite folder of
     `wt`, for each stage its `stages` file names, in that order: `(start, end, exit)`,
@@ -1836,8 +1897,9 @@ def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str
                    log, outcome: dict | None = None, stages: dict | None = None,
                    measure: dict | None = None) -> None:
     """One log line and one JSON line per run: where the train's time went.
-    `result`: green, red, environment (a red preflight, or a suite run that aborted
-    with nobody to blame — the last round's `red_path` tells them apart; no red
+    `result`: green, red, environment (a red preflight, a suite run that aborted
+    with nobody to blame, or the lane `full` held by another run — the last round's
+    `red_path` tells them apart; no red
     train) or preboard (the preboard check dropped every candidate — nothing was built).
     `branches` are the ones that landed, `deployed` whether the deploy ran
     green (null: no deploy ran), `ended` when the run finished (UTC) — what
@@ -2123,6 +2185,14 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
                         red_ids=red_ids, preboard=preboard, preboard_timeout=preboard_timeout)
         # a result the batch names itself (preboard: nobody left to build) stands
         result = outcome.get("result") or ("green" if rc == 0 else "red")
+        return rc
+    except LaneHeld as busy:
+        # before the general branch: its own red path, as a suite abort's
+        result = "environment"
+        _end_round(measure, "lane-held")
+        print(f"train: {busy} — another run holds it; nothing ran, nobody is blamed, nothing merged "
+              f"(see {logfile})", file=sys.stderr)
+        _cleanup(root, stamp)
         return rc
     except SuiteAborted as aborted:
         # before the general branch: its own red path, never overwritten as "environment"
@@ -2519,6 +2589,13 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         _cleanup(root, stamp)
         return 1
 
+    # `full` from here to before the push (v2.97 B7): after the preboard, whose probes are
+    # seconds; a train that cannot take it ends in a round of its own, nothing built
+    try:
+        full_lane = _hold_full(root, stamp, log)
+    except LaneHeld:
+        rounds.append({"red_path": "lane-held", "runs": {}})
+        raise
     # the abort rule's two exits (v2.95): a red fresh base is main's, a stop that blames
     # nobody still reports who was dropped for a real red in an earlier round — on every
     # environment stop of a round, the preflight's and a no-op suite's included; a passenger
@@ -2701,6 +2778,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     except EnvironmentRed:
         _report_dropped(conflicts=False)
         raise
+    finally:
+        full_lane.close()  # before the push: its hook takes `full` itself
     if not aboard:
         if rounds and str(rounds[-1]["red_path"]).startswith("dropped:"):
             _end_round(measure, "none-survived")  # the last drop left nobody aboard
