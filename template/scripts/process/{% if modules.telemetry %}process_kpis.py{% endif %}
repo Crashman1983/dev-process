@@ -3817,7 +3817,8 @@ def _gh_issues(root: Path, since: datetime, *, resolve_subs: bool
         while cut is None:
             reason = budget.spent()
             if reason:
-                cut = {"pages": budget.pages, "reason": reason, "list": label}
+                # named after the list that could not be read (or finished), not a list never started
+                cut = {"pages": budget.pages, "reason": reason, "list": label if cursor else f"before {label}"}
                 break
             args = ["-f", f"owner={owner}", "-f", f"name={name}"]
             if filtered:
@@ -3839,8 +3840,15 @@ def _gh_issues(root: Path, since: datetime, *, resolve_subs: bool
                 old = found.get(n)
                 if old is None or (_aware(node.get("updatedAt")) or floor) >= (_aware(old.get("updatedAt")) or floor):
                     found[n] = node
-            info = page.get("pageInfo") or {}
-            cursor = info.get("endCursor") if info.get("hasNextPage") else None
+            info = page.get("pageInfo")
+            if not isinstance(info, dict) or not isinstance(info.get("hasNextPage"), bool):
+                # a page without its paging facts cannot say the list ended: a cut, never complete
+                cut = {"pages": budget.pages, "reason": why or "a page without pageInfo", "list": label}
+                break
+            cursor = info.get("endCursor") if info["hasNextPage"] else None
+            if info["hasNextPage"] and not cursor:
+                cut = {"pages": budget.pages, "reason": "a next page without a cursor", "list": label}
+                break
             if not cursor:
                 break
         if cut is not None:
@@ -3923,7 +3931,10 @@ def _outcome_config(root: Path) -> tuple[dict, list[str]]:
 
 
 def _cut_text(cut: dict) -> str:
-    return f"cut after {cut.get('pages')} page(s) of the {cut.get('list', 'issue')} list ({cut.get('reason')})"
+    where = str(cut.get("list", "issue"))
+    if where.startswith("before "):
+        return f"cut after {cut.get('pages')} page(s), {where[len('before '):]} list not read ({cut.get('reason')})"
+    return f"cut after {cut.get('pages')} page(s) of the {where} list ({cut.get('reason')})"
 
 
 def _days(a: datetime | None, b: datetime | None) -> float | None:
