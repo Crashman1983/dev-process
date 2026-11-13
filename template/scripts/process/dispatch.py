@@ -1363,6 +1363,25 @@ def _branch_entry(history: dict, branch: str) -> dict:
     return entry
 
 
+def issue_history(root: Path, issue: int) -> dict:
+    """`phases/<issue>.json` as written — {} when absent or unreadable; creates nothing."""
+    return _load_json_dict(common_dir(root) / DISPATCH_DIR / "phases" / f"{issue}.json")
+
+
+def history_track(history: dict) -> str | None:
+    """The issue's track as its phase history keeps it (`start --track`, `dispatch.py track`)."""
+    track = history.get("track")
+    return track.strip() if isinstance(track, str) and track.strip() else None
+
+
+def history_starts(history: dict) -> list[float]:
+    """Every phase start of the issue, over all its branches (`branches.<b>.starts`) — none in a
+    history from before v2.94."""
+    branches = history.get("branches") if isinstance(history.get("branches"), dict) else {}
+    return [float(s[1]) for entry in branches.values() if isinstance(entry, dict)
+            and isinstance(entry.get("starts"), list) for s in entry["starts"] if _is_start(s)]
+
+
 def _note_phase(phases: Path, issue: int, branch: str, rec: dict) -> None:
     """A phase of `issue` started on `branch`: its window opens unless one is
     open (the chain's next phase, a re-dispatch), the start joins `starts` (a

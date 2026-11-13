@@ -4110,15 +4110,15 @@ def outcomes(root: Path | None = None, *, days: int = _OUTCOME_DAYS, as_json: bo
 # --- intake: what comes in, what is in progress, how it grows (#412, #413) -------------------
 # Readings over merged work miss the open work: issues opened against issues closed, and the
 # issues in progress at once. In progress has two sources: open issues with the label (the
-# example schema of github-issues.md — an argument, no mandate key) and the issue of each
-# worker's last report (`tower.latest_reports`, the owner of that rule). A branch given up after
+# example schema of github-issues.md — an argument, no mandate key) and the issues the tower counts
+# (`tower.in_progress`, the owner of that rule over every host: a worker's last report not `done`,
+# `idle` or `failed`, a dispatch record without one, nothing dormant). A branch given up after
 # `planned`, `blocked` or `pushed` holds its issue while it is open: estimated, its age beside it.
 # Growth is two numbers, never added into one: commits on the issue's branches
 # (`tower.issue_branch_commits`) and commits of its merge events (`merge_events` with
 # `_own_issues`; a `Refs #N` lands nothing for N). Nothing here refuses or warns.
 IN_PROGRESS_LABEL = "status:in-progress"
 _INTAKE_WEEKS = 4
-_REPORT_OVER = ("done", "idle")  # a worker whose last report says this holds no issue
 _TIMELINE = ("number timelineItems(last:50,itemTypes:[LABELED_EVENT,UNLABELED_EVENT]){nodes{__typename "
              "... on LabeledEvent{createdAt label{name}} ... on UnlabeledEvent{createdAt label{name}}}}")
 
@@ -4179,7 +4179,7 @@ def intake_table(root: Path, *, weeks: int = _INTAKE_WEEKS, label: str = IN_PROG
     open at the week's end; the issues in progress by label and by the tower, each with its
     claim, its days since and its branch and landed commits."""
     import report as _report  # noqa: PLC0415 — the reports' one reader
-    import tower  # noqa: PLC0415 — the last report per worker, the branch commits
+    import tower  # noqa: PLC0415 — the work in progress, the branch commits
     now = now or datetime.now(timezone.utc)
     issues, why, cut = (fetch or _gh_issues)(root, now - timedelta(days=7 * weeks), resolve_subs=False)
     read = issues is not None
@@ -4205,28 +4205,25 @@ def intake_table(root: Path, *, weeks: int = _INTAKE_WEEKS, label: str = IN_PROG
     by_number = {it["number"]: it for it in issues or []}
     labelled = sorted(n for n, it in by_number.items() if it.get("state") == "OPEN" and label in it.get("labels", []))
     label_at, claims_why = ((label_claims or _gh_label_claims)(root, labelled, label) if labelled else ({}, None))
-    fetched = _report.fetch_reports(root)  # the other host's published reports, first
+    work = tower.in_progress(root, now=now.timestamp())  # fetches the other hosts' reports first
+    fetched = work["fetched"]
     history = sorted(_report.read_reports(root, remote=True), key=lambda r: r.get("epoch", 0))
     towered: dict[int, dict] = {}
-    for rec in tower.latest_reports(root, remote=True):
-        n = _report_issue(rec)
-        if n is None or rec.get("state") in _REPORT_OVER:
-            continue
+    for e in work["in_progress"]:
+        n = e["issue"]
         it = by_number.get(n)
         if read and ((it is not None and it.get("state") != "OPEN") or (it is None and cut is None)):
             continue  # closed — the list holds every open issue
-        streak = None  # the first report of this worker's current streak on this issue
-        for r in reversed([r for r in history if r.get("worker") == rec["worker"]]):
-            if _report_issue(r) != n:
-                break
-            streak = r
-        since = datetime.fromtimestamp((streak or rec).get("epoch", 0), tz=timezone.utc)
-        last = datetime.fromtimestamp(rec.get("epoch", 0), tz=timezone.utc)
-        mine = {"worker": rec["worker"], "state": rec.get("state"), "since": since,
-                "age_days": round((now - last).total_seconds() / 86400, 1)}
-        if n not in towered or since < towered[n]["since"]:
-            towered[n] = mine
-    notes = [] if fetched else ["other hosts not read (the published reports could not be fetched)"]
+        start = e["last"]  # a record without a report: its start
+        if e["source"] == "report":  # the first report of this worker's current streak on this issue
+            for r in reversed([r for r in history if r.get("worker") == e["worker"]]):
+                if _report_issue(r) != n:
+                    break
+                start = r.get("epoch", 0)
+        towered[n] = {"worker": e["worker"], "state": e["state"],
+                      "since": datetime.fromtimestamp(start, tz=timezone.utc),
+                      "age_days": round((now.timestamp() - e["last"]) / 86400, 1)}
+    notes = list(work["notes"])
     if not read:
         notes.append(f"issue state not read ({why}): a closed issue may count")
     elif cut is not None:

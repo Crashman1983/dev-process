@@ -1192,3 +1192,109 @@ def test_issue_branch_commits_counts_a_rebased_copy_once_and_no_integration_comm
     assert tower.issue_branch_commits(out, 99, None) == 0
     monkeypatch.setattr(tower, "integration_ref", lambda _root: None)
     assert tower.issue_branch_commits(out, 12, None) is None  # no integration branch: unknown
+
+
+# --- in progress: one rule over reports and dispatch records (v2.97 B2) -------------------
+
+NOW = 1_794_000_000.0  # a fixed clock; DAY below
+DAY = 86400
+
+
+def _common(out: Path) -> Path:
+    common = Path(_git(out, "rev-parse", "--git-common-dir").stdout.strip())
+    return common if common.is_absolute() else out / common
+
+
+def _put_reports(out: Path, *rows: dict) -> None:
+    ledger = _ledger(out)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    with ledger.open("a", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps({"host": "here", "note": "", **row}) + "\n")
+
+
+def _put_record(out: Path, branch: str, **fields) -> None:
+    d = _common(out) / "process-dispatch"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{branch}.json").write_text(json.dumps({"branch": branch, "phase": "plan", **fields}))
+
+
+def _put_history(out: Path, issue: int, history: dict) -> None:
+    d = _common(out) / "process-dispatch" / "phases"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{issue}.json").write_text(json.dumps(history))
+
+
+def test_in_progress_is_the_last_report_per_worker_or_a_record_without_one(render, tmp_path, monkeypatch):
+    """A worker that moved on holds its old issue no longer; `review-pass` counts (the work waits
+    for the train), `failed`, `done` and `idle` do not; a dispatch record without a report counts,
+    a hand-over to another host too; an issue silent for 15 days is dormant — shown, not counted."""
+    monkeypatch.setenv("PROCESS_HOST", "here")
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _put_reports(out,
+                 {"worker": "w1", "issue": 5, "state": "planned", "epoch": NOW - 5 * DAY},
+                 {"worker": "w9", "issue": 7, "state": "planned", "epoch": NOW - 3 * DAY},
+                 {"worker": "w1", "issue": 6, "state": "planned", "epoch": NOW - 4 * DAY},
+                 {"worker": "w9", "issue": 21, "state": "done", "epoch": NOW - 2 * DAY},
+                 {"worker": "w2", "issue": 7, "state": "review-pass", "epoch": NOW - DAY, "track": "B"},
+                 {"worker": "w3", "issue": 8, "state": "failed", "epoch": NOW - DAY},
+                 {"worker": "w4", "issue": 9, "state": "done", "epoch": NOW - DAY},
+                 {"worker": "w5", "issue": 10, "state": "idle", "epoch": NOW - DAY},
+                 {"worker": "w6", "issue": 11, "state": "planned", "epoch": NOW - 15 * DAY})
+    _put_record(out, "b12", issue=12, started=NOW - 3600, track="process")
+    _put_record(out, "b13", issue=13, started=NOW - 2 * DAY, remote=True)
+    _put_record(out, "w4", issue=9, started=NOW - 3 * DAY)  # its `done` came after the start
+    _put_history(out, 6, {"phase": "plan", "branch": "w1", "track": "A", "branches": {
+        "w1": {"starts": [["plan", NOW - 4 * DAY - 100]]}, "x": {"starts": [["brainstorm", NOW - 6 * DAY]]}}})
+    tower = _load_tower(out)
+    t = tower.in_progress(out, fetch=False, now=NOW)
+    got = {e["issue"]: e for e in t["in_progress"]}
+    assert set(got) == {6, 7, 12, 13}, got
+    assert [e["issue"] for e in t["dormant"]] == [11] and tower.DORMANT_DAYS == 14
+    assert got[6]["track"] == "A" and got[6]["claimed"] == NOW - 6 * DAY  # the earliest start of any branch
+    assert got[7]["track"] == "B" and got[7]["claimed"] == NOW - 3 * DAY  # else the earliest report
+    assert got[7]["state"] == "review-pass" and got[7]["worker"] == "w2"
+    assert got[12]["track"] == "process" and got[12]["source"] == "record"
+    assert got[13]["track"] is None and got[13]["remote"] is True and got[13]["state"] == "remote"
+    assert t["fetched"] is None and t["notes"] == []
+    # with the fetch and no origin: the other hosts are not read, and it says so
+    t = tower.in_progress(out, now=NOW)
+    assert t["fetched"] is False and "other hosts not read — may undercount" in t["notes"]
+
+
+def test_in_progress_reads_the_other_hosts_published_reports_and_names_their_age(render, tmp_path, monkeypatch):
+    monkeypatch.setenv("PROCESS_HOST", "here")
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    line = json.dumps({"worker": "ios-9", "issue": 9, "state": "pushed", "epoch": NOW - 14 * 60, "host": "mac",
+                       "track": "A"}) + "\n"
+    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=out, input=line, capture_output=True,
+                          text=True, check=True).stdout.strip()
+    _git(out, "update-ref", "refs/process/reports/mac", blob)
+    tower = _load_tower(out)
+    t = tower.in_progress(out, fetch=False, now=NOW)
+    [e] = t["in_progress"]
+    assert e["issue"] == 9 and e["host"] == "mac" and e["track"] == "A"
+    assert t["hosts"] == {"mac": 14} and "host mac as of 14 min ago" in t["notes"]
+
+
+def test_a_report_carries_its_track_and_the_network_calls_take_a_deadline(render, tmp_path, monkeypatch):
+    import importlib.util
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    sys.path.insert(0, str(out / "scripts/process"))
+    spec = importlib.util.spec_from_file_location("report_under_test", out / "scripts/process/report.py")
+    report = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(report)
+    monkeypatch.setenv("PROCESS_TRACK", "A")
+    assert report.write_report(out, "planned", issue=3, note="", worker="w", model="m")["track"] == "A"
+    assert report.write_report(out, "planned", issue=3, note="", worker="w", model="m", track="B")["track"] == "B"
+    monkeypatch.delenv("PROCESS_TRACK")
+    assert "track" not in report.write_report(out, "planned", issue=3, note="", worker="w", model="m")
+    seen = []
+    monkeypatch.setattr(report, "_run", lambda argv, timeout=60: seen.append((argv[3], timeout)) or True)
+    report.fetch_reports(out, timeout=15)
+    report.sync_reports(out, timeout=15)
+    report.fetch_reports(out)
+    assert seen == [("fetch", 15), ("update-ref", 15), ("push", 15), ("fetch", 60)]

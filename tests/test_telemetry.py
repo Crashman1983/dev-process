@@ -1373,6 +1373,26 @@ def test_intake_reads_in_progress_from_the_label_and_the_last_report_per_worker(
     assert {w["issue"] for w in t["in_progress"]} == {6, 9} and t["label"] == "doing"
 
 
+def test_intake_takes_its_tower_part_from_the_one_in_progress_rule(render, tmp_path):
+    """v2.97 B2: the tower part is `tower.in_progress` — `failed` holds nothing, `review-pass`
+    holds, a dispatch record without a report holds, an issue silent for 14 days is dormant; the
+    closed-issue filter and the `estimated` quality stay intake's."""
+    out = _merges_repo(render, tmp_path)
+    m = _flow_module(out)
+    _reports(out, ("w1", 12, "failed", _dt(28)), ("w2", 13, "planned", _dt(10)),
+             ("w3", 14, "review-pass", _dt(28)), ("w4", 16, "planned", _dt(28)))
+    rec_dir = out / ".git/process-dispatch"
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    (rec_dir / "15-x.json").write_text(json.dumps({"branch": "15-x", "issue": 15, "phase": "plan",
+                                                   "started": int(_dt(29).timestamp())}))
+    issues = [_issue(n, f"issue {n}") for n in (12, 13, 14, 15)] + [_issue(16, "x", "CLOSED", closed=_at(29))]
+    t = m.intake_table(out, weeks=4, now=_dt(31), fetch=_fetch(issues), label_claims=_no_claims)
+    got = {w["issue"]: w for w in t["in_progress"]}
+    assert set(got) == {14, 15}
+    assert got[15]["tower"]["worker"] == "15-x" and got[15]["claimed"] == {"value": _dt(29), "quality": "estimated"}
+    assert t["counts"]["tower"] == {"value": 2, "quality": "estimated"}
+
+
 def test_intake_label_claim_is_the_last_setting_after_the_last_removal(render, tmp_path, monkeypatch):
     from datetime import datetime, timezone
     out = _merges_repo(render, tmp_path)
@@ -1418,7 +1438,9 @@ def test_intake_counts_branch_and_landed_commits_apart(render, tmp_path):
     _g(out, "merge", "-q", "--squash", "31-squash")
     _put(out, "feat: squash (#31)", {}, _at(12))
     numbers = (20, 21, 22, 30, 31, 40)
-    _reports(out, *[(f"w{n}", n, "planned", _dt(1, 12)) for n in numbers])
+    # the claim is the first report of the streak; the later one keeps the issue from going dormant
+    _reports(out, *[(f"w{n}", n, "planned", _dt(1, 12)) for n in numbers],
+             *[(f"w{n}", n, "planned", _dt(20)) for n in numbers])
     t = m.intake_table(out, weeks=4, now=_dt(31), fetch=_fetch([_issue(n, f"issue {n}") for n in numbers]),
                        label_claims=_no_claims)
     got = {w["issue"]: w for w in t["in_progress"]}
