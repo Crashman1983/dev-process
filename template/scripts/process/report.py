@@ -254,11 +254,11 @@ def publish_if_steered(root: Path, timeout: float = 15) -> bool | None:
     other host (`tower.in_progress`) sees a `done` only once it is published. None when
     there is no steering block (nothing to publish for); else whether the sync went through."""
     try:
-        from optimize import steering  # noqa: PLC0415 — the block's one reader
+        from optimize import holds_wip, steering  # noqa: PLC0415 — the block's one reader
         conf, _problems = steering(root)
     except Exception:  # noqa: BLE001 — bookkeeping: an unreadable mandate publishes nothing
         return None
-    if not conf:
+    if not holds_wip(conf):
         return None
     return sync_reports(root, timeout=timeout)
 

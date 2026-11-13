@@ -412,14 +412,18 @@ With a `steering` block in the mandate (`optimization.md`), `dispatch.py start`
 holds an issue's **first** start (no `starts` in `phases/<issue>.json` yet —
 brainstorm, plan or a quick execute) to its track's limit: `--track <name>` is
 required once `tracks` is set, `process` is the fixed track of process work
-(limit `process_issues_in_progress`), every other track has `wip_per_track`.
+(limit `process_issues_in_progress`), every other track has `wip_per_track`. Only a
+block that sets one of these turns the check, its network step and the
+publishing of reports on; a share limit or a cadence alone does not.
 At the limit `start` exits 3 and names the limit, the track and its issues;
 `--over-wip "<reason>"` starts anyway. Both write a `gate="wip"` row to the gate
 events (`outcome` `refused` or `override`), which the tower's `wip:` line shows
 for the last seven days. A later phase or a restart after `stop` is not checked;
 the track stays in the phase history and every later worker inherits it
 (`PROCESS_TRACK`). `dispatch.py track --issue N --track <name>` files work that
-began before the limit. `queue add` takes `--track` and `--over-wip` too; a
+began before the limit — on the host where it runs; workers already running keep
+no track until their next phase. An issue whose reports (any host's, as fetched)
+already name it is never a first start here: a continuation keeps its track. `queue add` takes `--track` and `--over-wip` too; a
 line refused for its limit waits.
 
 In progress (`tower.in_progress`, the one rule): the issue of each worker's
@@ -431,7 +435,9 @@ undercount" when that failed. Work silent for 14 days is `dormant`: shown, not
 counted. The train and `finish` publish their `done` under a `steering` block.
 On a plan or execute start, an issue over `growth_max_commits` (its branch
 commits) or `growth_max_days` (since its claim) gets a "split or finish" note in
-the worker's prompt and a line for the steward; it never refuses.
+the worker's prompt and a line for the steward; it never refuses. A first start
+writes a `started` report and publishes it at once, so the other host counts it
+before the worker's first report.
 
 ## What the tower is not
 

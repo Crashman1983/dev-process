@@ -408,7 +408,7 @@ def load_mandate(root: Path) -> tuple[dict | None, str | None]:
 
 
 # the mandate's `steering` block (v2.97): key → (what it must be, its test). The names are the
-# ones Kenni's mandate already carries, so that file holds as it is.
+# ones an adopter's mandate already carries, so that file holds as it is.
 PROCESS_TRACK = "process"  # the fixed track of process work; its limit is process_issues_in_progress
 
 
@@ -429,6 +429,16 @@ STEERING_KEYS: dict[str, tuple[str, object]] = {
     "growth_max_commits": ("a positive integer", lambda v: _count(v, 1)),
     "growth_max_days": ("a positive number", lambda v: _real(v) and v > 0),
 }
+
+
+WIP_KEYS = ("tracks", "wip_per_track", "process_issues_in_progress")
+
+
+def holds_wip(settings: dict) -> bool:
+    """Does a steering block set a work-in-progress limit — what turns on dispatch's first-start
+    check, its network step and the publishing of reports? A block with only a share limit, a
+    cadence or growth limits does not."""
+    return any(k in settings for k in WIP_KEYS)
 
 
 def steering(root: Path) -> tuple[dict, list[str]]:

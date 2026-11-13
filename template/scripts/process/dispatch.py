@@ -2226,6 +2226,11 @@ START_LOCK = "dispatch-start.lock"  # beside the records; not `_QueueLock`: drai
 WIP_GATE = "wip"  # its gate_events rows: no gate with a run time (`process_kpis.py nodes` leaves them out)
 
 
+def _holds_wip(settings: dict) -> bool:
+    import optimize  # noqa: PLC0415
+    return optimize.holds_wip(settings)
+
+
 def steering_settings(root: Path) -> dict:
     """The mandate's `steering` block (`optimize.steering`, its one reader); its problems are
     named, and a wrong value sets no limit."""
@@ -2279,6 +2284,11 @@ def wip_check(root: Path, *, issue: int, branch: str, track: str | None, over_wi
     mine = [e for e in work["in_progress"] if e["issue"] == issue]
     if mine:
         return None, track or mine[0]["track"]
+    # begun before, on another host (its reports, as fetched) or in a history from before v2.94
+    # without `starts`: a continuation, never a first start — it keeps its track
+    seen = [r for r in _report.read_reports(root, remote=True) if tower._issue_number(r.get("issue")) == issue]
+    if seen or issue_history(root, issue).get("branches"):
+        return None, track or tower.issue_facts(root, issue, reports=seen)[0]
     track = track or next((e["track"] for e in work["dormant"] if e["issue"] == issue), None)
     notes = ([tower.UNDERCOUNT_NOTE] if False in net else []) + list(work["notes"])
     said = "".join(f"; {n}" for n in notes)
@@ -2348,7 +2358,8 @@ def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str |
     kw = {"issue": issue, "phase": phase, "tier": tier, "branch": branch, "title": title, "dry_run": dry_run,
           "owner_approved": owner_approved, "plan_review": plan_review, "stale_plan_ok": stale_plan_ok,
           "harness": harness, "cls": cls, "track": track, "over_wip": over_wip, "settings": settings}
-    if not settings or history_starts(issue_history(root, issue)):
+    import optimize  # noqa: PLC0415
+    if not optimize.holds_wip(settings) or history_starts(issue_history(root, issue)):
         return _start(root, **kw, net=None)
     net = net if net is not None else report_network(root, dry_run=dry_run)
     with _FileLock(_records_dir(root) / START_LOCK):
@@ -2514,7 +2525,7 @@ def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str 
     worker_vars = {**pp["env"], "PROCESS_WORKER": branch, "PROCESS_PHASE": phase, "PROCESS_MODEL": model,
                    "PROCESS_EFFORT": effort or "", "PROCESS_ISSUE": str(issue), "PROCESS_TRACK": track or "",
                    # with steering, every host counts what the others report: the worker publishes each line
-                   **({"PROCESS_REPORT_SYNC": "1"} if settings else {})}
+                   **({"PROCESS_REPORT_SYNC": "1"} if _holds_wip(settings) else {})}
     codex_binary = None
     if codex:
         import _dispatch_codex as codex_run  # noqa: PLC0415  (the one owner of Codex runs)
@@ -3287,7 +3298,7 @@ def drain(root: Path) -> int:
     with _QueueLock(root):
         entries = queue_load(root)
         started = 0
-        net = report_network(root, dry_run=False) if entries and steering_settings(root) else None
+        net = report_network(root, dry_run=False) if entries and _holds_wip(steering_settings(root)) else None
         for e in list(entries):
             said = io.StringIO()
             try:
