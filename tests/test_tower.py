@@ -749,6 +749,55 @@ def test_balance_shows_how_much_of_what_lands_is_process(render, tmp_path):
     assert not [f for f in table["findings"] if f["kind"] == "process-heavy"]
 
 
+def _mandate(out: Path, steering: dict | None) -> None:
+    p = out / "docs/process/optimization.local.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({} if steering is None else {"steering": steering}), encoding="utf-8")
+
+
+def test_the_process_share_limit_comes_from_the_mandate_and_falls_back_per_key(render, tmp_path):
+    """v2.97 B5 (#416): one owner of the limit — `steering.process_share_max` and
+    `process_share_window_weeks` from the mandate, else 40 % over four weeks; a wrong
+    type is ignored, never guessed."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    tower = _load_tower(out)
+    assert tower.process_share_limit(out) == (0.4, 4)  # no mandate: as before
+    _mandate(out, None)
+    assert tower.process_share_limit(out) == (0.4, 4)  # a mandate without the block
+    _mandate(out, {"process_share_max": 0.3, "process_share_window_weeks": 6})
+    assert tower.process_share_limit(out) == (0.3, 6)
+    _mandate(out, {"process_share_max": 0, "process_share_window_weeks": 1})
+    assert tower.process_share_limit(out) == (0, 1)  # the bounds hold
+    for bad in ("0.3", True, 1.5, -0.1, None):
+        _mandate(out, {"process_share_max": bad, "process_share_window_weeks": 2})
+        assert tower.process_share_limit(out) == (0.4, 2), bad
+    for bad in ("3", True, 0, 2.5, -1):
+        _mandate(out, {"process_share_max": 0.5, "process_share_window_weeks": bad})
+        assert tower.process_share_limit(out) == (0.5, 4), bad
+    _mandate(out, None)
+    (out / "docs/process/optimization.local.json").write_text('{"steering": [1]}')
+    assert tower.process_share_limit(out) == (0.4, 4)  # a block that is no mapping
+    (out / "docs/process/optimization.local.json").write_text("{not json")
+    assert tower.process_share_limit(out) == (0.4, 4)  # an unreadable mandate
+
+
+def test_the_process_heavy_finding_takes_the_mandate_limit_and_keeps_its_week(render, tmp_path):
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _commit_files(out, 15, {".process-work/journal/2026-10-07.md": "REVIEW line "}, "docs: attest")
+    _commit_files(out, 5, {"src/app.py": "x = "}, "feat: app")
+    _commit_files(out, 3, {"src/app.py": "y = ", "specs/001-app/plan.md": "- [x] T"}, "feat: app task")
+    # 15 of 24 commits (62 %) touch only process records
+    _mandate(out, {"process_share_max": 0.7, "process_share_window_weeks": 3})
+    table = json.loads(_tower(out, "--json").stdout)
+    assert table["balance"]["days"] == 7  # the tower's window stays one week
+    assert not [f for f in table["findings"] if f["kind"] == "process-heavy"], table["findings"]
+    _mandate(out, {"process_share_max": 0.5})
+    table = json.loads(_tower(out, "--json").stdout)
+    heavy = [f for f in table["findings"] if f["kind"] == "process-heavy"]
+    assert heavy and "15 of 24 commits in 7 days" in heavy[0]["what"] and "50 %" in heavy[0]["what"], heavy
+
+
 def test_a_stale_check_that_breaks_announces_nothing_instead_of_ending_every_watch(render, tmp_path, monkeypatch, capsys):
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     mod = _load_tower(out)

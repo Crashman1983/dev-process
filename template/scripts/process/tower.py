@@ -402,7 +402,26 @@ BALANCE_DAYS = 7
 # process outweighs the product (downstream: 47 % process-only against 19 %
 # product in two weeks, and the steward's time over 90 % process)
 PROCESS_HEAVY_SHARE = 0.4
+PROCESS_SHARE_WEEKS = 4  # the weeks `process_kpis.py share` judges the share over
 BALANCE_MIN_COMMITS = 20
+
+
+def process_share_limit(root: Path) -> tuple[float, int]:
+    """(max, weeks): the process-only share of commits above which the process outweighs
+    the product, and the weeks `share` judges it over — `steering.process_share_max` (0–1)
+    and `steering.process_share_window_weeks` from the mandate, each falling back on its
+    own to PROCESS_HEAVY_SHARE and PROCESS_SHARE_WEEKS. A wrong type is ignored, never
+    guessed. The one owner of the limit: the tower's finding takes the max, `share` both."""
+    from optimize import load_mandate  # noqa: PLC0415 — stdlib-only sibling
+    mandate, _problem = load_mandate(root)
+    steering = (mandate or {}).get("steering")
+    if not isinstance(steering, dict):
+        steering = {}
+    top = steering.get("process_share_max")
+    weeks = steering.get("process_share_window_weeks")
+    good_top = isinstance(top, (int, float)) and not isinstance(top, bool) and 0 <= top <= 1
+    good_weeks = isinstance(weeks, int) and not isinstance(weeks, bool) and weeks >= 1
+    return (top if good_top else PROCESS_HEAVY_SHARE), (weeks if good_weeks else PROCESS_SHARE_WEEKS)
 
 
 def is_process_path(rel: str) -> bool:
@@ -856,13 +875,15 @@ def _announce(seen_path: Path, what: str, collect) -> list[dict]:
 
 # --- findings -----------------------------------------------------------------------
 
-def findings(table: dict, stale_minutes: int, prompt_minutes: int = PROMPT_MINUTES) -> list[dict]:
+def findings(table: dict, stale_minutes: int, prompt_minutes: int = PROMPT_MINUTES, *,
+             share_max: float = PROCESS_HEAVY_SHARE) -> list[dict]:
     out: list[dict] = []
     b = table.get("balance")
-    if b and b["commits"] >= BALANCE_MIN_COMMITS and b["process"] / b["commits"] > PROCESS_HEAVY_SHARE:
+    if b and b["commits"] >= BALANCE_MIN_COMMITS and b["process"] / b["commits"] > share_max:
         out.append({"kind": "process-heavy", "severity": "low",
                     "what": f"{b['process']} of {b['commits']} commits in {b['days']} days touch only process "
-                            f"records; {b['product']} only product code",
+                            f"records; {b['product']} only product code — above the limit of "
+                            f"{100 * share_max:g} %",
                     "because": "the process is outweighing the work it guards — look where the rounds go "
                                "(process_kpis.py rounds) and whether bookkeeping is batched one commit per "
                                "round (testing.md, bookkeeping-only push)"})
@@ -1142,7 +1163,8 @@ def build(root: Path, stale_minutes: int = 60, *, remote: bool = False,
         "holds": live_holds(root, ref),
         "remote_fetched": fetch_ok if remote else None,
     }
-    table["findings"] = findings(table, stale_minutes, prompt_minutes) + local_findings(root)
+    table["findings"] = (findings(table, stale_minutes, prompt_minutes, share_max=process_share_limit(root)[0])
+                         + local_findings(root))
     try:
         table["findings"] += codex_findings(root, wts)
     except Exception as exc:  # noqa: BLE001 — a trace that cannot be read costs a finding, never the table
