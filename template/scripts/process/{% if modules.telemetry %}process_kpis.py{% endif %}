@@ -3966,8 +3966,13 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
             return None
         return _aware(issue.get("closedAt"))
 
+    own_repo = next((it.get("repository") for it in issues if it.get("repository")), None)
+
     def _done(issue: dict) -> tuple[datetime | None, str]:
-        if issue.get("number") in delivered:
+        # the flow's deliveries are this repository's issues: a sub-issue of another
+        # repository with the same number is never delivered by them
+        mine = issue.get("repository") in (None, own_repo)
+        if mine and issue.get("number") in delivered:
             return delivered[issue["number"]]
         closed = _closed(issue)
         return closed, "proxy" if closed else "missing"

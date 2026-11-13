@@ -85,3 +85,10 @@ def test_marks_read_the_german_entry_and_nothing_without_what_changes():
 def test_a_mark_counts_only_as_the_first_thing_after_the_dash():
     body = "**What changes.**\n- **Bold** [required] later.\n- [Required] wrong case.\n- [must] unknown.\n"
     assert [m for m, _ in cl.marks(body)] == [None, None, None]
+
+
+def test_a_bold_note_inside_what_changes_does_not_hide_later_items():
+    body = ("**What changes.**\n- [optional] A group.\n\n**Note:** read this first.\n\n- unmarked item\n"
+            "1. numbered item\n\n**Effect.**\n- not an item of the part\n")
+    assert cl.marks(body) == [("optional", "A group."), (None, "unmarked item"), (None, "numbered item")]
+
