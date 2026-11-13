@@ -1164,6 +1164,21 @@ def test_gh_issues_a_page_without_paging_facts_is_a_cut_not_the_end(render, tmp_
         == "cut after 40 page(s), late list not read (page limit (40))"
 
 
+def test_outcomes_a_sub_issue_of_another_repository_is_not_delivered_by_a_local_number(render, tmp_path):
+    """#12 is delivered in this repository's flow; `other/repo#12`, still open, is not."""
+    import json
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    foreign = {**_issue(12, "Acceptance run", labels=["acceptance"]), "repository": "other/repo"}
+    epic = {**_issue(103, "[EPIC] Shared", subs=[foreign]), "repository": "own/repo"}
+    (out / "docs/process/optimization.local.json").write_text(
+        json.dumps({"outcomes": {"usable": "label:acceptance"}}), encoding="utf-8")
+    t = m.outcomes_table(out, days=3650, now=datetime(2026, 12, 31, tzinfo=timezone.utc), fetch=_fetch([epic]))
+    ep = {e["number"]: e for e in t["epics"]}
+    assert ep[103]["usable_at"] is None and ep[103]["quality"] == "open"
+
+
 def test_outcomes_asks_for_sub_issues_only_for_a_label_or_title_marker(render, tmp_path):
     from datetime import datetime, timedelta, timezone
     out = _flow_repo(render, tmp_path)

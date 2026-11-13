@@ -26,7 +26,9 @@ ENTRY = re.compile(r"^##\s+(v\d+\.\d+\.\d+)\s+—\s+(.+?)(?:\s+·\s+\d{4}-\d{2}-
 OLD_ENTRY = re.compile(r"^\*\*(v\d+\.\d+\.\d+)\s+—\s+(.+?)\*\*\s*(.*)$")
 MARKS = ("required", "recommended", "optional")
 CHANGES = ("**What changes.**", "**Was sich ändert.**")
-_ITEM = re.compile(r"^[-*+][ \t]+(?P<text>.*)$")
+# the parts that follow What changes in an entry (CHANGELOG preamble): the part ends at the next
+_PART = re.compile(r"^\*\*[^*]+\.\*\*[ \t]*$")  # a part label alone on its line, e.g. **Effect.**
+_ITEM = re.compile(r"^(?:[-*+]|\d+[.)])[ \t]+(?P<text>.*)$")
 _MARK = re.compile(r"^\[(?P<mark>" + "|".join(MARKS) + r")\][ \t]*(?P<rest>.*)$")
 
 
@@ -74,15 +76,17 @@ def notes(text: str, tag: str) -> tuple[str, str] | None:
 
 def marks(body: str) -> list[tuple[str | None, str]]:
     """(mark or None, first line) of every first-level item under **What changes.** /
-    **Was sich ändert.**, which runs until the next bold part or heading. The first
-    line comes without its dash and mark. A body without that part has no item."""
+    **Was sich ändert.**, which runs until the next part label alone on its line
+    (`**Effect.**`, `**Update.**` …) or a heading — a bold note inside the part does
+    not end it. Numbered items count as items. The first line comes without its dash
+    and mark. A body without that part has no item."""
     out: list[tuple[str | None, str]] = []
     inside = False
     for line in body.splitlines():
         if line.startswith(CHANGES):
             inside = True
             continue
-        if line.startswith(("**", "#")):
+        if _PART.match(line.strip()) or line.startswith("#"):
             inside = False
         if not inside:
             continue
