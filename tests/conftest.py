@@ -127,3 +127,7 @@ def _outside_ci(monkeypatch):
     # a suite run inside a dispatched worker inherits its PROCESS_WORKER — a branch of the
     # outer repository, none of a test's: report.py would refuse it (v2.97 B8)
     monkeypatch.delenv("PROCESS_WORKER", raising=False)
+    # …and its track and report sync: a test's reports must not carry the outer track or push
+    # report refs to a test origin
+    monkeypatch.delenv("PROCESS_TRACK", raising=False)
+    monkeypatch.delenv("PROCESS_REPORT_SYNC", raising=False)

@@ -3069,6 +3069,31 @@ def test_a_first_start_reports_its_claim_so_the_other_host_can_count_it(render, 
         _stop_all(out, "b1")
 
 
+def test_work_begun_on_another_host_is_no_first_start_and_keeps_its_track(render, tmp_path):
+    """The other host's reports (as fetched) name the issue: a continuation here is not checked
+    against the limit and inherits the track those reports carry, even after a `stop` there."""
+    import importlib.util
+    out = _wip_repo(render, tmp_path, None, **TRACKS)
+    try:
+        assert _dispatch(out, "start", "--issue", "1", "--phase", "plan", "--branch", "b1",
+                         "--track", "A").returncode == 0
+        spec = importlib.util.spec_from_file_location("rep_other", out / "scripts/process/report.py")
+        rep = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rep)
+        # another host's `idle` for #2 on track A, as a fetched report (written under its host name)
+        import os
+        os.environ["PROCESS_HOST"] = "other-host"
+        try:
+            rep.write_report(out, "idle", issue=2, note="stopped there", worker="b1", track="A")
+        finally:
+            del os.environ["PROCESS_HOST"]
+        r = _dispatch(out, "start", "--issue", "2", "--phase", "execute", "--tier", "1", "--branch", "b2",
+                      "--dry-run")
+        assert r.returncode == 0, r.stderr  # no --track asked, no limit applied
+    finally:
+        _stop_all(out, "b1")
+
+
 def test_a_later_phase_and_a_restart_after_stop_are_not_checked_and_keep_the_track(render, tmp_path):
     marker = tmp_path / "seen"
     out = _wip_repo(render, tmp_path, marker, **TRACKS)
