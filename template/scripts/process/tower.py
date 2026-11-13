@@ -416,16 +416,9 @@ def process_share_limit(root: Path) -> tuple[float, int]:
     and `steering.process_share_window_weeks` from the mandate, each falling back on its
     own to PROCESS_HEAVY_SHARE and PROCESS_SHARE_WEEKS. A wrong type is ignored, never
     guessed. The one owner of the limit: the tower's finding takes the max, `share` both."""
-    from optimize import load_mandate  # noqa: PLC0415 — stdlib-only sibling
-    mandate, _problem = load_mandate(root)
-    steering = (mandate or {}).get("steering")
-    if not isinstance(steering, dict):
-        steering = {}
-    top = steering.get("process_share_max")
-    weeks = steering.get("process_share_window_weeks")
-    good_top = isinstance(top, (int, float)) and not isinstance(top, bool) and 0 <= top <= 1
-    good_weeks = isinstance(weeks, int) and not isinstance(weeks, bool) and weeks >= 1
-    return (top if good_top else PROCESS_HEAVY_SHARE), (weeks if good_weeks else PROCESS_SHARE_WEEKS)
+    from optimize import steering  # noqa: PLC0415 — the block's one reader
+    conf, _problems = steering(root)
+    return conf.get("process_share_max", PROCESS_HEAVY_SHARE), conf.get("process_share_window_weeks", PROCESS_SHARE_WEEKS)
 
 
 def is_process_path(rel: str) -> bool:

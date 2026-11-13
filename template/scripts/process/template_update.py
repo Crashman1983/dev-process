@@ -408,15 +408,12 @@ def update_cadence(root: Path) -> tuple[int | None, str | None]:
     """(days, problem): `steering.kit_update_cadence_days` from the mandate; no key, no
     cadence. A wrong type is named and ignored, never guessed."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from optimize import load_mandate  # noqa: PLC0415 — stdlib-only sibling
-    mandate, _problem = load_mandate(root)
-    steering = (mandate or {}).get("steering")
-    if not isinstance(steering, dict) or "kit_update_cadence_days" not in steering:
-        return None, None
-    days = steering["kit_update_cadence_days"]
-    if isinstance(days, int) and not isinstance(days, bool) and days >= 1:
-        return days, None
-    return None, "steering.kit_update_cadence_days must be a positive integer — ignored"
+    from optimize import steering  # noqa: PLC0415 — the block's one reader
+    conf, problems = steering(root)
+    if "kit_update_cadence_days" in conf:
+        return conf["kit_update_cadence_days"], None
+    problem = next((p for p in problems if p.startswith("steering.kit_update_cadence_days")), None)
+    return None, (problem.replace("— no limit applies", "— ignored") if problem else None)
 
 
 def cadence_lines(root: Path, required: bool | None, today: _dt.date | None = None) -> list[str]:
