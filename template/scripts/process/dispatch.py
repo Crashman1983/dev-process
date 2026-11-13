@@ -92,7 +92,8 @@ track's limit it exits 3 naming the issues, unless `--over-wip "<reason>"`;
 refusal and override are `gate_events` rows (`gate="wip"`). The track lives
 in `phases/<issue>.json` and every later record and report inherits it
 (`PROCESS_TRACK`); `track` records it for older work. Workers then publish
-each report (`PROCESS_REPORT_SYNC=1`).
+each report (`PROCESS_REPORT_SYNC=1`). A plan or execute start over
+`growth_max_commits` or `growth_max_days` gets a `split or finish` note.
 
 Trust boundary, plainly: the policy's `command` is executed on the
 machine that runs dispatch. It is a repository file — whoever can merge
@@ -2307,6 +2308,31 @@ def wip_check(root: Path, *, issue: int, branch: str, track: str | None, over_wi
             f'--over-wip "<reason>" on the owner\'s DECISION{said}'), track
 
 
+def growth_note(root: Path, issue: int, settings: dict, now: float | None = None) -> str | None:
+    """The `split or finish` note of a plan or execute start (#413, like plan_drift in `warn`):
+    the commits on the issue's branches (`tower.issue_branch_commits`) and the days since its claim
+    (`tower.issue_facts`) over `growth_max_commits` or `growth_max_days`. Never a refusal, no `gh`."""
+    most_commits, most_days = settings.get("growth_max_commits"), settings.get("growth_max_days")
+    if most_commits is None and most_days is None:
+        return None
+    import tower  # noqa: PLC0415
+    _track, claim = tower.issue_facts(root, issue)
+    since = _dt.datetime.fromtimestamp(claim, tz=_dt.timezone.utc) if claim else None
+    commits = tower.issue_branch_commits(root, issue, since)
+    days = ((time.time() if now is None else now) - claim) / 86400 if claim else None
+    over = []
+    if most_commits is not None and commits is not None and commits > most_commits:
+        over.append(f"{commits} commits on its branches (growth_max_commits {most_commits})")
+    if most_days is not None and days is not None and days > most_days:
+        over.append(f"{int(days)} days since its claim (growth_max_days {most_days})")
+    if not over:
+        return None
+    what = " and ".join(over)
+    print(f"dispatch: growth — #{issue}: {what} — split or finish (worker told)", file=sys.stderr)
+    return (f"Growth: issue #{issue} has {what} — split or finish: before you widen it, finish the part in "
+            "hand and land it, or name the split (a new issue for the rest) in your report.")
+
+
 # --- commands ---------------------------------------------------------------------------
 
 def start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str | None, title: str | None,
@@ -2470,6 +2496,9 @@ def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str 
                         attests=not other_harness, plan_review=plan_review, plan_paths=plan_paths, quick=quick)
     if drift_note:
         prompt += "\n\n" + drift_note
+    grown = growth_note(root, issue, settings) if phase in ("plan", "execute") else None
+    if grown:
+        prompt += "\n\n" + grown
     # every cell of the Claude policy, whatever its command's first word
     # (`npx claude …`, `env X=1 claude …`) — except a `codex` cell (the
     # cross-model `codex exec … --sandbox read-only`): a Codex run has its own sandbox

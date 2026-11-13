@@ -3127,3 +3127,41 @@ def test_the_track_command_writes_the_issues_track(render, tmp_path):
     # the first start of #5 needs no --track now, and counts against the process track
     r = _dispatch(out, "start", "--issue", "5", "--phase", "plan", "--branch", "b5", "--dry-run")
     assert r.returncode == 0 and "track process" in r.stdout, r.stdout + r.stderr
+
+
+def _grown(out: Path) -> None:
+    _git(out, "checkout", "-q", "-b", "7-grow")
+    for n in (1, 2):
+        (out / f"g{n}.txt").write_text(str(n))
+        _git(out, "add", "-A")
+        _git(out, "commit", "-q", "-m", f"feat: g{n}")
+    _git(out, "checkout", "-q", "main")
+
+
+def test_a_grown_issue_gets_a_split_or_finish_note_on_plan_and_execute_never_a_refusal(
+        render, tmp_path, monkeypatch, capsys):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _grown(out)
+    mod = _load_dispatch(out)
+    seen = _started_prompts(mod, monkeypatch)
+    _steering(out, growth_max_commits=1)
+    for phase in ("plan", "execute", "review"):
+        assert mod.start(out, issue=7, phase=phase, tier=2, branch="7-grow", title=None, dry_run=True) == 0
+        err = capsys.readouterr().err
+        if phase == "review":
+            assert "split or finish" not in seen[-1] and "growth" not in err
+        else:
+            assert "split or finish" in seen[-1] and "2 commits" in seen[-1], phase
+            assert "dispatch: growth — #7" in err and "split or finish" in err
+    _steering(out, growth_max_commits=5)
+    assert mod.start(out, issue=7, phase="plan", tier=2, branch="7-grow", title=None, dry_run=True) == 0
+    assert "split or finish" not in seen[-1]
+    # the days count from the claim: the earliest phase start in the history
+    phases = out / ".git/process-dispatch/phases"
+    phases.mkdir(parents=True, exist_ok=True)
+    (phases / "7.json").write_text(json.dumps({"phase": "plan", "branch": "7-grow", "branches": {
+        "7-grow": {"starts": [["plan", time.time() - 20 * 86400]]}}}))
+    _steering(out, growth_max_days=10)
+    assert mod.start(out, issue=7, phase="execute", tier=2, branch="7-grow", title=None, dry_run=True) == 0
+    assert "split or finish" in seen[-1] and "20 days" in seen[-1]
