@@ -106,6 +106,15 @@ def render_into(_template_src):
 
 
 @pytest.fixture(autouse=True)
+def _own_lanes(monkeypatch, tmp_path_factory):
+    # the host's lanes (`~/.local/state/process-lanes`) are the host's: a finish or a train
+    # under test holds `full` (v2.97 B7) and would queue behind a real run, or tests behind
+    # each other. Outside the test's tree, which must stay clean. A test about the lane
+    # directory itself drops or sets the variable.
+    monkeypatch.setenv("PROCESS_LANE_DIR", str(tmp_path_factory.mktemp("lanes")))
+
+
+@pytest.fixture(autouse=True)
 def _outside_ci(monkeypatch):
     # the tests exercise local behaviour (hook wiring, notes); the CI runner's
     # own CI/GITHUB_ACTIONS variables must not switch it off under them

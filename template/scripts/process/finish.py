@@ -23,6 +23,11 @@ again; `--tests` alone runs that `merge_suite`. `--tests-passed` is a claim
 and certifies nothing — it is refused while `merge_suite` is set (#255), and
 without one the push runs the suite itself.
 
+The `--tests` run (its host check included) holds the lane `full`, as the
+train does (v2.97 B7): one heavy run per host. Past the lane's wait it exits
+75 naming the holder — the suite did not run, nothing is merged. A project
+with its own `scripts/lane.py` holds its lanes itself; finish holds none.
+
 The cost commit (v2.94 E2, only with the telemetry module) comes right before the
 archive commit, in the run that writes it: `docs: record cost — #<issue>`, the journal's
 COST lines per phase of the branch's issue (wall time including waits). No line for a
@@ -65,6 +70,7 @@ Pure stdlib + sibling imports.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shlex
@@ -80,6 +86,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 import certificate  # noqa: E402
+import lane  # noqa: E402
 import testing_config  # noqa: E402
 from check_review import (  # noqa: E402  (one owner for grammar + arithmetic)
     JOURNAL_DIR,
@@ -476,6 +483,24 @@ def _certifiable_tree(root: Path, tests: str) -> tuple[str, str, list[str], list
     return (tree, cfg["merge_suite"], cfg["certificate_env"], cfg["merge_scope"]) if tree else None
 
 
+FULL_LANE = "full"
+
+
+def _full_lane(root: Path) -> contextlib.AbstractContextManager:
+    """The lane `full` around finish's suite (v2.97 B7): another `finish --tests` or a train
+    on this host waits, and the suite's own `lane.py run --lane full` passes through
+    (`PROCESS_LANE_HELD`). The rule of `test_select.run`: held where the template's lane
+    script is the project's — a project that kept its own `scripts/lane.py` holds its lanes
+    in its commands, and finish takes no lock first; a configuration without `full` has
+    nothing to hold. Entering raises `lane.LaneBusy` past the lane's wait."""
+    if testing_config.lane_script(root) != root / "scripts/process/lane.py":
+        return contextlib.nullcontext()
+    settings = lane.config(root)
+    if FULL_LANE not in settings["lanes"]:
+        return contextlib.nullcontext()
+    return lane.hold(FULL_LANE, label="finish --tests", settings=settings)
+
+
 def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
     """--apply: execute the deterministic part of the tail instead of
     printing it for an agent to retype. Cost commit (`_record_cost`), archive
@@ -566,24 +591,33 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
         except testing_config.ConfigError as exc:
             print(f"finish: {exc} — not merging")
             return 1
-        if cfg:
-            import test_select  # noqa: PLC0415
-
-            problem = test_select.merge_environment_problem(root, cfg)
-            if problem:
-                print(f"finish: environment — {problem}; the suite did not run, not merging "
-                      f"(fix the host, or merge on the gate host)")
-                return 1
-        # the certificate serves the pre-push only; a local merge pushes nothing
-        before = None if local_only else _certifiable_tree(root, tests)
-        certificate.clear_run(root)  # the `stages` file the certificate reads is this run's
-        print(f"finish: $ {shown}   # the FULL suite, once per batch")
+        # one heavy run per host (v2.97 B7): the host check and the suite under the lane
+        # `full`, as `test_select.run` holds it; a held lane past its wait merges nothing
         try:
-            green = subprocess.run(argv, cwd=str(root),
-                                   env={**git_environment(), **assigned}).returncode == 0
-        except OSError as exc:  # no such command, not executable
-            print(f"finish: --tests cannot run ({exc}) — not merging")
-            return 1
+            with _full_lane(root):
+                if cfg:
+                    import test_select  # noqa: PLC0415
+
+                    problem = test_select.merge_environment_problem(root, cfg)
+                    if problem:
+                        print(f"finish: environment — {problem}; the suite did not run, not merging "
+                              f"(fix the host, or merge on the gate host)")
+                        return 1
+                # the certificate serves the pre-push only; a local merge pushes nothing
+                before = None if local_only else _certifiable_tree(root, tests)
+                certificate.clear_run(root)  # the `stages` file the certificate reads is this run's
+                print(f"finish: $ {shown}   # the FULL suite, once per batch")
+                try:
+                    green = subprocess.run(argv, cwd=str(root),
+                                           env={**git_environment(), **assigned}).returncode == 0
+                except OSError as exc:  # no such command, not executable
+                    print(f"finish: --tests cannot run ({exc}) — not merging")
+                    return 1
+        except lane.LaneBusy as busy:
+            print(f"finish: lane {busy} — its wait ran out; the suite did not run, nothing merged. "
+                  f"Not a red suite: re-run once it is free (`scripts/process/lane.py status`)",
+                  file=sys.stderr)
+            return lane.EX_TEMPFAIL
         if not green:
             print("finish: full suite red — not merging")
             return 1
