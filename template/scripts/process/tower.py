@@ -454,6 +454,47 @@ def balance(root: Path, ref: str | None, days: int = BALANCE_DAYS, offset: int =
                                                          for f in landed)}
 
 
+def issue_branch_commits(root: Path, issue: int, since: datetime | None) -> int | None:
+    """The commits on the branches that carry `issue` in their name (`check_review.branch_issue`),
+    local and remote: per branch `--no-merges <branch> --not <integration>`, authored at or after
+    `since` (every one without it). A local branch and its remote copy after a rebase are one
+    commit each, told by `git patch-id --stable`; a commit without a diff counts by its SHA.
+    None when there is no integration branch or git cannot read a branch. The one count for
+    `process_kpis.py intake` (v2.96) and the growth note of dispatch (v2.97)."""
+    ref = integration_ref(root)
+    if not ref:
+        return None
+    names = (_git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/", "refs/remotes/") or "").split()
+    shas: set[str] = set()
+    for name in names:
+        if name == ref or _review.branch_issue(name) != str(issue):
+            continue
+        out = _git(root, "log", "--no-merges", "--format=%H %at", name, "--not", ref)
+        if out is None:
+            return None
+        for line in out.splitlines():
+            sha, _, at = line.partition(" ")
+            if at.isdigit() and (since is None or int(at) >= since.timestamp()):
+                shas.add(sha)
+    if not shas:
+        return 0
+    try:
+        show = subprocess.run(["git", "-C", str(root), "--no-optional-locks", "show", "--no-color", "--no-ext-diff",
+                               "--no-textconv", "-p", "--format=commit %H", *sorted(shas)],
+                              capture_output=True, timeout=60, env=git_environment())
+        ids = subprocess.run(["git", "-C", str(root), "patch-id", "--stable"], input=show.stdout,
+                             capture_output=True, timeout=60, env=git_environment())
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if show.returncode != 0 or ids.returncode != 0:
+        return None
+    patches: dict[str, str] = {}
+    for line in ids.stdout.decode(errors="replace").splitlines():
+        patch, _, sha = line.partition(" ")
+        patches[sha.strip()] = patch
+    return len(set(patches.values())) + sum(1 for s in shas if s not in patches)
+
+
 def lanes(root: Path) -> list[str]:
     """The lane status lines (`testing_config.lane_status` owns where they come from)."""
     import testing_config  # noqa: PLC0415
