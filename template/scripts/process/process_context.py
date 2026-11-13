@@ -17,7 +17,7 @@ branch: a spec dir named like the branch leaf (speckit.md, Branching), else
 the issue the branch name leads with (check_review.branch_issue). `scope`
 says which. `--all` prints every item in full (the unscoped shape).
 
-    process_context.py [root] [--issue N | --all] [--cost]
+    process_context.py [root] [--issue N | --all] [--cost] [--trend]
 
 Read-only, never a gate, pure stdlib. Borrowed pattern: Spec Kit's
 check-prerequisites --json (deterministic context bootstrap).
@@ -29,11 +29,13 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_review import OPEN_TASK, branch_issue, declared_issue_numbers, open_questions, plan_tier, spec_dir_issue  # noqa: E402
+from process_git import answers_release  # noqa: E402  (the release grammar's owner)
 
 PLANS = ".process-work/plans"
 STATE = ".process-work/state"
@@ -127,7 +129,11 @@ def _args(argv: list[str]) -> argparse.Namespace:
     scope.add_argument("--issue", type=int, metavar="N", help="scope to issue N (beats the branch)")
     scope.add_argument("--all", action="store_true", help="every plan and spec dir in full detail")
     ap.add_argument("--cost", action="store_true",
-                    help="add context_cost: approx tokens a session reads (always over everything)")
+                    help="add context_cost: approx tokens and lines a session reads (always over "
+                         "everything), with entry_load: each harness's anchors, nested anchors, overlays")
+    ap.add_argument("--trend", action="store_true",
+                    help="with --cost (implied): the same sums at each commit that switches "
+                         f"{ANSWERS} to a release tag (the last {TREND_POINTS})")
     return ap.parse_args(argv)
 
 
@@ -206,8 +212,8 @@ def main(argv: list[str] | None = None) -> int:
         1 for line in _read(inbox).splitlines() if line.strip().startswith(("-", "*"))
     ) if inbox.is_file() else 0
 
-    if args.cost:
-        out["context_cost"] = context_cost(root, out)
+    if args.cost or args.trend:
+        out["context_cost"] = context_cost(root, out, trend=args.trend)
 
     if not args.all:
         out["scope"], spec_dir = _scope(args.issue, branch, spec_issues)
@@ -241,25 +247,115 @@ def main(argv: list[str] | None = None) -> int:
 CHARS_PER_TOKEN = 4
 ANCHORS = ("CLAUDE.md", "AGENTS.md", ".github/copilot-instructions.md")
 COMMAND_DIRS = (".claude/commands", ".github/prompts")
+KERNEL = "docs/process/kernel.md"
+RULES = "docs/process/mandatory-rules.md"
+# entry load: what each harness reads before the first prompt. The kernel is
+# a copy inside the anchor, so the anchor files are the whole of it.
+HARNESS_ANCHORS = {"claude": ("CLAUDE.md",), "agents_md": ("AGENTS.md",),
+                   "copilot": (".github/copilot-instructions.md",
+                               ".github/instructions/process.instructions.md")}
+SUBTREE_ANCHOR_NAMES = ("CLAUDE.md", "AGENTS.md")  # a harness loads these on top in a subtree
+OVERLAY_DOCS = "docs/process"
+COMMAND_OVERLAYS = "docs/process/commands"  # overlays.md, "Where an overlay lives"
+LOCAL = ".local.md"
+ANSWERS = ".copier-answers.yml"
+TREND_POINTS = 12
+
+
+def _size(texts: list[str]) -> dict:
+    return {"files": len(texts),
+            "tokens": sum(len(t) for t in texts) // CHARS_PER_TOKEN,
+            "lines": sum(len(t.splitlines()) for t in texts)}
 
 
 def _tokens(paths: list[Path]) -> dict:
-    sizes = [(p, len(_read(p))) for p in paths if p.is_file()]
-    return {"files": len(sizes),
-            "tokens": sum(n for _p, n in sizes) // CHARS_PER_TOKEN}
+    return _size([_read(p) for p in paths if p.is_file()])
 
 
-def context_cost(root: Path, ctx: dict) -> dict:
+def _mandatory_files(tree: set[str]) -> dict[str, list[str]]:
+    """The groups every session loads, as relative paths present in `tree` —
+    one owner for the working copy and for a commit (--trend)."""
+    return {"anchor": [a for a in ANCHORS if a in tree],
+            "kernel": [KERNEL] if KERNEL in tree else [],
+            "mandatory_rules": [RULES] if RULES in tree else [],
+            "commands": sorted(p for p in tree
+                               if p.rpartition("/")[0] in COMMAND_DIRS and p.endswith(".md"))}
+
+
+def _entry_files(tree: set[str]) -> dict:
+    """entry_load's groups over the relative paths in `tree`: the anchors of
+    each harness present, the nested anchors (never the root ones), the
+    command overlays and the doc overlays (command overlays apart)."""
+    return {"harnesses": {h: [f for f in fs if f in tree] for h, fs in HARNESS_ANCHORS.items()
+                          if any(f in tree for f in fs)},
+            "subtree_anchors": sorted(p for p in tree if "/" in p
+                                      and p.rpartition("/")[2] in SUBTREE_ANCHOR_NAMES),
+            "command_overlays": sorted(p for p in tree if p.endswith(LOCAL)
+                                       and p.rpartition("/")[0] == COMMAND_OVERLAYS),
+            "doc_overlays": sorted(p for p in tree if p.endswith(LOCAL)
+                                   and p.startswith(OVERLAY_DOCS + "/")
+                                   and p.rpartition("/")[0] != COMMAND_OVERLAYS)}
+
+
+def _entry_paths(files: dict) -> list[str]:
+    return [p for k, v in files.items()
+            for ps in (v.values() if k == "harnesses" else (v,)) for p in ps]
+
+
+def _worktree(root: Path) -> tuple[set[str], str | None]:
+    """The relative paths the groups read in the working copy, and why the
+    nested anchors are unknown (None when `git ls-files` answered). Nested
+    anchors come from the index, so a vendored or scratch tree stays out."""
+    fixed = {*ANCHORS, *(f for fs in HARNESS_ANCHORS.values() for f in fs), KERNEL, RULES}
+    tree = {f for f in fixed if (root / f).is_file()}
+    for d in COMMAND_DIRS:
+        if (root / d).is_dir():
+            tree |= {f"{d}/{p.name}" for p in (root / d).glob("*.md") if p.is_file()}
+    if (root / OVERLAY_DOCS).is_dir():
+        tree |= {p.relative_to(root).as_posix() for p in (root / OVERLAY_DOCS).rglob("*" + LOCAL)
+                 if p.is_file()}
+    r = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--",
+                        *(f":(glob)**/{n}" for n in SUBTREE_ANCHOR_NAMES)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return tree, (r.stderr.strip().splitlines() or ["git ls-files failed"])[0]
+    return tree | {p for p in r.stdout.split("\0") if p and (root / p).is_file()}, None
+
+
+def _entry_load(files: dict, read: Callable[[str], str], *, detail: bool) -> dict:
+    """Sizes of entry_load's groups; `detail` adds the paths, the overlay of
+    each command and the five largest doc overlays (the trend keeps sums)."""
+    texts = {p: read(p) for p in _entry_paths(files)}
+
+    def size(paths: list[str]) -> dict:
+        return _size([texts[p] for p in paths])
+
+    def each(p: str) -> dict:
+        one = size([p])
+        return {"file": p, "tokens": one["tokens"], "lines": one["lines"]}
+
+    load: dict = {"harnesses": {h: size(fs) for h, fs in files["harnesses"].items()},
+                  "subtree_anchors": size(files["subtree_anchors"]),
+                  "overlays": {"commands": size(files["command_overlays"]),
+                               "docs": size(files["doc_overlays"])}}
+    if detail:
+        load["subtree_anchors"]["paths"] = [each(p) for p in files["subtree_anchors"]]
+        load["overlays"]["commands"]["by_command"] = {
+            p.rpartition("/")[2][:-len(LOCAL)]: each(p) for p in files["command_overlays"]}
+        load["overlays"]["docs"]["largest"] = [
+            each(p) for p in sorted(files["doc_overlays"], key=lambda p: (-len(texts[p]), p))[:5]]
+    return load
+
+
+def context_cost(root: Path, ctx: dict, *, trend: bool = False) -> dict:
     """Token sizes over the UNSCOPED context (every plan and spec dir), split
     into what every session loads (`mandatory`) and what it reads on demand
-    (`available`)."""
+    (`available`); `entry_load` stands apart from both, so the session
+    estimate stays what it was."""
     pdocs = root / "docs/process"
-    mandatory: dict[str, list[Path]] = {
-        "anchor": [root / a for a in ANCHORS],
-        "kernel": [pdocs / "kernel.md"],
-        "mandatory_rules": [pdocs / "mandatory-rules.md"],
-        "commands": [p for d in COMMAND_DIRS for p in sorted((root / d).glob("*.md"))
-                     if (root / d).is_dir()]}
+    tree, why = _worktree(root)
+    mandatory: dict[str, list[Path]] = {k: [root / p for p in v]
+                                        for k, v in _mandatory_files(tree).items()}
     jdir = root / ".process-work/journal"
     available: dict[str, list[Path]] = {
         "process_docs": [p for p in sorted(pdocs.rglob("*.md"))
@@ -280,14 +376,104 @@ def context_cost(root: Path, ctx: dict) -> dict:
         report["available"][k]["tokens"] for k in
         ("product_frame", "active_plans", "state_and_latest_journal"))
     report["session_start_estimate_tokens"] = session
+    load = _entry_load(_entry_files(tree), lambda p: _read(root / p), detail=True)
+    if why is not None:
+        load["subtree_anchors"] = {"files": None, "tokens": None, "lines": None,
+                                   "paths": [], "missing": why}
+    report["entry_load"] = load
     groups = {**mandatory, **available}
     everything = sorted({p for ps in groups.values() for p in ps if p.is_file()},
                         key=lambda p: -len(_read(p)))
     report["largest"] = [{"file": str(p.relative_to(root)),
                           "tokens": len(_read(p)) // CHARS_PER_TOKEN}
                          for p in everything[:10]]
+    if trend:
+        report["trend"] = cost_trend(root)
     report["unit"] = f"approx tokens = chars / {CHARS_PER_TOKEN}"
     return report
+
+
+# --- trend: the same sums at each release the project updated to ----------
+
+def _blobs(root: Path, specs: list[str]) -> list[str | None]:
+    """The text of each `git cat-file` spec (a blob id or `<rev>:./<path>`),
+    None where it is missing — one batch call, not one `git show` per file."""
+    if not specs:
+        return []
+    r = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"],
+                       input="".join(f"{s}\n" for s in specs).encode(), capture_output=True)
+    data, pos, got = r.stdout, 0, []
+    for _spec in specs:
+        nl = data.find(b"\n", pos)
+        if nl < 0:
+            got.append(None)
+            continue
+        head = data[pos:nl].split()
+        pos = nl + 1
+        if len(head) != 3 or not head[2].isdigit():
+            got.append(None)  # `<spec> missing`
+            continue
+        size = int(head[2])
+        got.append(data[pos:pos + size].decode("utf-8", "replace"))
+        pos += size + 1
+    return got
+
+
+def _release_switches(root: Path) -> tuple[list[tuple[str, str, str]] | None, str | None]:
+    """(commit, date, release) for each commit whose `.copier-answers.yml`
+    moves to a release tag, oldest first — or (None, why) without git. A
+    commit that changes other answers, or moves to a SHA or dev ref, is none."""
+    r = subprocess.run(["git", "-C", str(root), "log", "--format=%H %cs", "--", ANSWERS],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None, (r.stderr.strip().splitlines() or ["git log failed"])[0]
+    commits = [line.split()[:2] for line in reversed(r.stdout.splitlines()) if line.strip()]
+    texts = _blobs(root, [f"{sha}:./{ANSWERS}" for sha, _date in commits])
+    switches, before = [], None
+    for (sha, date), text in zip(commits, texts):
+        release = answers_release(text) if text is not None else None
+        if release is not None and release != before:
+            switches.append((sha, date, "v{}.{}.{}".format(*release)))
+        before = release
+    return switches, None
+
+
+def _tree_blobs(root: Path, sha: str) -> dict[str, str]:
+    """path -> blob id at `sha`, relative to `root` like the working copy."""
+    r = subprocess.run(["git", "-C", str(root), "ls-tree", "-r", "-z", sha],
+                       capture_output=True, text=True)
+    blobs = {}
+    for entry in r.stdout.split("\0"):
+        meta, _tab, path = entry.partition("\t")
+        parts = meta.split()
+        if len(parts) == 3 and parts[1] == "blob":
+            blobs[path] = parts[2]
+    return blobs
+
+
+def cost_trend(root: Path) -> dict:
+    """`mandatory` and `entry_load` sums at the last TREND_POINTS commits that
+    switch `.copier-answers.yml` to a release tag, read from each commit's
+    tree, never from the working copy."""
+    switches, why = _release_switches(root)
+    if switches is None:
+        return {"value": None, "quality": "missing", "why": why}
+    if not switches:
+        return {"value": None, "quality": "missing",
+                "why": f"no commit switches {ANSWERS} to a release tag"}
+    points = []
+    for sha, date, release in switches[-TREND_POINTS:]:
+        blobs = _tree_blobs(root, sha)
+        must, entry = _mandatory_files(set(blobs)), _entry_files(set(blobs))
+        paths = sorted({*(p for ps in must.values() for p in ps), *_entry_paths(entry)})
+        texts = dict(zip(paths, _blobs(root, [blobs[p] for p in paths])))
+
+        def read(p: str, texts: dict[str, str | None] = texts) -> str:
+            return texts.get(p) or ""
+        points.append({"commit": sha[:12], "date": date, "release": release,
+                       "mandatory": {k: _size([read(p) for p in v]) for k, v in must.items()},
+                       "entry_load": _entry_load(entry, read, detail=False)})
+    return {"value": points, "quality": "measured"}
 
 
 if __name__ == "__main__":
