@@ -121,7 +121,13 @@ tower run. Owner messages are a third wake. On each wake:
    plan is refreshed by a plan phase first, `--stale-plan-ok` only when
    you have checked the drift does not touch the work. The
    dispatcher refuses when the policy's `max_workers` are live or a lane
-   is held. Stop only sessions you started (`dispatch.py stop <branch>`),
+   is held. **Work in progress has limits** when the mandate sets
+   `steering` (`optimization.md`): pick the next Ready issue of a track
+   below its limit, name its track on the first start (`--track <name>`;
+   `process` for process work; the label `track:<name>` or the owner says
+   which), and start nothing in a full track — `dispatch` refuses it;
+   `--over-wip "<reason>"` only with the owner's `DECISION` line. A
+   "split or finish" note on a grown issue goes to its worker as is. Stop only sessions you started (`dispatch.py stop <branch>`),
    and only after the plan and its decisions are committed.
 5. Report to the owner only on an event: a departure, a dropped
    offender, a stopped worker, an overlap decided, a finding that needs

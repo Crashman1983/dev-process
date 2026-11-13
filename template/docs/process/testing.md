@@ -288,7 +288,12 @@ code. A project supplies data; the template owns the sequence:
   (`flock`; without it, unqueued and said once). A push holds one lane once
   for all its stacks — released between stages, another push took the gap
   and the first paid its 30-minute run twice (downstream). A run that
-  already holds the lane re-enters it.
+  already holds the lane re-enters it. `finish --tests` holds `full` around
+  its suite, and the train holds `full` from after the preboard to before
+  its push (the push's own pre-push takes the lane then); with the template's
+  `lane.py` only, never over a project's own `scripts/lane.py`. Whoever wants
+  `full` during a train waits at most the lane's `wait` (3600 s by default)
+  and then stops with 75, naming the train — a red round can run longer.
 - **`scripts/process/certificate.py`** — `push` and `merge` certificates,
   keyed by the evidence tree (without `.process-work/`) and what ran.
   Written only on a clean tree that the run left unchanged, with no

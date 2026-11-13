@@ -7,9 +7,9 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
-## v2.96.0 — Steuerung messbar: Epics, offene Arbeit, Ankerlast, Pflicht-Updates
+## v2.96.0 — Steuerung mit Grenzen: offene Arbeit gemessen und begrenzt, Lanes für schwere Läufe
 
-Die Optimierungsschleife sieht jetzt offene Arbeit, nicht nur gemergte: wie viele Issues gleichzeitig in Arbeit sind, wie lange jedes schon läuft und wie stark es wächst, und ob neue Issues schneller kommen als geschlossene. Die Wert-Messung findet lange laufende Produkt-Epics, die sie bisher übersah. Die Startlast einer Sitzung wird je Harness gemessen, und ein Trockenlauf des Template-Updates sagt, welche Änderungen ein Projekt jetzt übernehmen muss; ab diesem Release ist jede Änderung in den Notes als verlangt, empfohlen oder optional markiert.
+Die Optimierungsschleife sieht jetzt offene Arbeit, nicht nur gemergte: wie viele Issues gleichzeitig in Arbeit sind, wie lange jedes schon läuft und wie stark es wächst, und ob neue Issues schneller kommen als geschlossene. Die Wert-Messung findet lange laufende Produkt-Epics, die sie bisher übersah. Die Startlast einer Sitzung wird je Harness gemessen, und ein Trockenlauf des Template-Updates sagt, welche Änderungen ein Projekt jetzt übernehmen muss; ab diesem Release ist jede Änderung in den Notes als verlangt, empfohlen oder optional markiert. Ein Projekt kann jetzt in seinem Mandat Grenzen setzen: wie viele Issues je Track gleichzeitig in Arbeit sein dürfen (der Steward startet dann nichts in einem vollen Track), wie groß der Anteil reiner Prozessarbeit werden darf und wie oft Template-Updates übernommen werden. Zwei schwere Testläufe auf einer Maschine kollidieren nicht mehr.
 
 ## v2.95.0 — Ein Abbruch durch Last ist kein Befund über einen Passagier
 

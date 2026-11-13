@@ -31,3 +31,8 @@ in the clone's git common dir (a `process-tower` folder inside `.git`), shared b
 every worktree on this machine and never committed; the tower
 (`scripts/process/tower.py`) shows the latest state per worker and marks
 a worker stale after an hour without report or commit (`docs/process/tower.md`).
+The worker (`--worker`, `PROCESS_WORKER` or the current branch) must be a
+local or remote-tracking branch — the train and the tower match reports by
+branch; a detached `HEAD` or an unknown name exits 2. `done` and `idle` may
+name a branch already deleted after its merge, if the phase history or an
+earlier report knows it.
