@@ -50,7 +50,9 @@ from pathlib import Path
 
 # `failed`: the run itself broke (crash, timeout, signal) — not `blocked`, which is a
 # question or a red gate the worker hands over (#270)
-STATES = ("planned", "pushed", "review-pass", "blocked", "failed", "done", "idle")
+# `started`: dispatch's claim on an issue's first start under a `steering` block, published so the
+# other host's WIP count sees it before the worker's first report (never a phase's end)
+STATES = ("planned", "pushed", "review-pass", "blocked", "failed", "done", "idle", "started")
 REPORTS_DIR = "process-tower"
 REPORTS_FILE = "reports.jsonl"
 REPORT_REFS = "refs/process/reports"

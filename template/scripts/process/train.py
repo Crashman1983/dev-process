@@ -2883,7 +2883,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 log(f"worktree {wt['path']} of {b}: {failed or 'removed'}")
         if not keep_branches:
             _delete_branch(root, b, shas.get(b), push=push, log=log)
-    if push and _report.publish_if_steered(root) is False:
+    if _report.publish_if_steered(root) is False:
         # the other host counts these issues in progress until a sync carries the `done`
         print("train: the `done` reports are written but not published", file=sys.stderr)
     _cleanup(root, stamp)

@@ -2668,8 +2668,26 @@ def _start(root: Path, *, issue: int, phase: str, tier: int | None, branch: str 
         where = f"pid {proc.pid}"
     _write_record(root, branch, rec)
     _remember_issue(root, issue, branch)
+    if net is not None and not dry_run:
+        _publish_claim(root, issue=issue, branch=branch, track=track, model=model)
     print(f"dispatch: started {phase} for #{issue} on {branch} with {label} ({where}, log {log.name})")
     return 0
+
+
+def _publish_claim(root: Path, *, issue: int, branch: str, track: str | None, model: str | None) -> None:
+    """A first start under `steering`: a `started` report, published at once, so the other host's
+    WIP count sees the claim before the worker's first report (a local record is never fetched)."""
+    import tower  # noqa: PLC0415
+    try:
+        _report.write_report(root, "started", issue=issue, note="first start (dispatch)", worker=branch,
+                             model=model, track=track)
+    except (OSError, SystemExit) as exc:
+        print(f"dispatch: the claim on #{issue} is not reported ({exc}) — the other host may admit "
+              f"one more", file=sys.stderr)
+        return
+    if not _report.sync_reports(root, timeout=tower.FETCH_TIMEOUT_S):
+        print(f"dispatch: the claim on #{issue} is not published — the other host may admit one more "
+              f"until the next sync", file=sys.stderr)
 
 
 def set_track(root: Path, issue: int, track: str) -> int:

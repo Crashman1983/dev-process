@@ -3051,6 +3051,24 @@ def test_a_first_start_at_the_tracks_limit_is_refused_and_the_override_recorded(
         _stop_all(out, "b1", "b2")
 
 
+def test_a_first_start_reports_its_claim_so_the_other_host_can_count_it(render, tmp_path):
+    """A local record is never fetched by another host: a first start under `steering` writes a
+    `started` report with issue and track (and tries to publish it); a later phase writes none."""
+    out = _wip_repo(render, tmp_path, None, **TRACKS)
+    try:
+        assert _dispatch(out, "start", "--issue", "1", "--phase", "plan", "--branch", "b1",
+                         "--track", "A").returncode == 0
+        reports = (out / ".git/process-tower/reports.jsonl").read_text().splitlines()
+        started = [json.loads(line) for line in reports if '"started"' in line]
+        assert [(r["issue"], r["track"], r["worker"]) for r in started] == [(1, "A", "b1")]
+        _stop_all(out, "b1")
+        assert _dispatch(out, "start", "--issue", "1", "--phase", "plan", "--branch", "b1").returncode == 0
+        again = (out / ".git/process-tower/reports.jsonl").read_text().count('"started"')
+        assert again == 1  # a restart is no first start
+    finally:
+        _stop_all(out, "b1")
+
+
 def test_a_later_phase_and_a_restart_after_stop_are_not_checked_and_keep_the_track(render, tmp_path):
     marker = tmp_path / "seen"
     out = _wip_repo(render, tmp_path, marker, **TRACKS)

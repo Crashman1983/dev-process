@@ -4266,7 +4266,9 @@ def intake_table(root: Path, *, weeks: int = _INTAKE_WEEKS, label: str = IN_PROG
         "weeks": weeks, "label": label,
         "issues": {"read": read, "why": why, "complete": (cut is None) if read else None, "cut": cut},
         "intake": rows,
-        "tower": {"fetched": fetched, "note": "; ".join(notes) or None},
+        "tower": {"fetched": fetched, "note": "; ".join(notes) or None,
+                  # silent for tower.DORMANT_DAYS: shown, never counted (the WIP count skips them too)
+                  "dormant": sorted(e["issue"] for e in work.get("dormant") or [])},
         "label_claims": {"why": claims_why},
         "counts": {
             "label": {"value": len(labelled) if read else None, "quality": quality},
@@ -4280,6 +4282,8 @@ def intake_table(root: Path, *, weeks: int = _INTAKE_WEEKS, label: str = IN_PROG
 def intake(root: Path | None = None, *, weeks: int = _INTAKE_WEEKS, label: str = IN_PROGRESS_LABEL,
            as_json: bool = False) -> int:
     import json  # noqa: PLC0415
+
+    import tower  # noqa: PLC0415 — owns DORMANT_DAYS
     root = root or Path.cwd()
     t = intake_table(root, weeks=weeks, label=label)
     if as_json:
@@ -4298,6 +4302,9 @@ def intake(root: Path | None = None, *, weeks: int = _INTAKE_WEEKS, label: str =
     c = t["counts"]
     print(f"  in progress {_num(c['total']['value'])} [{c['total']['quality']}] — label "
           f"{_num(c['label']['value'])} [{c['label']['quality']}], tower {c['tower']['value']} [{c['tower']['quality']}]")
+    if t["tower"].get("dormant"):
+        print(f"  dormant (silent {tower.DORMANT_DAYS} d, not counted): "
+              + ", ".join(f"#{n}" for n in t["tower"]["dormant"]))
     if t["tower"]["note"]:
         print(f"  tower: {t['tower']['note']}")
     for w in t["in_progress"]:

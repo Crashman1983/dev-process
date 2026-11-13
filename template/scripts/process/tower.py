@@ -84,7 +84,7 @@ PROMPT_MINUTES = 10
 PROMPT_LINES = 15  # the screen tail a dialog is looked for in: it spans several lines
 # `prompt` and `stale` are synthetic: never a report line, written by --wait for a
 # live session at a permission prompt or a silent one
-WAIT_STATES = _report.STATES + ("prompt", "stale")
+WAIT_STATES = tuple(s for s in _report.STATES if s != "started") + ("prompt", "stale")  # a claim wakes nobody
 STALE_POLL_S = 60  # how often --wait looks at the live sessions
 STALE_SEEN = "stale-announced.json"  # beside the reports: the stale episodes --wait announced
 PROMPT_SEEN = "prompt-announced.json"  # likewise, the permission prompts
@@ -685,7 +685,8 @@ def wip(root: Path) -> list[dict]:
     settings, _problems = optimize.steering(root)
     if not settings:
         return []
-    work = in_progress(root, fetch=False)["in_progress"]
+    seen = in_progress(root, fetch=False)
+    work = seen["in_progress"]
     overrides = _wip_overrides(root)
     names = list(dict.fromkeys([*(settings.get("tracks") or {}), optimize.PROCESS_TRACK,
                                 *sorted(e["track"] for e in work if e["track"])]))
@@ -698,6 +699,9 @@ def wip(root: Path) -> list[dict]:
     loose = sorted(e["issue"] for e in work if not e["track"])
     if loose:
         rows.append({"track": "untracked", "limit": None, "in_progress": loose, "overrides_7d": 0})
+    dormant = sorted(e["issue"] for e in seen.get("dormant") or [])
+    if dormant:  # shown apart, never counted: silent for DORMANT_DAYS
+        rows.append({"track": "dormant", "limit": None, "in_progress": dormant, "overrides_7d": 0})
     return rows
 
 
