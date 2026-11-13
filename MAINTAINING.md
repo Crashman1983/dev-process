@@ -80,7 +80,8 @@ auch wenn kein Projekt einen Fehler meldet.
   Pflichtzeilen im Template. Erlaubt sind Korrekturen, die Arbeit blockieren,
   Änderungen, die Aufwand entfernen, und Messwerte, die Werkzeuge schreiben,
   ohne neue Zeile für Agenten. Owner-Entscheidung vom 2026-11-10 (Prozess-Audit,
-  PR #407).
+  PR #407). **Gelockert am 2026-11-13** (Owner): Erlaubt ist auch, was die
+  Produktivität noch in der Zeit des Freeze erhöht, auch mit neuer Regel.
 
 ## Zusammenarbeit mit dem Steward eines Projekts
 
