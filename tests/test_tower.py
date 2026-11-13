@@ -348,6 +348,86 @@ def test_report_rejects_unknown_state(render, tmp_path):
     assert _report(out, "sleeping").returncode != 0
 
 
+# --- v2.97 B8: the worker is a branch -------------------------------------------------------
+
+def _worker_run(out: Path, *args: str, **env: str):
+    base = {k: v for k, v in os.environ.items() if k not in ("PROCESS_WORKER", "PROCESS_REPORT_SYNC")}
+    return subprocess.run([sys.executable, str(out / "scripts/process/report.py"), *args, "--model", "m"],
+                          cwd=out, capture_output=True, text=True, env={**base, **env})
+
+
+def _ledger_workers(out: Path) -> list[str]:
+    common = _git(out, "rev-parse", "--git-common-dir").stdout.strip()
+    ledger = Path(common if Path(common).is_absolute() else out / common) / "process-tower/reports.jsonl"
+    return [json.loads(line)["worker"] for line in ledger.read_text().splitlines()] if ledger.is_file() else []
+
+
+def test_report_refuses_a_worker_that_is_no_branch(render, tmp_path):
+    """B8: an invented `--worker` or `PROCESS_WORKER` is refused with exit 2 — the train and
+    the tower match reports by branch, a report under another name is never found."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    for args, env in ((("planned", "--worker", "no-such-branch"), {}),
+                      (("pushed", "--force"), {"PROCESS_WORKER": "no-such-branch"}),
+                      (("done", "--worker", "no-such-branch"), {}),
+                      (("idle", "--worker", "no-such-branch"), {})):
+        r = _worker_run(out, *args, **env)
+        assert r.returncode == 2, (args, r.stdout + r.stderr)
+        assert ("worker no-such-branch is no branch — the train and the tower match reports by branch"
+                in r.stderr), r.stderr
+    assert _ledger_workers(out) == []
+
+
+def test_report_refuses_a_detached_head(render, tmp_path):
+    """B8 (r1 m9): the fallback on a detached HEAD names `HEAD`, no branch — refused, also
+    given by hand, although `refs/remotes/origin/HEAD` exists."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(out, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    _git(out, "checkout", "-q", "--detach")
+    for args in (("planned",), ("planned", "--worker", "HEAD")):
+        r = _worker_run(out, *args)
+        assert r.returncode == 2 and "worker HEAD is no branch" in r.stderr, (args, r.stderr)
+    assert _ledger_workers(out) == []
+
+
+def test_report_takes_a_local_or_a_remote_tracking_branch(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "branch", "local-work")
+    _git(out, "update-ref", "refs/remotes/origin/remote-work", "HEAD")
+    assert _worker_run(out, "planned", "--worker", "local-work").returncode == 0
+    assert _worker_run(out, "planned", PROCESS_WORKER="remote-work").returncode == 0
+    assert _worker_run(out, "planned").returncode == 0  # the current branch, main
+    assert _ledger_workers(out) == ["local-work", "remote-work", "main"]
+
+
+def test_report_done_and_idle_for_a_deleted_but_known_branch(render, tmp_path):
+    """B8 (r2 M4; r3 m5): `done` after the merge, with the branch gone, stays possible for a
+    name a former report or `phases/branches.json` knows; a typo is refused all the same."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "branch", "7-merged")
+    assert _worker_run(out, "pushed", "--force", "--worker", "7-merged").returncode == 0
+    _git(out, "branch", "-D", "7-merged")
+    for state in ("done", "idle"):
+        r = _worker_run(out, state, "--worker", "7-merged")
+        assert r.returncode == 0, (state, r.stderr)
+    # known to dispatch's branch index only
+    common = _git(out, "rev-parse", "--git-common-dir").stdout.strip()
+    phases = Path(common if Path(common).is_absolute() else out / common) / "process-dispatch/phases"
+    phases.mkdir(parents=True, exist_ok=True)
+    (phases / "branches.json").write_text(json.dumps({"8-indexed": [8]}))
+    assert _worker_run(out, "done", "--worker", "8-indexed").returncode == 0
+    # a known name is no licence for the other states, and a typo stays refused
+    r = _worker_run(out, "planned", "--worker", "7-merged")
+    assert r.returncode == 2 and "worker 7-merged is no branch" in r.stderr, r.stderr
+    r = _worker_run(out, "done", "--worker", "7-mreged")
+    assert r.returncode == 2 and "worker 7-mreged is no branch" in r.stderr, r.stderr
+    assert _ledger_workers(out) == ["7-merged", "7-merged", "7-merged", "8-indexed"]
+
+
 def test_two_hosts_meet_in_the_tower_via_origin(render, tmp_path):
     # the steward on host A, a detached worker on host B: B publishes its
     # reports as a ref on origin and pushes its branch; A's --remote table
@@ -1110,9 +1190,11 @@ def test_a_merged_or_deleted_branch_shows_no_train_hold(render, tmp_path):
     _git(out, "commit", "-q", "-m", "m")
     _git(out, "checkout", "-q", "main")
     _git(out, "merge", "-q", "--ff-only", "merged")
+    _git(out, "branch", "gone")  # a worker is a branch when it reports (v2.97 B8)
     for worker in ("merged", "gone"):  # merged: not ahead; gone: no branch at all
         _report(out, "blocked", "--worker", worker, "--note", "old")
         _report(out, "idle", "--worker", worker)
+    _git(out, "branch", "-D", "gone")
     t = json.loads(_tower(out, "--json").stdout)
     assert t["holds"] == [] and _hold_kinds(t) == [], (t["holds"], t["findings"])
 

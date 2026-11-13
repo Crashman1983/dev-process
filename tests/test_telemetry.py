@@ -1615,6 +1615,10 @@ def test_a_worker_states_its_usage_and_models_shows_it(render, tmp_path):
     with the report; `models` puts them beside rounds and blocks."""
     out = _render(render, tmp_path)
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=out, check=True)
+    # a worker is a branch (v2.97 B8)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty",
+                    "-m", "base"], cwd=out, check=True)
+    subprocess.run(["git", "branch", "w7"], cwd=out, check=True)
     rep = out / "scripts/process/report.py"
     env = {**os.environ, "PROCESS_PHASE": "execute", "PROCESS_MODEL": "deepseek-v4.1-flash"}
     r = subprocess.run([sys.executable, str(rep), "blocked", "--issue", "7", "--worker", "w7",

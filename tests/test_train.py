@@ -1521,6 +1521,7 @@ def test_another_workers_blocked_report_does_not_hold_the_branch(render, tmp_pat
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "branch", "beta")  # a worker is a branch (v2.97 B8)
     _report(out, "beta", None, "blocked", note="not alpha's")
     c = _candidate(out, "alpha")
     assert c["eligible"] and not any("blocked" in r for r in c["reasons"]), c

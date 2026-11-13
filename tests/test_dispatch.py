@@ -395,6 +395,7 @@ def test_dry_run_names_the_lane_rule(render, tmp_path):
 def test_report_carries_model_and_kpis_cut_by_it(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {"telemetry": True}})
     _repo(out)
+    _git(out, "branch", "w5")  # a worker is a branch (v2.97 B8)
     env = dict(os.environ, PROCESS_PHASE="execute")
     r = subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "pushed", "--issue", "5",
                         "--worker", "w5", "--model", "claude-sonnet-5", "--force"], cwd=out, capture_output=True, text=True, env=env)
@@ -437,6 +438,8 @@ def test_the_execution_mode_is_reported_and_kpis_cut_by_it(render, tmp_path):
     kpis = [sys.executable, str(out / "scripts/process/process_kpis.py"), "execution"]
     r = subprocess.run(kpis, cwd=out, capture_output=True, text=True)
     assert r.returncode == 0 and "nothing measured yet" in r.stdout
+    for worker in ("w5", "w6", "w7"):  # a worker is a branch (v2.97 B8)
+        _git(out, "branch", worker)
 
     def rep(issue, mode):
         return subprocess.run([sys.executable, str(out / "scripts/process/report.py"), "done", "--issue", str(issue),
