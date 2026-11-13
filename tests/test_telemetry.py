@@ -849,10 +849,21 @@ def test_session_tokens_count_a_message_once_not_once_per_content_block(render, 
     assert m.session_output_tokens(d) == {"s": 40}
 
 
-def _issue(n, title, state="OPEN", labels=(), created="2026-01-05T10:00:00Z", closed=None, subs=()):
+def _issue(n, title, state="OPEN", labels=(), created="2026-01-05T10:00:00Z", closed=None, subs=(),
+           subs_complete=True):
     return {"number": n, "title": title, "state": state, "createdAt": created, "closedAt": closed,
-            "labels": list(labels), "sub_total": len(subs),
-            "sub_done": sum(1 for c in subs if c["state"] == "CLOSED"), "subs": list(subs)}
+            "updatedAt": closed or created, "labels": list(labels), "sub_total": len(subs),
+            "sub_done": sum(1 for c in subs if c["state"] == "CLOSED"), "subs": list(subs),
+            "subs_complete": subs_complete}
+
+
+def _fetch(issues, cut=None, seen=None):
+    """An issue reader under the fetch contract: (issues, why, cut); `seen` records each call."""
+    def fetch(_root, since, *, resolve_subs):
+        if seen is not None:
+            seen.append((since, resolve_subs))
+        return issues, None, cut
+    return fetch
 
 
 def test_outcomes_measures_epics_to_usable_and_bug_origin_on_two_axes(render, tmp_path):
@@ -873,7 +884,7 @@ def test_outcomes_measures_epics_to_usable_and_bug_origin_on_two_axes(render, tm
     ]
     (out / "docs/process/optimization.local.json").write_text(
         json.dumps({"outcomes": {"usable": "label:acceptance"}}), encoding="utf-8")
-    t = m.outcomes_table(out, days=3650, now=now, fetch=lambda _root: (issues, None))
+    t = m.outcomes_table(out, days=3650, now=now, fetch=_fetch(issues))
     ep = {e["number"]: e for e in t["epics"]}
     assert set(ep) == {100, 101, 102}  # native sub-issues or the title prefix
     assert ep[100]["quality"] == "measured" and ep[100]["usable_at"] is not None  # #12 deployed in the flow
@@ -894,10 +905,10 @@ def test_outcomes_default_marker_is_a_proxy_and_no_gh_is_unavailable(render, tmp
     m = _flow_module(out)
     now = datetime(2026, 12, 31, tzinfo=timezone.utc)
     epic = _issue(100, "[EPIC] Done", "CLOSED", closed="2026-03-01T00:00:00Z")
-    t = m.outcomes_table(out, days=3650, now=now, fetch=lambda _root: ([epic], None))
+    t = m.outcomes_table(out, days=3650, now=now, fetch=_fetch([epic]))
     assert t["epics"][0]["quality"] == "proxy" and t["epics"][0]["days_to_usable"] == 54.58
     assert t["bug_origin"]["coverage"] is None and t["bug_origin"]["blind_spot"] is False
-    gone = m.outcomes_table(out, now=now, fetch=lambda _root: (None, "gh is not installed"))
+    gone = m.outcomes_table(out, now=now, fetch=lambda _r, _s, **_k: (None, "gh is not installed", None))
     assert gone == {"available": False, "reason": "gh is not installed", "days": 90}
     # a duplicate or not-planned closure is no delivery; an epic grouped after its work is not negative
     dropped = dict(epic, stateReason="NOT_PLANNED")
@@ -906,7 +917,7 @@ def test_outcomes_default_marker_is_a_proxy_and_no_gh_is_unavailable(render, tmp
     bug["stateReason"] = "DUPLICATE"
     late = _issue(101, "[EPIC] grouped later", "CLOSED", created="2026-05-01T00:00:00Z",
                   closed="2026-04-01T00:00:00Z")
-    t = m.outcomes_table(out, days=3650, now=now, fetch=lambda _root: ([dropped, bug, late], None))
+    t = m.outcomes_table(out, days=3650, now=now, fetch=_fetch([dropped, bug, late]))
     ep = {e["number"]: e for e in t["epics"]}
     assert ep[100]["usable_at"] is None and ep[100]["quality"] == "open"
     assert ep[101]["days_to_usable"] == 0.0
@@ -923,48 +934,265 @@ def test_outcomes_names_a_mistyped_mandate_instead_of_matching_letters(render, t
     bugs = [_issue(1, "b", labels=["b"], created="2026-12-01T00:00:00Z"),
             _issue(2, "real", labels=["bug"], created="2026-12-01T00:00:00Z")]
     t = m.outcomes_table(out, days=3650, now=datetime(2026, 12, 31, tzinfo=timezone.utc),
-                         fetch=lambda _root: (bugs, None))
+                         fetch=_fetch(bugs))
     assert t["bug_origin"]["bugs"] == 1  # the default `bug`, not the letters b, u, g
     assert t["config"]["coverage_target"] == 0.8
     assert len(t["config_problems"]) == 4 and any("colour" in p for p in t["config_problems"])
 
 
-def test_gh_issues_reads_the_graphql_answer_through_gh(render, tmp_path, monkeypatch):
-    import json
+_FAKE_GH = r'''
+import json, pathlib, re, sys
+scenario = json.loads(pathlib.Path(SCENARIO).read_text())
+args = sys.argv[1:]
+if args[0] == "repo":
+    print("o/2048")
+    sys.exit(0)
+given = {}
+for flag, kv in zip(args, args[1:]):
+    if flag in ("-f", "-F"):
+        k, _, v = kv.partition("=")
+        given[k] = v
+q = given.get("query", "")
+rate = {"remaining": scenario.get("remaining", 5000)}
+ALIAS = r'(\w+):repository\(owner:"([^"]*)",name:"([^"]*)"\)\{issue\(number:(\d+)\)'
+
+
+def page(key):
+    nodes, nxt = scenario["pages"].get(key, [[], None])
+    return {"pageInfo": {"hasNextPage": nxt is not None, "endCursor": nxt}, "nodes": nodes}
+
+
+code, errors = 0, []
+if "issues(" in q:
+    states = re.search(r"states:(\w+)", q).group(1)
+    since = given.get("since")
+    kind = "open" if states == "OPEN" else "closed" if since == scenario["since"] else "late"
+    data = {"rateLimit": rate, "repository": {"issues": page(kind + ":" + given.get("after", ""))}}
+elif "$number" in q:
+    kind = "subs"
+    data = {"rateLimit": rate, "repository": {"issue": {"subIssues": page(
+        "subs:" + given["number"] + ":" + given.get("after", ""))}}}
+elif "timelineItems" in q:
+    kind = "timeline"
+    data = {"rateLimit": rate}
+    for alias, _o, _n, n in re.findall(ALIAS, q):
+        data[alias] = {"issue": {"number": int(n), "timelineItems": {"nodes": scenario["timeline"].get(n, [])}}}
+else:
+    kind = "batch"
+    data = {"rateLimit": rate}
+    for alias, owner, name, n in re.findall(ALIAS, q):
+        node = scenario["issues"].get(owner + "/" + name + "#" + n)
+        if node is None:
+            errors.append({"message": "Could not resolve to an Issue with the number of " + n})
+        data[alias] = {"issue": node}
+    code = 1 if errors else 0
+with open(LOG, "a") as fh:
+    fh.write(json.dumps({"kind": kind, "args": args, **given}) + "\n")
+print(json.dumps({"data": data, **({"errors": errors} if errors else {})}))
+sys.exit(code)
+'''
+
+
+def _fake_gh(tmp_path, monkeypatch, scenario: dict):
+    """A `gh` on PATH that answers each list by `states`, `since` and `after`, the sub-issue
+    follow-up by issue and cursor, a batch alias by alias (exit 1 with partial `data` when one
+    is missing), and logs every call. Returns a reader of the calls since this setup."""
     import os
-    out = _flow_repo(render, tmp_path)
-    m = _flow_module(out)
     fake = tmp_path / "fakebin"
-    fake.mkdir()
-    answer = {"data": {"repository": {"issues": {"nodes": [{
-        "number": 7, "title": "[EPIC] x", "state": "CLOSED", "stateReason": "COMPLETED",
-        "createdAt": "2026-01-01T00:00:00Z", "closedAt": "2026-02-01T00:00:00Z",
-        "labels": {"nodes": [{"name": "type:epic"}]}, "subIssuesSummary": {"total": 1, "completed": 1},
-        "subIssues": {"nodes": [{"number": 8, "title": "acc", "state": "CLOSED", "stateReason": None,
-                                 "closedAt": "2026-01-20T00:00:00Z", "labels": {"nodes": []}}]}}]}}}}
-    (tmp_path / "answer.json").write_text(json.dumps(answer))
-    (fake / "gh").write_text(
-        f"#!{sys.executable}\nimport sys, pathlib\n"
-        f"pathlib.Path({str(tmp_path / 'args.txt')!r}).open('a').write(' '.join(sys.argv[1:]) + '\\n')\n"
-        "if sys.argv[1] == 'repo': print('o/2048')\n"
-        f"else: print(pathlib.Path({str(tmp_path / 'answer.json')!r}).read_text())\n")
+    fake.mkdir(exist_ok=True)
+    (tmp_path / "scenario.json").write_text(json.dumps(scenario))
+    log = tmp_path / "gh-calls.jsonl"
+    log.write_text("")
+    (fake / "gh").write_text(f"#!{sys.executable}\nSCENARIO = {str(tmp_path / 'scenario.json')!r}\n"
+                             f"LOG = {str(log)!r}\n" + _FAKE_GH)
     (fake / "gh").chmod(0o755)
     monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ['PATH']}")
-    issues, why = m._gh_issues(out)
-    assert why is None and issues[0]["number"] == 7 and issues[0]["sub_total"] == 1
-    assert issues[0]["subs"][0]["number"] == 8 and issues[0]["labels"] == ["type:epic"]
-    args = (tmp_path / "args.txt").read_text()
-    assert "-f owner=o -f name=2048" in args  # -f: a numeric repo name stays a string
-    assert "stateReason" in args
+    return lambda: [json.loads(line) for line in log.read_text().splitlines()]
+
+
+def _node(n, title, state="OPEN", labels=(), created="2026-01-05T10:00:00Z", closed=None, updated=None,
+          subs=(), subs_next=None, total=None):
+    """One issue as GraphQL answers it in the light form: sub-issues as number and repository."""
+    return {"number": n, "title": title, "state": state, "stateReason": "COMPLETED" if state == "CLOSED" else None,
+            "createdAt": created, "closedAt": closed, "updatedAt": updated or closed or created,
+            "labels": {"nodes": [{"name": lb} for lb in labels]},
+            "subIssuesSummary": {"total": len(subs) if total is None else total, "completed": 0},
+            "subIssues": {"nodes": [{"number": int(ref.split("#")[1]),
+                                     "repository": {"nameWithOwner": ref.split("#")[0]}} for ref in subs],
+                          "pageInfo": {"hasNextPage": subs_next is not None, "endCursor": subs_next}}}
+
+
+_GH_SINCE_TEXT = "2026-12-01T00:00:00Z"
+
+
+def _gh_since():
+    from datetime import datetime, timezone
+    return datetime(2026, 12, 1, tzinfo=timezone.utc)
+
+
+def _gh_scenario(missing=()) -> dict:
+    """Epic #700 on the second open page with 61 sub-issues: #1–#59 closed long before the window
+    (batch-resolved, the acceptance issue #51 at position 51), #142 from the list, and x/y#5 on
+    the epic's second sub-issue page. #140 changes between the lists, #141 closes between them."""
+    subs = [f"o/2048#{n}" for n in range(1, 60)] + ["o/2048#142"]
+    issues = {f"o/2048#{n}": _node(n, f"part {n}", "CLOSED", ["acceptance"] if n == 51 else (),
+                                   closed="2025-06-01T00:00:00Z") for n in range(1, 60)}
+    issues["x/y#5"] = _node(5, "elsewhere", "CLOSED", closed="2025-05-01T00:00:00Z")
+    for key in missing:
+        issues.pop(key)
+    epic = _node(700, "[EPIC] product", created="2025-01-01T00:00:00Z", updated="2026-01-01T00:00:00Z",
+                 subs=subs, subs_next="s1", total=61)
+    return {"since": _GH_SINCE_TEXT, "issues": issues, "pages": {
+        "closed:": [[_node(140, "old", "CLOSED", closed="2026-12-02T00:00:00Z")], "c1"],
+        "closed:c1": [[_node(142, "part", "CLOSED", closed="2026-12-03T00:00:00Z")], None],
+        "open:": [[_node(143, "new work")], "o1"],
+        "open:o1": [[epic], None],
+        "late:": [[_node(140, "new", "CLOSED", closed="2026-12-02T00:00:00Z", updated="2026-12-05T00:00:00Z"),
+                   _node(141, "closed meanwhile", "CLOSED", closed="2026-12-04T00:00:00Z")], None],
+        "subs:700:s1": [[{"number": 5, "repository": {"nameWithOwner": "x/y"}}], None]}}
+
+
+def test_gh_issues_pages_both_lists_and_resolves_sub_issues_in_batches(render, tmp_path, monkeypatch):
+    """#417: `outcomes` read the 100 most recently updated issues with 50 sub-issues each —
+    Kenni's product epic (82 sub-issues) fell out of the window, its acceptance issue stood past
+    position 50. Now: the closed issues of the window, then every open one, paged by creation;
+    sub-issues as numbers, resolved against the list and in batches of 50."""
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    calls = _fake_gh(tmp_path, monkeypatch, _gh_scenario())
+    issues, why, cut = m._gh_issues(out, _gh_since(), resolve_subs=True)
+    assert why is None and cut is None
+    by = {i["number"]: i for i in issues}
+    assert set(by) == {700, 140, 141, 142, 143}  # #700 past the first page, #141 closed between the lists
+    assert by[140]["title"] == "new"  # two copies: the newer updatedAt wins
+    epic = by[700]
+    assert epic["sub_total"] == 61 and epic["subs_complete"] is True and len(epic["subs"]) == 61
+    assert epic["subs"][50]["number"] == 51 and epic["subs"][50]["labels"] == ["acceptance"]
+    assert {(c["repository"], c["number"]) for c in epic["subs"]} >= {("x/y", 5), ("o/2048", 142)}
+    got = calls()
+    lists = [(c["kind"], c.get("after")) for c in got if c["kind"] in ("closed", "open", "late")]
+    # the closed issues first, then the open ones; the first page sends no cursor
+    assert lists == [("closed", None), ("closed", "c1"), ("open", None), ("open", "o1"), ("late", None)]
+    closed, opened = got[0]["query"], got[2]["query"]
+    assert "states:CLOSED" in closed and "filterBy:{since:$since}" in closed and "direction:ASC" in closed
+    assert "states:OPEN" in opened and "filterBy" not in opened and "direction:DESC" in opened
+    assert "field:CREATED_AT" in closed and "field:CREATED_AT" in opened  # a change moves no cursor
+    assert "subIssues(first:100)" in closed and "stateReason" in closed
+    assert all("rateLimit{remaining}" in c["query"] for c in got)
+    assert "-f owner=o -f name=2048" in " ".join(got[0]["args"])  # -f: a numeric repo name stays a string
+    assert [c["number"] for c in got if c["kind"] == "subs"] == ["700"]
+    batches = [c["query"].count("repository(") for c in got if c["kind"] == "batch"]
+    assert batches == [50, 10]  # #142 came with the list: not asked again
+    # outcomes on top: the acceptance issue at position 51 decides usable
+    (out / "docs/process/optimization.local.json").write_text(
+        json.dumps({"outcomes": {"usable": "label:acceptance"}}), encoding="utf-8")
+    t = m.outcomes_table(out, days=30, now=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    ep = {e["number"]: e for e in t["epics"]}
+    assert ep[700]["quality"] == "proxy" and ep[700]["usable_at"] == datetime(2025, 6, 1, tzinfo=timezone.utc)
+    assert t["complete"] is True and t["cut"] is None
+    assert t["sample"] == "all open issues and those changed in the window"
+
+
+def test_gh_issues_keeps_a_partial_batch_answer_and_the_epic_is_missing(render, tmp_path, monkeypatch):
+    """`gh` exits 1 on a GraphQL error and still prints `data`: the entries there are resolved,
+    only the missing one is not (moved or deleted) — and its epic is `missing`, never usable."""
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    _fake_gh(tmp_path, monkeypatch, _gh_scenario(missing=["o/2048#59"]))
+    issues, why, cut = m._gh_issues(out, _gh_since(), resolve_subs=True)
+    epic = next(i for i in issues if i["number"] == 700)
+    assert why is None and cut is None
+    assert 51 in [c["number"] for c in epic["subs"]] and 59 not in [c["number"] for c in epic["subs"]]
+    assert epic["subs_complete"] is False
+    (out / "docs/process/optimization.local.json").write_text(
+        json.dumps({"outcomes": {"usable": "label:acceptance"}}), encoding="utf-8")
+    t = m.outcomes_table(out, days=30, now=datetime(2026, 12, 31, tzinfo=timezone.utc))
+    ep = {e["number"]: e for e in t["epics"]}
+    assert ep[700]["quality"] == "missing" and ep[700]["usable_at"] is None and ep[700]["subs_complete"] is False
+    assert t["epics_unread"] == 1 and t["o1_epic_usable"]["n"] == 0
+
+
+def test_gh_issues_stops_at_the_rate_floor_or_the_page_limit(render, tmp_path, monkeypatch):
+    """Every query asks `rateLimit{remaining}`; under RATE_FLOOR or at MAX_PAGES (pages, follow-ups
+    and batches together) the run stops. A stop in the list is a `cut`; a stop while resolving
+    leaves the list whole and the epic's sub-issues unread."""
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    assert (m.RATE_FLOOR, m.MAX_PAGES) == (500, 40)
+    _fake_gh(tmp_path, monkeypatch, {**_gh_scenario(), "remaining": 400})
+    issues, why, cut = m._gh_issues(out, _gh_since(), resolve_subs=True)
+    assert why is None and [i["number"] for i in issues] == [140]
+    assert cut["pages"] == 1 and "rate limit" in cut["reason"]
+    _fake_gh(tmp_path, monkeypatch, _gh_scenario())
+    monkeypatch.setattr(m, "MAX_PAGES", 3)
+    issues, _why, cut = m._gh_issues(out, _gh_since(), resolve_subs=True)
+    assert {i["number"] for i in issues} == {140, 142, 143} and cut["pages"] == 3 and "page limit" in cut["reason"]
+    monkeypatch.setattr(m, "MAX_PAGES", 7)  # five list pages, the epic's second sub-issue page, one batch
+    issues, _why, cut = m._gh_issues(out, _gh_since(), resolve_subs=True)
+    epic = next(i for i in issues if i["number"] == 700)
+    assert cut is None and epic["subs_complete"] is False and len(epic["subs"]) == 51
+    # no sub-issues asked: nothing resolved, no follow-up, no batch
+    calls = _fake_gh(tmp_path, monkeypatch, _gh_scenario())
+    issues, _why, cut = m._gh_issues(out, _gh_since(), resolve_subs=False)
+    epic = next(i for i in issues if i["number"] == 700)
+    assert cut is None and epic["subs"] == [] and epic["subs_complete"] is False and epic["sub_total"] == 61
+    assert {c["kind"] for c in calls()} == {"closed", "open", "late"}
+
+
+def test_outcomes_asks_for_sub_issues_only_for_a_label_or_title_marker(render, tmp_path):
+    from datetime import datetime, timedelta, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    now = datetime(2026, 12, 31, tzinfo=timezone.utc)
+    seen: list = []
+    m.outcomes_table(out, days=30, now=now, fetch=_fetch([], seen=seen))
+    assert seen == [(now - timedelta(days=30), False)]  # epic-closed reads no sub-issue
+    for marker in ("label:acceptance", "title:Abnahme"):
+        (out / "docs/process/optimization.local.json").write_text(
+            json.dumps({"outcomes": {"usable": marker}}), encoding="utf-8")
+        m.outcomes_table(out, days=30, now=now, fetch=_fetch([], seen=seen))
+        assert seen[-1] == (now - timedelta(days=30), True)
+
+
+def test_outcomes_cut_list_is_incomplete_and_an_unread_epic_is_missing(render, tmp_path, capsys):
+    """Two separate consequences (#417 r1 M3): a cut list makes the report incomplete and leaves
+    every quality as it is; an epic whose sub-issues were not all read is `missing`, counted,
+    never in `reached`."""
+    from datetime import datetime, timezone
+    out = _flow_repo(render, tmp_path)
+    m = _flow_module(out)
+    (out / "docs/process/optimization.local.json").write_text(
+        json.dumps({"outcomes": {"usable": "label:acceptance"}}), encoding="utf-8")
+    accept = _issue(12, "Acceptance run", "CLOSED", ["acceptance"], closed="2026-11-30T00:00:00Z")
+    whole = _issue(100, "[EPIC] whole", subs=[accept])
+    unread = _issue(101, "[EPIC] unread", subs=[accept], subs_complete=False)
+    cut = {"pages": 40, "reason": "page limit (40)", "list": "open"}
+    now = datetime(2026, 12, 31, tzinfo=timezone.utc)
+    t = m.outcomes_table(out, days=3650, now=now, fetch=_fetch([whole, unread], cut=cut))
+    ep = {e["number"]: e for e in t["epics"]}
+    assert ep[100]["quality"] == "measured"  # the cut changes no quality
+    assert ep[101]["quality"] == "missing" and ep[101]["usable_at"] is None
+    assert t["o1_epic_usable"]["n"] == 1 and t["epics_unread"] == 1
+    assert t["complete"] is False and t["cut"] == cut
+    assert t["sample"] == "cut after 40 page(s) of the open list (page limit (40))"
+    whole_t = m.outcomes_table(out, days=3650, now=now, fetch=_fetch([whole]))
+    assert whole_t["complete"] is True and whole_t["cut"] is None and whole_t["epics_unread"] == 0
+    m._gh_issues = _fetch([whole, unread], cut=cut)
+    assert m.outcomes(out) == 0
+    text = capsys.readouterr().out
+    assert "list cut after 40 page(s) of the open list (page limit (40)) — epics not read do not appear" in text
+    assert "1 epic(s) with sub-issues not all read: missing, never usable" in text
 
 
 def test_outcomes_cli_text_names_the_blind_spot_or_says_unavailable(render, tmp_path, capsys):
     out = _flow_repo(render, tmp_path)
     m = _flow_module(out)
-    m._gh_issues = lambda _root: (None, "gh is not installed")
+    m._gh_issues = lambda _r, _s, **_k: (None, "gh is not installed", None)
     assert m.outcomes(out) == 0
     assert "unavailable: gh is not installed — outcomes skipped (not zero)" in capsys.readouterr().out
-    m._gh_issues = lambda _root: ([_issue(202, "no origin", labels=["bug"], created="2099-01-01T00:00:00Z")], None)
+    m._gh_issues = _fetch([_issue(202, "no origin", labels=["bug"], created="2099-01-01T00:00:00Z")])
     assert m.outcomes(out) == 0
     text = capsys.readouterr().out
     assert "1 bug(s), cause and channel on 0% (target 80%) — blind spot" in text

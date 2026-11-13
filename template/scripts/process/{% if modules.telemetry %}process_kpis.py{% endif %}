@@ -50,7 +50,8 @@ difference. See "honest ceiling" in the module doc.
                                                 # occupancy, delay, owner effort, tokens
   process_kpis.py outcomes      [--days D] [--json]
                                                 # value: epics to usable, disruptive bugs to
-                                                # fixed; bug origin coverage (cause × channel)
+                                                # fixed; bug origin coverage (cause × channel);
+                                                # all open issues and those changed in the window
   process_kpis.py nodes         [--days D] [--json]
                                                 # per gate: cost, blocks, distinct inputs,
                                                 # sole blocks, flips, triaged blocks
@@ -3668,52 +3669,224 @@ OUTCOME_DEFAULTS = {"epic_title_prefix": "[EPIC]", "epic_labels": ["type:epic", 
 _QUALITY_ORDER = ("measured", "estimated", "proxy")
 CAUSES = ("regression", "preexisting", "unknown")
 CHANNELS = ("operator", "agent", "monitor", "other")
-_ISSUES_QUERY = """query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
-issues(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title state stateReason createdAt
-closedAt labels(first:30){nodes{name}} subIssuesSummary{total completed}
-subIssues(first:50){nodes{number title state stateReason closedAt labels(first:30){nodes{name}}}}}}}}"""
+# The reader pages instead of reading a window (#417): a consumer's product epic fell out of "the
+# 100 most recently updated issues". The closed issues changed since the window's start come first,
+# then every open one — a stop loses the oldest open issues, not the window's bugs and fixes —,
+# each paged by creation, so an issue changed between two pages moves no cursor. Sub-issues come
+# as numbers and are resolved against that list, the rest in batches. One budget for all queries.
+RATE_FLOOR = 500  # GraphQL points left under which the reader stops
+MAX_PAGES = 40  # queries per run: list pages, sub-issue pages and batches together
+_BATCH = 50  # aliases per batch query
+_ISSUE_FIELDS = "number title state stateReason createdAt closedAt updatedAt labels(first:30){nodes{name}}"
+_SUB_PAGE = "nodes{number repository{nameWithOwner}} pageInfo{hasNextPage endCursor}"
+_ISSUES_QUERY = ("query($owner:String!,$name:String!,$after:String<SINCE_VAR>){rateLimit{remaining} "
+                 "repository(owner:$owner,name:$name){issues(first:100,after:$after,states:<STATES>,<FILTER>"
+                 "orderBy:{field:CREATED_AT,direction:<DIRECTION>}){pageInfo{hasNextPage endCursor} nodes{"
+                 + _ISSUE_FIELDS + " subIssuesSummary{total completed} subIssues(first:100){" + _SUB_PAGE
+                 + "}}}}}")
+_SUBS_QUERY = ("query($owner:String!,$name:String!,$number:Int!,$after:String){rateLimit{remaining} "
+               "repository(owner:$owner,name:$name){issue(number:$number){subIssues(first:100,after:$after){"
+               + _SUB_PAGE + "}}}}")
+# the three lists, in this order: (name, states, direction, filtered since); the third holds
+# what closed while the first two were read — open during the first, closed before the second
+_ISSUE_LISTS = (("closed", "CLOSED", "ASC", "window"), ("open", "OPEN", "DESC", None),
+                ("closed-meanwhile", "CLOSED", "ASC", "run"))
 
 
-def _gh_issues(root: Path) -> tuple[list[dict] | None, str | None]:
-    """The 100 most recently updated issues with their sub-issues, flattened;
-    (None, why) when gh or the repository cannot be read."""
+def _iso_z(when: datetime) -> str:
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _list_query(states: str, direction: str, filtered: bool) -> str:
+    return (_ISSUES_QUERY.replace("<SINCE_VAR>", ",$since:DateTime" if filtered else "")
+            .replace("<FILTER>", "filterBy:{since:$since}," if filtered else "")
+            .replace("<STATES>", states).replace("<DIRECTION>", direction))
+
+
+def _gh_graphql(gh: str, root: Path, query: str, args: list[str]) -> tuple[dict | None, str | None]:
+    """One GraphQL call through `gh`: (its `data`, why it failed). On a GraphQL error `gh` exits
+    non-zero and still prints the `data` that resolved — read, never thrown away."""
     import json  # noqa: PLC0415
+    try:
+        r = subprocess.run([gh, "api", "graphql", "-H", "GraphQL-Features: sub_issues", "-f", f"query={query}",
+                            *args], capture_output=True, text=True, timeout=120, cwd=str(root))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"gh failed ({exc})"
+    try:
+        answer = json.loads(r.stdout)
+    except ValueError:
+        answer = None
+    data = answer.get("data") if isinstance(answer, dict) else None
+    data = data if isinstance(data, dict) else None
+    if r.returncode != 0:
+        return data, f"gh api graphql failed: {r.stderr.strip()[:200]}"
+    return data, None if data is not None else "gh returned an unreadable answer"
+
+
+class _Budget:
+    """What one run may still ask: MAX_PAGES queries in all, none once GitHub's
+    `rateLimit.remaining` (asked with every query) fell under RATE_FLOOR."""
+
+    def __init__(self) -> None:
+        self.pages = 0
+        self.remaining: int | None = None
+
+    def spent(self) -> str | None:
+        if self.pages >= MAX_PAGES:
+            return f"page limit ({MAX_PAGES})"
+        if self.remaining is not None and self.remaining < RATE_FLOOR:
+            return f"rate limit ({self.remaining} left < {RATE_FLOOR})"
+        return None
+
+    def took(self, data: dict | None) -> None:
+        self.pages += 1
+        left = ((data or {}).get("rateLimit") or {}).get("remaining")
+        if isinstance(left, int) and not isinstance(left, bool):
+            self.remaining = left
+
+
+def _gh_repo(gh: str, root: Path) -> tuple[str, str] | str:
+    """(owner, name) of this clone's GitHub repository, or why not."""
+    try:
+        repo = subprocess.run([gh, "repo", "view", "--json", "owner,name", "-q", '.owner.login + "/" + .name'],
+                              capture_output=True, text=True, timeout=60, cwd=str(root))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return f"gh failed ({exc})"
+    if repo.returncode != 0 or "/" not in repo.stdout:
+        return "gh cannot name this repository"
+    owner, name = repo.stdout.strip().split("/", 1)
+    return owner, name
+
+
+def _flat_issue(n: dict, repo: str) -> dict:
+    return {"number": n.get("number"), "title": n.get("title") or "", "state": n.get("state"),
+            "stateReason": n.get("stateReason"), "createdAt": n.get("createdAt"), "closedAt": n.get("closedAt"),
+            "updatedAt": n.get("updatedAt"), "repository": repo,
+            "labels": [lb.get("name") for lb in ((n.get("labels") or {}).get("nodes") or [])]}
+
+
+def _sub_refs(page: dict | None) -> tuple[list[tuple[str, int]], str | None]:
+    """(repository, number) of a page of sub-issues, and the cursor of the next page."""
+    page = page or {}
+    refs = [((c.get("repository") or {}).get("nameWithOwner") or "", c.get("number"))
+            for c in page.get("nodes") or [] if isinstance(c, dict) and isinstance(c.get("number"), int)]
+    info = page.get("pageInfo") or {}
+    return refs, (info.get("endCursor") if info.get("hasNextPage") else None)
+
+
+def _batch_query(refs: list[tuple[str, int]], body: str) -> str:
+    """One query with an alias per issue (`aN:repository(owner,name){issue(number:N)}`)."""
+    import json  # noqa: PLC0415
+    parts = []
+    for i, (repo, number) in enumerate(refs):
+        owner, _, name = repo.partition("/")
+        parts.append(f"a{i}:repository(owner:{json.dumps(owner)},name:{json.dumps(name)})"
+                     f"{{issue(number:{int(number)}){{{body}}}}}")
+    return "query{rateLimit{remaining} " + " ".join(parts) + "}"
+
+
+def _gh_issues(root: Path, since: datetime, *, resolve_subs: bool
+               ) -> tuple[list[dict] | None, str | None, dict | None]:
+    """(issues, why, cut): the closed issues changed since `since`, then every open one, then the
+    ones closed while the run read — merged by number, the newer `updatedAt` winning. Each
+    carries `subs_complete`; with `resolve_subs` its sub-issues are resolved into `subs` (against
+    the list, the rest in batches), without it `subs` stays empty. `cut` names a stop of the
+    list (pages read, reason, list); (None, why, None) when gh or the repository cannot be read."""
     import shutil  # noqa: PLC0415
 
     gh = shutil.which("gh")
     if not gh:
-        return None, "gh is not installed"
-    try:
-        repo = subprocess.run([gh, "repo", "view", "--json", "owner,name", "-q", '.owner.login + "/" + .name'],
-                              capture_output=True, text=True, timeout=60, cwd=str(root))
-        if repo.returncode != 0 or "/" not in repo.stdout:
-            return None, "gh cannot name this repository"
-        owner, name = repo.stdout.strip().split("/", 1)
-        r = subprocess.run([gh, "api", "graphql", "-H", "GraphQL-Features: sub_issues",
-                            "-f", f"query={_ISSUES_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}"],
-                           capture_output=True, text=True, timeout=120, cwd=str(root))
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return None, f"gh failed ({exc})"
-    if r.returncode != 0:
-        return None, f"gh api graphql failed: {r.stderr.strip()[:200]}"
-    try:
-        nodes = json.loads(r.stdout)["data"]["repository"]["issues"]["nodes"]
-    except (ValueError, KeyError, TypeError):
-        return None, "gh returned an unreadable answer"
+        return None, "gh is not installed", None
+    repo = _gh_repo(gh, root)
+    if isinstance(repo, str):
+        return None, repo, None
+    owner, name = repo
+    own = f"{owner}/{name}"
+    started = datetime.now(timezone.utc)
+    budget = _Budget()
+    found: dict[int, dict] = {}
+    cut: dict | None = None
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    for label, states, direction, filtered in _ISSUE_LISTS:
+        query = _list_query(states, direction, filtered is not None)
+        cursor: str | None = None
+        while cut is None:
+            reason = budget.spent()
+            if reason:
+                cut = {"pages": budget.pages, "reason": reason, "list": label}
+                break
+            args = ["-f", f"owner={owner}", "-f", f"name={name}"]
+            if filtered:
+                args += ["-f", f"since={_iso_z(since if filtered == 'window' else started)}"]
+            if cursor:  # the first page sends none
+                args += ["-f", f"after={cursor}"]
+            data, why = _gh_graphql(gh, root, query, args)
+            budget.took(data)
+            page = ((data or {}).get("repository") or {}).get("issues")
+            if not isinstance(page, dict):
+                if budget.pages == 1:
+                    return None, why or "gh returned an unreadable answer", None
+                cut = {"pages": budget.pages - 1, "reason": why or "unreadable answer", "list": label}
+                break
+            for node in page.get("nodes") or []:
+                n = node.get("number") if isinstance(node, dict) else None
+                if not isinstance(n, int):
+                    continue
+                old = found.get(n)
+                if old is None or (_aware(node.get("updatedAt")) or floor) >= (_aware(old.get("updatedAt")) or floor):
+                    found[n] = node
+            info = page.get("pageInfo") or {}
+            cursor = info.get("endCursor") if info.get("hasNextPage") else None
+            if not cursor:
+                break
+        if cut is not None:
+            break
 
-    def _flat(n: dict) -> dict:
-        return {"number": n.get("number"), "title": n.get("title") or "", "state": n.get("state"),
-                "stateReason": n.get("stateReason"),
-                "createdAt": n.get("createdAt"), "closedAt": n.get("closedAt"),
-                "labels": [lb.get("name") for lb in ((n.get("labels") or {}).get("nodes") or [])]}
-    out = []
-    for n in nodes:
-        item = _flat(n)
-        item["sub_total"] = (n.get("subIssuesSummary") or {}).get("total") or 0
-        item["sub_done"] = (n.get("subIssuesSummary") or {}).get("completed") or 0
-        item["subs"] = [_flat(c) for c in ((n.get("subIssues") or {}).get("nodes") or [])]
+    out: list[dict] = []
+    refs: dict[int, list[tuple[str, int]]] = {}
+    read_all: dict[int, bool] = {}
+    for n, node in sorted(found.items()):
+        item = _flat_issue(node, own)
+        summary = node.get("subIssuesSummary") or {}
+        item["sub_total"] = summary.get("total") or 0
+        item["sub_done"] = summary.get("completed") or 0
+        item["subs"] = []
+        refs[n], more = _sub_refs(node.get("subIssues"))
+        while resolve_subs and more:  # an epic with more than 100 sub-issues pages on
+            if budget.spent():
+                break
+            data, _why = _gh_graphql(gh, root, _SUBS_QUERY, ["-f", f"owner={owner}", "-f", f"name={name}",
+                                                             "-F", f"number={n}", "-f", f"after={more}"])
+            budget.took(data)
+            page = (((data or {}).get("repository") or {}).get("issue") or {}).get("subIssues")
+            if not isinstance(page, dict):
+                break
+            got, more = _sub_refs(page)
+            refs[n] += got
+        read_all[n] = more is None and len(refs[n]) >= item["sub_total"]
         out.append(item)
-    return out, None
+    if not resolve_subs:
+        for item in out:
+            item["subs_complete"] = item["sub_total"] == 0 and not refs[item["number"]]
+        return out, None, cut
+
+    resolved: dict[tuple[str, int], dict] = {(own, n): _flat_issue(node, own) for n, node in found.items()}
+    needed = list(dict.fromkeys(r for rs in refs.values() for r in rs if r not in resolved))
+    for i in range(0, len(needed), _BATCH):
+        if budget.spent():
+            break
+        chunk = needed[i:i + _BATCH]
+        data, _why = _gh_graphql(gh, root, _batch_query(chunk, _ISSUE_FIELDS), [])
+        budget.took(data)
+        for j, ref in enumerate(chunk):  # an entry missing beside a GraphQL error: moved or deleted
+            node = ((data or {}).get(f"a{j}") or {}).get("issue")
+            if isinstance(node, dict):
+                resolved[ref] = _flat_issue(node, ref[0])
+    for item in out:
+        mine = refs[item["number"]]
+        item["subs"] = [resolved[r] for r in mine if r in resolved]
+        item["subs_complete"] = read_all[item["number"]] and len(item["subs"]) == len(mine)
+    return out, None, cut
 
 
 def _outcome_config(root: Path) -> tuple[dict, list[str]]:
@@ -3745,6 +3918,10 @@ def _outcome_config(root: Path) -> tuple[dict, list[str]]:
     return cfg, problems
 
 
+def _cut_text(cut: dict) -> str:
+    return f"cut after {cut.get('pages')} page(s) of the {cut.get('list', 'issue')} list ({cut.get('reason')})"
+
+
 def _days(a: datetime | None, b: datetime | None) -> float | None:
     return None if a is None or b is None else round((b - a).total_seconds() / 86400, 2)
 
@@ -3754,7 +3931,11 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=days)
     cfg, config_problems = _outcome_config(root)
-    issues, why = (fetch or _gh_issues)(root)
+    usable = cfg["usable"]
+    kind, _, marker = str(usable).partition(":")
+    # only an acceptance sub-issue by label or title needs the sub-issues read (r2 m5)
+    resolve = usable != "epic-closed" and kind in ("label", "title")
+    issues, why, cut = (fetch or _gh_issues)(root, since, resolve_subs=resolve)
     if issues is None:
         return {"available": False, "reason": why, "days": days}
     delivered: dict[int, tuple[datetime | None, str]] = {}
@@ -3776,8 +3957,8 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
         closed = _closed(issue)
         return closed, "proxy" if closed else "missing"
 
-    usable = cfg["usable"]
     epics = []
+    unread = 0
     for it in issues:
         is_epic = (it.get("sub_total", 0) > 0 or it["title"].startswith(cfg["epic_title_prefix"])
                    or bool(set(it["labels"]) & set(cfg["epic_labels"])))
@@ -3787,8 +3968,11 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
         if usable == "epic-closed":
             at = _closed(it)
             quality = "proxy" if at else "open"
+        elif resolve and not it.get("subs_complete"):
+            # its sub-issues not all read or resolved: the acceptance issue may be among the rest
+            at, quality = None, "missing"
+            unread += 1
         else:
-            kind, _, marker = str(usable).partition(":")
             accept = [c for c in it.get("subs", [])
                       if (kind == "label" and marker in c["labels"]) or (kind == "title" and marker in c["title"])]
             done = [_done(c) for c in accept]
@@ -3805,6 +3989,7 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
         epics.append({"number": it["number"], "title": it["title"], "created": created,
                       "usable_at": at, "quality": quality,
                       "days_to_usable": span,
+                      "subs_complete": bool(it.get("subs_complete")) if resolve else None,
                       "sub_issues": {"total": it.get("sub_total", 0), "done": it.get("sub_done", 0)}})
     reached = [e for e in epics if e["usable_at"] and e["usable_at"] >= since]
     bugs = [it for it in issues if set(it["labels"]) & set(cfg["bug_labels"])
@@ -3833,9 +4018,12 @@ def outcomes_table(root: Path, *, days: int = _OUTCOME_DAYS, now: datetime | Non
                 "quality": ("missing" if not vals else "measured" if qs == {"measured"} else
                             "estimated" if qs <= {"measured", "estimated"} else "proxy")}
     return {
-        "available": True, "days": days, "sample": "the 100 most recently updated issues",
+        "available": True, "days": days,
+        # a cut list leaves every quality as it is; the report is incomplete (r2 m3)
+        "complete": cut is None, "cut": cut,
+        "sample": "all open issues and those changed in the window" if cut is None else _cut_text(cut),
         "config": cfg, "config_problems": config_problems,
-        "epics": epics,
+        "epics": epics, "epics_unread": unread,
         "o1_epic_usable": _median_block([(e["days_to_usable"], e["quality"]) for e in reached]),
         "o2_disruptive_fixed": {**_median_block(fixes), "open": len(disruptive) - len(fixes)},
         "bug_origin": {
@@ -3865,6 +4053,10 @@ def outcomes(root: Path | None = None, *, days: int = _OUTCOME_DAYS, as_json: bo
     o1, o2, bo = t["o1_epic_usable"], t["o2_disruptive_fixed"], t["bug_origin"]
     for problem in t["config_problems"]:
         print(f"  mandate: {problem}")
+    if not t["complete"]:
+        print(f"  list {_cut_text(t['cut'])} — epics not read do not appear")
+    if t["epics_unread"]:
+        print(f"  {t['epics_unread']} epic(s) with sub-issues not all read: missing, never usable")
     print(f"  epics       {len(t['epics'])} seen; usable in the window: n={o1['n']}, median "
           f"{o1['median_days'] if o1['median_days'] is not None else '—'} d [{o1['quality']}] "
           f"(marker: {t['config']['usable']})")
