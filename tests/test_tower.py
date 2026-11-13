@@ -1409,3 +1409,28 @@ def test_a_report_carries_its_track_and_the_network_calls_take_a_deadline(render
     report.sync_reports(out, timeout=15)
     report.fetch_reports(out)
     assert seen == [("fetch", 15), ("update-ref", 15), ("push", 15), ("fetch", 60)]
+
+
+def test_reports_are_published_only_under_a_steering_block(render, tmp_path, monkeypatch):
+    """`done` from the train or `finish` reaches the other host's WIP count only once published:
+    with `steering` in the mandate the reports are synced, without it nothing is pushed."""
+    import importlib.util
+    import json
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    spec = importlib.util.spec_from_file_location("report_pub", out / "scripts/process/report.py")
+    rep = importlib.util.module_from_spec(spec)
+    import sys
+    sys.path.insert(0, str(out / "scripts/process"))
+    try:
+        spec.loader.exec_module(rep)
+        calls = []
+        monkeypatch.setattr(rep, "sync_reports", lambda root, timeout=60: calls.append(timeout) or True)
+        assert rep.publish_if_steered(out) is None and calls == []
+        (out / "docs/process/optimization.local.json").write_text(
+            json.dumps({"steering": {"wip_per_track": 2}}), encoding="utf-8")
+        assert rep.publish_if_steered(out) is True and calls == [15]
+        monkeypatch.setattr(rep, "sync_reports", lambda root, timeout=60: False)
+        assert rep.publish_if_steered(out) is False
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+
