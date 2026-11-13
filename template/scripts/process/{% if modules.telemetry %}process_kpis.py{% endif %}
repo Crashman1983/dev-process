@@ -52,6 +52,10 @@ difference. See "honest ceiling" in the module doc.
                                                 # value: epics to usable, disruptive bugs to
                                                 # fixed; bug origin coverage (cause × channel);
                                                 # all open issues and those changed in the window
+  process_kpis.py intake        [--weeks N] [--label L] [--json]
+                                                # issues opened, closed and open week by week;
+                                                # in progress by label and tower, with claim,
+                                                # days, branch and landed commits
   process_kpis.py nodes         [--days D] [--json]
                                                 # per gate: cost, blocks, distinct inputs,
                                                 # sole blocks, flips, triaged blocks
@@ -4070,6 +4074,213 @@ def outcomes(root: Path | None = None, *, days: int = _OUTCOME_DAYS, as_json: bo
     return 0
 
 
+# --- intake: what comes in, what is in progress, how it grows (#412, #413) -------------------
+# Readings over merged work miss the open work: issues opened against issues closed, and the
+# issues in progress at once. In progress has two sources: open issues with the label (the
+# example schema of github-issues.md — an argument, no mandate key) and the issue of each
+# worker's last report (`tower.latest_reports`, the owner of that rule). A branch given up after
+# `planned`, `blocked` or `pushed` holds its issue while it is open: estimated, its age beside it.
+# Growth is two numbers, never added into one: commits on the issue's branches
+# (`tower.issue_branch_commits`) and commits of its merge events (`merge_events` with
+# `_own_issues`; a `Refs #N` lands nothing for N). Nothing here refuses or warns.
+IN_PROGRESS_LABEL = "status:in-progress"
+_INTAKE_WEEKS = 4
+_REPORT_OVER = ("done", "idle")  # a worker whose last report says this holds no issue
+_TIMELINE = ("number timelineItems(last:50,itemTypes:[LABELED_EVENT,UNLABELED_EVENT]){nodes{__typename "
+             "... on LabeledEvent{createdAt label{name}} ... on UnlabeledEvent{createdAt label{name}}}}")
+
+
+def _label_set_at(nodes: list, label: str) -> datetime | None:
+    """The last setting of `label` after its last removal; None when it is not set by these events."""
+    events = [(_aware(n.get("createdAt")), n.get("__typename")) for n in nodes
+              if isinstance(n, dict) and ((n.get("label") or {}).get("name") == label)]
+    removed = max((at for at, kind in events if kind == "UnlabeledEvent" and at), default=None)
+    added = [at for at, kind in events if kind == "LabeledEvent" and at and (removed is None or at > removed)]
+    return max(added) if added else None
+
+
+def _gh_label_claims(root: Path, numbers: list[int], label: str) -> tuple[dict[int, datetime], str | None]:
+    """{issue: when `label` was last set} from the issues' timelines, in batches of 50; (what was
+    read, why the rest was not)."""
+    import shutil  # noqa: PLC0415
+
+    gh = shutil.which("gh")
+    if not gh:
+        return {}, "gh is not installed"
+    repo = _gh_repo(gh, root)
+    if isinstance(repo, str):
+        return {}, repo
+    own = "/".join(repo)
+    budget = _Budget()
+    claims: dict[int, datetime] = {}
+    wanted = sorted(set(numbers))
+    for i in range(0, len(wanted), _BATCH):
+        reason = budget.spent()
+        if reason:
+            return claims, f"label events not all read ({reason})"
+        chunk = [(own, n) for n in wanted[i:i + _BATCH]]
+        data, _why = _gh_graphql(gh, root, _batch_query(chunk, _TIMELINE), [])
+        budget.took(data)
+        for j, (_repo, n) in enumerate(chunk):
+            items = ((((data or {}).get(f"a{j}") or {}).get("issue") or {}).get("timelineItems") or {})
+            at = _label_set_at(items.get("nodes") or [], label)
+            if at:
+                claims[n] = at
+    return claims, None
+
+
+def _report_issue(rec: dict) -> int | None:
+    n = rec.get("issue")
+    if isinstance(n, int) and not isinstance(n, bool):
+        return n
+    return int(n) if isinstance(n, str) and n.isdigit() else None
+
+
+def _value(value, quality: str) -> dict:
+    return {"value": value, "quality": quality if value is not None else "missing"}
+
+
+def intake_table(root: Path, *, weeks: int = _INTAKE_WEEKS, label: str = IN_PROGRESS_LABEL,
+                 now: datetime | None = None, fetch=None, label_claims=None) -> dict:
+    """Week by week the issues opened, closed (duplicates and `not planned` counted apart) and
+    open at the week's end; the issues in progress by label and by the tower, each with its
+    claim, its days since and its branch and landed commits."""
+    import report as _report  # noqa: PLC0415 — the reports' one reader
+    import tower  # noqa: PLC0415 — the last report per worker, the branch commits
+    now = now or datetime.now(timezone.utc)
+    issues, why, cut = (fetch or _gh_issues)(root, now - timedelta(days=7 * weeks), resolve_subs=False)
+    read = issues is not None
+    quality = "measured" if read else "missing"
+    rows = []
+    for w in range(weeks):
+        hi = now - timedelta(days=7 * w)
+        lo = hi - timedelta(days=7)
+        opened = closed = not_planned = stock = 0
+        for it in issues or []:
+            created, ended = _aware(it.get("createdAt")), _aware(it.get("closedAt"))
+            ended = ended if it.get("state") == "CLOSED" else None
+            opened += bool(created and lo <= created < hi)
+            if ended and lo <= ended < hi:
+                closed += 1
+                not_planned += it.get("stateReason") not in (None, "COMPLETED")
+            stock += bool(created and created < hi and not (ended and ended < hi))
+        rows.append({"week": -w, "from": lo, "to": hi, **{
+            key: {"value": n if read else None, "quality": quality}
+            for key, n in (("opened", opened), ("closed", closed), ("closed_not_planned", not_planned),
+                           ("open", stock))}})
+
+    by_number = {it["number"]: it for it in issues or []}
+    labelled = sorted(n for n, it in by_number.items() if it.get("state") == "OPEN" and label in it.get("labels", []))
+    label_at, claims_why = ((label_claims or _gh_label_claims)(root, labelled, label) if labelled else ({}, None))
+    fetched = _report.fetch_reports(root)  # the other host's published reports, first
+    history = sorted(_report.read_reports(root, remote=True), key=lambda r: r.get("epoch", 0))
+    towered: dict[int, dict] = {}
+    for rec in tower.latest_reports(root, remote=True):
+        n = _report_issue(rec)
+        if n is None or rec.get("state") in _REPORT_OVER:
+            continue
+        it = by_number.get(n)
+        if read and ((it is not None and it.get("state") != "OPEN") or (it is None and cut is None)):
+            continue  # closed — the list holds every open issue
+        streak = None  # the first report of this worker's current streak on this issue
+        for r in reversed([r for r in history if r.get("worker") == rec["worker"]]):
+            if _report_issue(r) != n:
+                break
+            streak = r
+        since = datetime.fromtimestamp((streak or rec).get("epoch", 0), tz=timezone.utc)
+        last = datetime.fromtimestamp(rec.get("epoch", 0), tz=timezone.utc)
+        mine = {"worker": rec["worker"], "state": rec.get("state"), "since": since,
+                "age_days": round((now - last).total_seconds() / 86400, 1)}
+        if n not in towered or since < towered[n]["since"]:
+            towered[n] = mine
+    notes = [] if fetched else ["other hosts not read (the published reports could not be fetched)"]
+    if not read:
+        notes.append(f"issue state not read ({why}): a closed issue may count")
+    elif cut is not None:
+        notes.append("issue list cut: an issue past the cut may be closed and still count")
+
+    got = merge_events(root)
+    events, table = got["events"], got.get("table") or {}
+    entries = []
+    for n in sorted(set(labelled) | set(towered)):
+        it = by_number.get(n)
+        source = "both" if n in labelled and n in towered else "label" if n in labelled else "tower"
+        found = ([(label_at[n], "measured", "label")] if n in label_at else []) + (
+            [(towered[n]["since"], "estimated", "tower")] if n in towered else [])
+        created = _aware((it or {}).get("createdAt"))
+        at, claim_q, claim_from = (min(found, key=lambda c: c[0]) if found else
+                                   (created, "estimated", "created") if created else (None, "missing", None))
+        branch = tower.issue_branch_commits(root, n, at) if at else None
+        landed: dict = {"value": None, "quality": "missing"}
+        if at and events is not None:
+            own = [ev for ev in events if ev["when"] > at and n in _own_issues(ev)]
+            if all(ev["bounded"] for ev in own):  # an unbounded finish range: its commits are unknown
+                count = sum(1 for ev in own for s in ev["commits"] if len(table.get(s, {}).get("parents", ())) < 2)
+                landed = {"value": count, "quality": "estimated", "mixed": any(ev["mixed"] for ev in own)}
+        total = None if branch is None or landed["value"] is None else branch + landed["value"]
+        entries.append({
+            "issue": n, "title": (it or {}).get("title"), "source": source,
+            "open": True if it is not None and it.get("state") == "OPEN" else None,
+            "claimed": {"value": at, "quality": claim_q}, "claim_from": claim_from,
+            "days": _value(round((now - at).total_seconds() / 86400, 1) if at else None, claim_q),
+            "branch_commits": _value(branch, "estimated"), "landed_commits": landed,
+            "commits": _value(total, "estimated"), "tower": towered.get(n)})
+    entries.sort(key=lambda e: (-((e["branch_commits"]["value"] or 0) + (e["landed_commits"]["value"] or 0)),
+                                e["issue"]))
+    return {
+        "weeks": weeks, "label": label,
+        "issues": {"read": read, "why": why, "complete": (cut is None) if read else None, "cut": cut},
+        "intake": rows,
+        "tower": {"fetched": fetched, "note": "; ".join(notes) or None},
+        "label_claims": {"why": claims_why},
+        "counts": {
+            "label": {"value": len(labelled) if read else None, "quality": quality},
+            "tower": {"value": len(towered), "quality": "estimated"},
+            "total": {"value": len(entries),
+                      "quality": "estimated" if towered else "measured" if read else "missing"}},
+        "in_progress": entries,
+    }
+
+
+def intake(root: Path | None = None, *, weeks: int = _INTAKE_WEEKS, label: str = IN_PROGRESS_LABEL,
+           as_json: bool = False) -> int:
+    import json  # noqa: PLC0415
+    root = root or Path.cwd()
+    t = intake_table(root, weeks=weeks, label=label)
+    if as_json:
+        print(json.dumps(t, indent=2, default=lambda o: o.isoformat() if isinstance(o, datetime) else str(o)))
+        return 0
+    print(f"[intake] issues in, out and in progress over {weeks} week(s) — in progress by the label "
+          f"`{label}` and by each worker's last report")
+    iss = t["issues"]
+    if not iss["read"]:
+        print(f"  issues not read ({iss['why']}) — intake and the label part missing (not zero)")
+    elif not iss["complete"]:
+        print(f"  list {_cut_text(iss['cut'])} — the counts are incomplete")
+    for r in t["intake"] if iss["read"] else []:
+        print(f"  week {r['week']}: opened {r['opened']['value']}, closed {r['closed']['value']} "
+              f"({r['closed_not_planned']['value']} as duplicate or not planned), open at its end {r['open']['value']}")
+    c = t["counts"]
+    print(f"  in progress {_num(c['total']['value'])} [{c['total']['quality']}] — label "
+          f"{_num(c['label']['value'])} [{c['label']['quality']}], tower {c['tower']['value']} [{c['tower']['quality']}]")
+    if t["tower"]["note"]:
+        print(f"  tower: {t['tower']['note']}")
+    for w in t["in_progress"]:
+        landed = w["landed_commits"]
+        rep = w["tower"]
+        print(f"    #{w['issue']} [{w['source']}] {_num(w['days']['value'])} d since the claim "
+              f"({w['claim_from'] or 'unknown'}, {w['claimed']['quality']}) — branch commits "
+              f"{_num(w['branch_commits']['value'])}, landed {_num(landed['value'])}"
+              + (" (a mixed range)" if landed.get("mixed") else "")
+              + f", sum {_num(w['commits']['value'])} [{w['commits']['quality']}]"
+              + (f"; last report {rep['state']} by {rep['worker']}, {_num(rep['age_days'])} d ago" if rep else ""))
+    n = len(t["in_progress"])
+    lvl = _level(n, False, True, _N_THRESHOLD)
+    print(f"  {confidence(n, sample_biased=True)} — the tower part and the commit counts are estimated")
+    print(f"  -> {action(lvl, 'an issue whose days and commits climb while others wait: split or finish it before starting another', thin='read it again next week; the trend over weeks says more than one count')}")
+    return 0
+
+
 # --- nodes: every gate as a node of the check graph -------------------------
 # The gate runner leaves one line per gate run in the common git dir
 # (`process-gate-events.jsonl`). A node's cost is measured directly; what it
@@ -4315,6 +4526,11 @@ def main() -> int:
     oc = sub.add_parser("outcomes")
     oc.add_argument("--days", type=int, default=_OUTCOME_DAYS)
     oc.add_argument("--json", action="store_true")
+    ik = sub.add_parser("intake")
+    ik.add_argument("--weeks", type=int, default=_INTAKE_WEEKS)
+    ik.add_argument("--label", default=IN_PROGRESS_LABEL,
+                    help=f"the label that marks an issue in progress (default {IN_PROGRESS_LABEL})")
+    ik.add_argument("--json", action="store_true")
     nd = sub.add_parser("nodes")
     nd.add_argument("--days", type=int, default=_NODE_DAYS)
     nd.add_argument("--json", action="store_true")
@@ -4351,6 +4567,8 @@ def main() -> int:
         return losses(days=args.days, as_json=args.json)
     if args.cmd == "outcomes":
         return outcomes(days=args.days, as_json=args.json)
+    if args.cmd == "intake":
+        return intake(weeks=args.weeks, label=args.label, as_json=args.json)
     if args.cmd == "nodes":
         return nodes(days=args.days, as_json=args.json)
 

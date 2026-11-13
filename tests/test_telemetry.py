@@ -1198,6 +1198,201 @@ def test_outcomes_cli_text_names_the_blind_spot_or_says_unavailable(render, tmp_
     assert "1 bug(s), cause and channel on 0% (target 80%) — blind spot" in text
 
 
+def _reports(out: Path, *rows) -> None:
+    """Report lines (worker, issue, state, aware datetime) into this host's ledger."""
+    d = out / ".git/process-tower"
+    d.mkdir(parents=True, exist_ok=True)
+    with (d / "reports.jsonl").open("a", encoding="utf-8") as fh:
+        for worker, issue, state, when in rows:
+            fh.write(json.dumps({"ts": when.isoformat(), "epoch": int(when.timestamp()), "host": "h",
+                                 "worker": worker, "branch": worker, "issue": issue, "state": state,
+                                 "note": "", "cwd": ""}) + "\n")
+
+
+def _no_claims(_root, numbers, _label):
+    return {}, None
+
+
+def test_intake_without_gh_is_missing_and_keeps_the_tower_part(render, tmp_path):
+    """#412: without `gh` the intake and the label part are `missing`, never zeros; the tower
+    part is read and says it could not drop closed issues."""
+    out = _merges_repo(render, tmp_path)
+    m = _flow_module(out)
+    _reports(out, ("w1", 12, "planned", _dt(20)))
+    t = m.intake_table(out, weeks=2, now=_dt(31), fetch=lambda _r, _s, **_k: (None, "gh is not installed", None))
+    assert len(t["intake"]) == 2
+    for row in t["intake"]:
+        for key in ("opened", "closed", "closed_not_planned", "open"):
+            assert row[key] == {"value": None, "quality": "missing"}
+    assert t["issues"] == {"read": False, "why": "gh is not installed", "complete": None, "cut": None}
+    assert t["counts"]["label"] == {"value": None, "quality": "missing"}
+    assert t["counts"]["tower"] == {"value": 1, "quality": "estimated"}
+    [w] = t["in_progress"]
+    assert w["issue"] == 12 and w["source"] == "tower" and w["open"] is None
+    assert w["claimed"] == {"value": _dt(20), "quality": "estimated"} and w["claim_from"] == "tower"
+    assert "a closed issue may count" in t["tower"]["note"]
+
+
+def test_intake_counts_opened_closed_and_the_open_stock_week_by_week(render, tmp_path):
+    out = _merges_repo(render, tmp_path)
+    m = _flow_module(out)
+    dup = _issue(3, "c", "CLOSED", created=_at(23), closed=_at(24))
+    dup["stateReason"] = "DUPLICATE"
+    issues = [_issue(1, "a", created=_at(16)), _issue(2, "b", "CLOSED", created=_at(17), closed=_at(23)),
+              dup, _issue(4, "old")]
+    seen: list = []
+    t = m.intake_table(out, weeks=2, now=_dt(29), fetch=_fetch(issues, seen=seen), label_claims=_no_claims)
+    from datetime import timedelta
+    assert seen == [(_dt(29) - timedelta(days=14), False)]  # the window's start, no sub-issues
+    w0, w1 = t["intake"]
+    value = lambda row: tuple(row[k]["value"] for k in ("opened", "closed", "closed_not_planned", "open"))  # noqa: E731
+    assert value(w1) == (2, 0, 0, 3)  # #1, #2 opened; at its end #1, #2 and #4 open
+    assert value(w0) == (1, 2, 1, 2)  # #3 opened; #2 done and #3 a duplicate, counted apart
+    assert w0["opened"]["quality"] == "measured" and t["issues"]["complete"] is True
+    cut = {"pages": 40, "reason": "page limit (40)", "list": "open"}
+    t = m.intake_table(out, weeks=2, now=_dt(29), fetch=_fetch(issues, cut=cut), label_claims=_no_claims)
+    assert t["issues"]["complete"] is False and t["issues"]["cut"] == cut
+    assert t["intake"][0]["opened"]["quality"] == "measured"
+
+
+def test_intake_reads_in_progress_from_the_label_and_the_last_report_per_worker(render, tmp_path):
+    """In progress: open issues with the label (`measured`) and the issue of each worker's last
+    report that is not done or idle (`estimated`). A worker that moved on without `done` holds
+    the old issue no longer; a closed issue does not count; the claim is the earlier of the
+    label's last setting and the first report of the worker's current streak."""
+    out = _merges_repo(render, tmp_path)
+    m = _flow_module(out)
+    _reports(out,
+             ("w1", 5, "planned", _dt(10)), ("w1", 6, "planned", _dt(20)),  # moved on: #5 not held
+             ("w2", 7, "pushed", _dt(21)),  # #7 is closed
+             ("w3", 8, "done", _dt(22)),
+             ("w4", 9, "planned", _dt(5)), ("w4", 11, "planned", _dt(8)),
+             ("w4", 9, "blocked", _dt(15)), ("w4", 9, "planned", _dt(25)))  # the streak starts on the 15th
+    issues = [_issue(5, "five"), _issue(6, "six", labels=["status:in-progress"]),
+              _issue(7, "seven", "CLOSED", closed=_at(23)), _issue(8, "eight"), _issue(9, "nine"),
+              _issue(10, "ten", labels=["status:in-progress"], created=_at(2)), _issue(11, "eleven")]
+    asked: list = []
+
+    def claims(_root, numbers, label):
+        asked.append((sorted(numbers), label))
+        return {6: _dt(28), 10: _dt(12)}, None
+    t = m.intake_table(out, weeks=4, now=_dt(31), fetch=_fetch(issues), label_claims=claims)
+    assert asked == [([6, 10], "status:in-progress")]
+    got = {w["issue"]: w for w in t["in_progress"]}
+    assert set(got) == {6, 9, 10}
+    assert got[6]["source"] == "both" and got[6]["claimed"] == {"value": _dt(20), "quality": "estimated"}
+    assert got[9]["source"] == "tower" and got[9]["claimed"]["value"] == _dt(15)
+    assert got[9]["tower"]["state"] == "planned" and got[9]["tower"]["worker"] == "w4"
+    assert got[10]["source"] == "label" and got[10]["claim_from"] == "label"
+    assert got[10]["claimed"] == {"value": _dt(12), "quality": "measured"}
+    assert got[10]["days"] == {"value": 19.0, "quality": "measured"}
+    assert t["counts"]["label"] == {"value": 2, "quality": "measured"}
+    assert t["counts"]["tower"] == {"value": 2, "quality": "estimated"}
+    assert t["counts"]["total"] == {"value": 3, "quality": "estimated"}
+    # another label is an argument, not a mandate key
+    t = m.intake_table(out, weeks=4, now=_dt(31), fetch=_fetch(issues), label="doing", label_claims=claims)
+    assert len(asked) == 1  # no issue carries it: no timeline asked
+    assert {w["issue"] for w in t["in_progress"]} == {6, 9} and t["label"] == "doing"
+
+
+def test_intake_label_claim_is_the_last_setting_after_the_last_removal(render, tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    m = _flow_module(out)
+
+    def ev(kind, label, day):
+        return {"__typename": kind, "createdAt": f"2026-03-{day:02d}T09:00:00Z", "label": {"name": label}}
+    calls = _fake_gh(tmp_path, monkeypatch, {"since": "", "pages": {}, "issues": {}, "timeline": {
+        "10": [ev("LabeledEvent", "status:in-progress", 1), ev("UnlabeledEvent", "status:in-progress", 2),
+               ev("LabeledEvent", "status:in-progress", 3), ev("LabeledEvent", "other", 4)],
+        "11": [ev("LabeledEvent", "status:in-progress", 1), ev("UnlabeledEvent", "status:in-progress", 2)]}})
+    got, why = m._gh_label_claims(out, [10, 11], "status:in-progress")
+    assert why is None and got == {10: datetime(2026, 3, 3, 9, tzinfo=timezone.utc)}
+    [call] = calls()
+    assert "timelineItems(last:50,itemTypes:[LABELED_EVENT,UNLABELED_EVENT])" in call["query"]
+    assert "rateLimit{remaining}" in call["query"]
+
+
+def test_intake_counts_branch_and_landed_commits_apart(render, tmp_path):
+    """#413: two numbers per issue in progress, never added into one: commits on its branches
+    (`tower.issue_branch_commits`) and commits of its merge events (`merge_events` with
+    `_own_issues`) — a `Refs #N` lands nothing for N, a finish range without an earlier bound is
+    `missing`, a squash is no event and its branch keeps counting."""
+    out = _merges_repo(render, tmp_path)
+    m = _flow_module(out)
+    _finish_merge(out, "40-first", [
+        ("docs: plan first", {".process-work/plans/2026-03-02-first.md": _plan_text(40)}, _at(2)),
+        ("feat: first (#40)", {"src/first.py": _lines(3)}, _at(2, 10))], ["2026-03-02-first.md"], _at(3))
+    _train_merge(out, "20-feat", [("feat: one", {"src/one.py": _lines(2)}, _at(4)),
+                                  ("feat: two", {"src/two.py": _lines(2)}, _at(4, 10))],
+                 "train: merge 20-feat\n\nCloses #20\nRefs #21\nRefs #22", _at(5))
+    _g(out, "checkout", "-q", "-b", "30-rebuilt", "main")
+    _put(out, "feat: thirty a", {"src/thirty.py": "a\n"}, _at(6))
+    _g(out, "checkout", "-q", "main")
+    _put(out, "chore: main moves", {"src/main.py": "m\n"}, _at(7))
+    _g(out, "checkout", "-q", "30-rebuilt")
+    _g(out, "merge", "-q", "--no-ff", "-m", "Merge main", "main", when=_at(8))
+    _put(out, "feat: thirty b", {"src/thirty.py": "b\n"}, _at(9))
+    _g(out, "checkout", "-q", "-b", "31-squash", "main")
+    _put(out, "feat: squash a", {"src/sq.py": "a\n"}, _at(10))
+    _put(out, "feat: squash b", {"src/sq.py": "b\n"}, _at(11))
+    _g(out, "checkout", "-q", "main")
+    _g(out, "merge", "-q", "--squash", "31-squash")
+    _put(out, "feat: squash (#31)", {}, _at(12))
+    numbers = (20, 21, 22, 30, 31, 40)
+    _reports(out, *[(f"w{n}", n, "planned", _dt(1, 12)) for n in numbers])
+    t = m.intake_table(out, weeks=4, now=_dt(31), fetch=_fetch([_issue(n, f"issue {n}") for n in numbers]),
+                       label_claims=_no_claims)
+    got = {w["issue"]: w for w in t["in_progress"]}
+
+    def counts(n):
+        return got[n]["branch_commits"]["value"], got[n]["landed_commits"]["value"]
+    assert counts(20) == (0, 2)  # landed by the train; the branch holds nothing beyond main
+    assert counts(21) == counts(22) == (0, 0)  # a Refs is no work of the issue
+    assert counts(30) == (2, 0)  # neither main's commit nor the merge of main
+    assert counts(31) == (2, 0)  # the squash is no event
+    assert got[40]["landed_commits"]["value"] is None and got[40]["landed_commits"]["quality"] == "missing"
+    assert got[20]["commits"] == {"value": 2, "quality": "estimated"}
+    assert got[20]["branch_commits"]["quality"] == got[20]["landed_commits"]["quality"] == "estimated"
+    assert got[40]["commits"]["quality"] == "missing"
+    assert [w["issue"] for w in t["in_progress"]][:3] == [20, 30, 31]  # by the sum
+
+
+def test_intake_cli_prints_rows_and_json_carries_quality_per_field(render, tmp_path, monkeypatch, capsys):
+    import os
+    import time
+    from datetime import datetime, timezone
+    out = _merges_repo(render, tmp_path)
+    m = _flow_module(out)
+    _reports(out, ("w1", 12, "planned", datetime.fromtimestamp(time.time() - 86400, tz=timezone.utc)))
+    monkeypatch.setattr(m, "_gh_issues", _fetch([_issue(12, "twelve")]))
+    monkeypatch.setattr(m, "_gh_label_claims", _no_claims)
+    assert m.intake(out, weeks=2, as_json=True) == 0
+    t = json.loads(capsys.readouterr().out)
+    [w] = t["in_progress"]
+    for key in ("claimed", "days", "branch_commits", "landed_commits", "commits"):
+        assert {"value", "quality"} <= set(w[key]), key
+    for row in t["intake"]:
+        for key in ("opened", "closed", "closed_not_planned", "open"):
+            assert set(row[key]) == {"value", "quality"}
+    assert m.intake(out, weeks=2) == 0
+    text = capsys.readouterr().out
+    assert text.startswith("[intake]") and "#12" in text and "confidence:" in text
+    assert "other hosts not read" in text  # no origin: the fetch of the published reports failed
+    # registered on the command line; a gh that cannot name the repository leaves the tower part
+    fake = tmp_path / "nogh"
+    fake.mkdir()
+    (fake / "gh").write_text(f"#!{sys.executable}\nimport sys\nsys.exit(1)\n")
+    (fake / "gh").chmod(0o755)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/process_kpis.py"), "intake", "--weeks", "3",
+                        "--label", "doing", "--json"], cwd=out, capture_output=True, text=True,
+                       env={**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}"})
+    assert r.returncode == 0, r.stderr
+    t = json.loads(r.stdout)
+    assert t["label"] == "doing" and len(t["intake"]) == 3 and t["issues"]["read"] is False
+    assert [w["issue"] for w in t["in_progress"]] == [12]
+
+
 def test_flow_ends_at_the_merge_by_design_when_the_mandate_has_no_deploy(render, tmp_path):
     import json
     out = _flow_repo(render, tmp_path)
