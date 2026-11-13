@@ -5,49 +5,44 @@
 
 Prints `<title>` on the first line and the entry's body after it. An entry is
 the section that starts with `## vX.Y.Z — <title> · <date>` (the date optional)
-and runs until the next `## ` or `# ` heading. Exits 1 when the version has no
-entry: a release without notes is not published.
+and runs until the next `## ` or `# ` heading; the grammar, the older bold form
+included, is owned by `template/scripts/process/changelog.py`, read from this
+tool's own tree. Exits 1 when the version has no entry: a release without notes
+is not published.
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 import sys
 from pathlib import Path
+from types import ModuleType
 
-# CHANGELOG.md: one `## vX.Y.Z — <title> · <date>` section per release (MAINTAINING.md)
-ENTRY = re.compile(r"^##\s+(v\d+\.\d+\.\d+)\s+—\s+(.+?)(?:\s+·\s+\d{4}-\d{2}-\d{2})?\s*$")
-# before the heading form an entry was a bold paragraph, `**vX.Y.Z — <title>.** body`: a tag's own
-# CHANGELOG still reads that way, and the publish workflow reads the tag's file
-OLD_ENTRY = re.compile(r"^\*\*(v\d+\.\d+\.\d+)\s+—\s+(.+?)\*\*\s*(.*)$")
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _changelog() -> ModuleType:
+    """The core entry grammar from this tool's tree — never from a `root` argument, which
+    may be a test root without the template — and without a `__pycache__` in it."""
+    spec = importlib.util.spec_from_file_location("release_changelog", ROOT / "template/scripts/process/changelog.py")
+    mod = importlib.util.module_from_spec(spec)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = keep
+    return mod
+
+
+changelog = _changelog()
+ENTRY, OLD_ENTRY = changelog.ENTRY, changelog.OLD_ENTRY
 # NEWS.md, the plain-language log: one `## vX.Y.Z — <title>` section per release
 NEWS_ENTRY = re.compile(r"^##\s+(v\d+\.\d+\.\d+)\s+—\s+(\S.*)$")
 
 
-def notes(changelog: str, tag: str) -> tuple[str, str] | None:
-    lines = changelog.splitlines()
-    for i, line in enumerate(lines):
-        m = ENTRY.match(line)
-        if not m or m.group(1) != tag:
-            continue
-        title = m.group(2).rstrip(".")
-        body = []
-        for nxt in lines[i + 1:]:
-            if nxt.startswith("## ") or nxt.startswith("# "):
-                break
-            body.append(nxt)
-        text = "\n".join(body).strip()
-        return (title, text + "\n") if text else None  # a heading alone tells a reader nothing
-    for i, line in enumerate(lines):
-        m = OLD_ENTRY.match(line)
-        if not m or m.group(1) != tag:
-            continue
-        body = [m.group(3)] if m.group(3) else []
-        for nxt in lines[i + 1:]:
-            if OLD_ENTRY.match(nxt) or nxt.startswith("#"):
-                break
-            body.append(nxt)
-        return m.group(2).rstrip("."), "\n".join(body).strip() + "\n"
-    return None
+def notes(text: str, tag: str) -> tuple[str, str] | None:
+    """The CHANGELOG entry of `tag` as (title, body), None without one (changelog.notes)."""
+    return changelog.notes(text, tag)
 
 
 def news(news_md: str, tag: str) -> tuple[str, str] | None:
