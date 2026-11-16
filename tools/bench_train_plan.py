@@ -2,6 +2,7 @@
 
 uv run python tools/bench_train_plan.py --branches 600 --runs 3
 uv run python tools/bench_train_plan.py --branches 600 --source <dir with copier.yml + template/>
+uv run python tools/bench_train_plan.py --branches 120 --stale-ahead 200
 
 Renders the template (default: this repo's working tree), then builds a
 project history like a busy downstream clone: `--plans` main commits, each
@@ -9,9 +10,12 @@ adding one plan (most archived) and a journal shard with REVIEW passes;
 `--branches` local branches, one in twelve ahead of main with its own
 archived plan and a REVIEW pass, the rest merged; dispatch records for the
 ahead branches and for stale merged ones; and a bare origin carrying main.
-Prints JSON: the seconds of each `plan --json` run, their median, and how
-many candidates the plan saw and found eligible. The time is the runner's;
-compare runs on one host, never against a fixed number.
+`--stale-ahead N` adds N branches ahead of main that cannot board (#426): own
+commits with an active plan, no archived plan, no report.
+Prints JSON: the seconds of each `plan --json` run, their median, the
+seconds of each section of `candidates()` (its profile line, median over the
+runs), and how many candidates the plan saw and found eligible. The time is
+the runner's; compare runs on one host, never against a fixed number.
 """
 import argparse
 import json
@@ -57,10 +61,11 @@ def _blob(data: str) -> str:
 
 
 class Builder:
-    def __init__(self, root: Path, *, branches: int, plans: int):
+    def __init__(self, root: Path, *, branches: int, plans: int, stale: int = 0):
         self.root = root
         self.ahead = max(1, round(branches / 12))
         self.merged = branches - self.ahead
+        self.stale = stale
         self.plans = plans
         self.archived = round(plans * 230 / 250)
         self.t0 = int(time.time()) - 200 * 86400
@@ -89,6 +94,7 @@ class Builder:
         chain = self._main_history()
         self._merged_branches(chain)
         self._ahead_branches(chain)
+        self._stale_branches(chain)
         self._dispatch_records()
         origin = self.root.parent / "origin.git"
         subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, env=ENV)
@@ -161,6 +167,25 @@ class Builder:
             + _blob(REVIEW.format(work=b) + f" verdict=pass round=1 base={fork} head={sha[mark]}\n") + "\n"
             for b, mark, fork in attest])
 
+    def _stale_names(self) -> list[str]:
+        first = int(self._ahead_names()[-1].split("-")[0]) + 1
+        return [f"{first + i}-stale-x" for i in range(self.stale)]
+
+    def _stale_branches(self, chain: list[str]) -> None:
+        """Branches that cannot board (#426): one commit with code and an active plan —
+        no archived plan, no REVIEW pass, no report."""
+        now = int(time.time())
+        stream = []
+        for i, b in enumerate(self._stale_names()):
+            n = int(b.split("-")[0])
+            stream.append(f"commit refs/heads/{b}\ncommitter t <t@t> {now - 86400 * (i + 2)} +0000\n"
+                          + _blob(f"wip: {b}") + f"from {random.choice(chain[-40:])}\n"
+                          + f"M 100644 inline src/stale_{n}.py\n" + _blob(f"S = {n}\n" * 40)
+                          + f"M 100644 inline .process-work/plans/2026-10-22-{b}.md\n"
+                          + _blob(f"# {b}\n\ntier: 2\nissue: #{n}\n\n## Decisions\n\n- none\n") + "\n")
+        if stream:
+            self.fast_import(stream)
+
     def _dispatch_records(self) -> None:
         records = Path(self.git("rev-parse", "--absolute-git-dir")) / "process-dispatch"
         records.mkdir(exist_ok=True)
@@ -182,41 +207,64 @@ class Builder:
         (records / "issues.json").write_text(json.dumps(issues, indent=2))
 
 
-def time_plan(project: Path, runs: int) -> tuple[list[float], dict]:
-    seconds, result = [], {}
+PROFILE_ENV = "PROCESS_TRAIN_PLAN_PROFILE"  # train.py's: `candidates()` then prints its section times
+
+
+def _profile(stderr: str) -> dict:
+    """The section times of `candidates()`, from its JSON line on stderr; {} without one."""
+    for line in stderr.splitlines():
+        if line.startswith("{") and "train_plan_profile" in line:
+            return json.loads(line)["train_plan_profile"]
+    return {}
+
+
+def time_plan(project: Path, runs: int) -> tuple[list[float], dict, list[dict]]:
+    seconds, result, profiles = [], {}, []
     for _ in range(runs):
         start = time.perf_counter()
         r = subprocess.run([sys.executable, "scripts/process/train.py", "plan", "--json"], cwd=project,
-                           capture_output=True, text=True, env=ENV)
+                           capture_output=True, text=True, env={**ENV, PROFILE_ENV: "1"})
         seconds.append(round(time.perf_counter() - start, 2))
         if r.returncode:
             raise SystemExit(f"train.py plan failed ({r.returncode}):\n{r.stdout}{r.stderr}")
         result = json.loads(r.stdout)
-    return seconds, result
+        profiles.append(_profile(r.stderr))
+    return seconds, result, profiles
+
+
+def _median_sections(profiles: list[dict]) -> dict:
+    """Each section's median over the runs, and the counts of the last run."""
+    timed = [k for k, v in (profiles[0] if profiles else {}).items() if isinstance(v, float)]
+    counts = {k: v for k, v in (profiles[-1] if profiles else {}).items() if isinstance(v, int)}
+    return {**{k: round(statistics.median(p.get(k, 0.0) for p in profiles), 3) for k in timed}, **counts}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--branches", type=int, default=600, help="local branches besides main (default 600)")
     parser.add_argument("--plans", type=int, default=250, help="plans and journal shards on main (default 250)")
+    parser.add_argument("--stale-ahead", type=int, default=0,
+                        help="branches ahead of main that cannot board: an active plan, no archived plan, "
+                             "no report (default 0)")
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--source", type=Path, default=ROOT, help="a directory with copier.yml and template/")
     parser.add_argument("--workdir", type=Path, help="build here and keep it (default: a temporary directory)")
     args = parser.parse_args(argv)
-    if args.branches < 2 or args.plans < 1 or args.runs < 1:
-        parser.error("--branches must be at least 2, --plans and --runs positive")
+    if args.branches < 2 or args.plans < 1 or args.runs < 1 or args.stale_ahead < 0:
+        parser.error("--branches must be at least 2, --plans and --runs positive, --stale-ahead not negative")
     if args.workdir and args.workdir.exists() and any(args.workdir.iterdir()):
         parser.error(f"--workdir {args.workdir} is not empty: a kept build is not rebuilt; name a new directory")
     with tempfile.TemporaryDirectory() as temp:
         work = args.workdir or Path(temp)
         work.mkdir(parents=True, exist_ok=True)
         project = render(args.source.resolve(), work)
-        builder = Builder(project, branches=args.branches, plans=args.plans)
+        builder = Builder(project, branches=args.branches, plans=args.plans, stale=args.stale_ahead)
         builder.build()
-        seconds, result = time_plan(project, args.runs)
+        seconds, result, profiles = time_plan(project, args.runs)
     cands = result.get("candidates") or []
     print(json.dumps({"branches": args.branches, "ahead": builder.ahead, "merged": builder.merged,
-                      "plans": args.plans, "seconds": seconds, "median_seconds": statistics.median(seconds),
+                      "stale_ahead": args.stale_ahead, "plans": args.plans, "seconds": seconds,
+                      "median_seconds": statistics.median(seconds), "sections": _median_sections(profiles),
                       "candidates": len(cands), "eligible": sum(1 for c in cands if c.get("eligible"))},
                      indent=2))
     return 0
