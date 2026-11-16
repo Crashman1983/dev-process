@@ -85,6 +85,10 @@ def test_a_misconfigured_disk_limit_is_a_problem_never_full(monkeypatch, value):
     got = pg.disk_use(Path("/x"))
     assert not got.full and got.use_pct is None and got.limit is None
     assert pg.DISK_LIMIT_ENV in got.problem and repr(value) in got.problem
+    # the train's reading (`fallback`): the default limit holds, the problem still named
+    fallen = pg.disk_use(Path("/x"), fallback=True)
+    assert fallen.full and fallen.use_pct == pytest.approx(100) and fallen.limit == 90
+    assert fallen.problem == got.problem
 
 
 def test_an_unreadable_disk_use_is_a_problem_never_full(monkeypatch):

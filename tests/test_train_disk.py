@@ -425,13 +425,20 @@ def test_a_disk_never_seen_over_the_limit_leaves_the_red_path_as_it_was(render, 
     assert "aborts" not in r.measure["rounds"][0]
 
 
-def test_a_misconfigured_limit_is_a_note_never_a_halt(render, tmp_path, monkeypatch):
-    _disk(monkeypatch, lambda: True, limit="abc")
+@pytest.mark.parametrize("full", [False, True])
+def test_a_misconfigured_limit_is_a_note_and_the_default_holds(render, tmp_path, monkeypatch, full):
+    """Refute v2.98: a misconfigured limit turned the train's check off. It is a note, said
+    once, and the default 90 % holds: 10 % runs, 95 % halts `disk-full`."""
+    _disk(monkeypatch, lambda: full, limit="abc")
     r = _aborting(render, tmp_path, monkeypatch, n=1, sh=lambda sub, cmd, nth: "green")
-    assert r.raised is None and r.written == [], r.err
-    assert [x["red_path"] for x in r.measure["rounds"]] == ["green"]
+    assert r.written == [], r.err
+    if full:
+        assert isinstance(r.raised, r.train.DiskFull) and str(r.raised).endswith(" 95%"), r.raised
+    else:
+        assert r.raised is None and [x["red_path"] for x in r.measure["rounds"]] == ["green"]
     assert "PROCESS_DISK_LIMIT_PCT='abc' is no percentage" in r.log and "note" in r.log, r.log
     assert r.err.count("PROCESS_DISK_LIMIT_PCT='abc'") == 1, r.err  # said once, not per check
+    assert "checked against the default 90%" in r.err, r.err
 
 
 def test_the_base_aborting_on_a_full_disk_twice_stays_suite_aborted(render, tmp_path, monkeypatch):

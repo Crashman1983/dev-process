@@ -473,7 +473,8 @@ The price, chosen: a passenger that leaves files outside its tree (in
 `/tmp`) is not blamed. The train halts `disk-full` and names the disk;
 `tidy.py --apply` frees the merged worktrees, and `train-phases` shows a
 series. A limit that is no percentage in (0, 100] is a note in the log and
-on stderr, never a halt. A project's `--preflight` may still check the disk.
+on stderr, and the train checks against the default 90 % (`dispatch.py
+start` refuses on it). A project's `--preflight` may still check the disk.
 
 ## Who pushes to main — the merge route
 
