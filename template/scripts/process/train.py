@@ -3009,6 +3009,14 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
               file=sys.stderr)
         _cleanup(root, stamp)
         return 2
+    # the last check point (DeepSeek F1): the push and the fast-forward write into the
+    # clone and the root's checkout — on a full disk that is a half-landed train, never a
+    # passenger's fault: nothing merges, nobody is blamed, the earlier real drops are told
+    try:
+        _halt_if_disk_full(root, log)
+    except DiskFull:
+        _report_dropped(conflicts=False)
+        raise
     if push:
         # origin first, local second: a rejected push (branch protection, a
         # race with another push) must leave local main untouched and the

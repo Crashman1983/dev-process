@@ -222,6 +222,22 @@ def test_a_full_disk_before_the_base_or_the_run_once_more_blames_nobody(render, 
         assert _subsets(r) == [("b1",), ("b1",), ()]  # aborted twice, the fresh base; not once more
 
 
+def test_a_full_disk_before_the_final_merge_merges_nothing(render, tmp_path, monkeypatch):
+    """DeepSeek F1: the batch is green, then the disk is full before the push and the
+    fast-forward — `DiskFull`, nothing merged, nobody blamed (not a crash in `merge --ff-only`)."""
+    full = [False]
+    _disk(monkeypatch, lambda: full[0])
+
+    def sh(sub, cmd, nth):
+        full[0] = True  # the green run leaves the disk full: a judge saw it free before
+        return "green"
+    r = _aborting(render, tmp_path, monkeypatch, n=1, via_run=True, sh=sh)
+    assert r.rc == 1 and r.written == [], (r.rc, r.err)
+    assert r.phases["result"] == "environment" and r.phases["branches"] == [], r.phases
+    assert [x["red_path"] for x in r.measure["rounds"]] == ["disk-full"], r.measure
+    assert "nobody is blamed" in r.err and "fast-forwarded" not in r.log, r.err
+
+
 def test_a_full_disk_in_the_preboard_halts_before_boarding(render, tmp_path, monkeypatch, capsys):
     """A `DiskFull` in the preboard (its candidate probe here) escapes `pre_board`: the train
     stops before boarding, the round it began ends `disk-full`, the probe tree is gone."""

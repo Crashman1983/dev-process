@@ -446,7 +446,8 @@ refuses at):
 - before every judge, ahead of the preflight and the gates;
 - before every suite run: the first run, the repeats, the base, the probes,
   the `--retry` run and the gates retry in the same tree, the preboard
-  probes.
+  probes;
+- before the push and the final `merge --ff-only`, on the root's disk.
 
 A disk over the limit there was not filled by anyone of this run: the train
 halts, `result="environment"`, `red_path="disk-full"`, the line
