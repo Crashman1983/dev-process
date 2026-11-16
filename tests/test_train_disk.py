@@ -258,6 +258,32 @@ def test_a_full_disk_in_the_preboard_halts_before_boarding(render, tmp_path, mon
     assert "preboard_checks" in row and _probe_gone(out)
 
 
+def test_a_full_disk_before_the_preboards_preflight_halts_disk_full(render, tmp_path, monkeypatch, capsys):
+    """DeepSeek F4: `bad` is red twice on the preboard, the base green again; the disk fills
+    before the confirming preflight (which fails on ENOSPC) — `disk-full`, not `environment`,
+    and `bad` is not reported."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "bad", {"src/BROKEN": "x\n"})
+    train = _load_train(out)
+    count = tmp_path / "preboard-runs"
+    count.write_text("")
+
+    def runs() -> int:
+        return len(count.read_text().splitlines())
+    # base, alpha, bad, bad once more, the base again: full after the fifth run
+    _disk(monkeypatch, lambda: runs() >= 5)
+    check = f"echo x >> {count}; test ! -e src/BROKEN"
+    preflight = f"test $(wc -l < {count}) -lt 5"  # red on the full disk, as ENOSPC would be
+    rc, _built, writes = _preboard_run(train, out, monkeypatch, preboard=check, preflight=preflight)
+    err = capsys.readouterr().err
+    assert rc == 1 and writes == [] and runs() == 5, (err, writes)
+    row = _phases(out)[-1]
+    assert row["result"] == "environment" and [x["red_path"] for x in row["rounds"]] == ["disk-full"], row
+    assert "the preflight" not in err and "disk-full" in err, err
+
+
 def test_a_host_over_the_limit_halts_the_real_train(render, tmp_path, monkeypatch):
     """End to end on the host's real disk, the limit at 0.001 %: every disk is over it — the
     train halts `disk-full` before its first build, with and without the preboard."""

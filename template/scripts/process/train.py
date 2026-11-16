@@ -2267,6 +2267,8 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
                 checks["dropped"] = []
                 return list(aboard), checks
             if preflight:
+                # a preflight red on ENOSPC is the disk's, not the environment's (DeepSeek F4)
+                _halt_if_disk_full(wt, log)
                 started = time.monotonic()
                 state = _sh(wt, preflight, log, preflight_timeout)
                 checks["preflight_s"] = time.monotonic() - started  # the caller books it as preflight
