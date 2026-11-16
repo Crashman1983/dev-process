@@ -10,6 +10,34 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.98.0 — The train loses no hours to foreign causes · 2026-11-16
+
+**Why.**
+- Measured in Kenni (last 50 trains): an issue waited a median 4.8 h against 1.1 h of work; 21 of 50 trains ended red; a bisect took up to 3.7 h; the plan phase took a median 346 s before every train.
+- The last two Kenni trains ran 6 h and 4 h, red for reasons outside the passengers' code — a full disk, and a review finding about a commit that only mentioned another issue — and the bisect took most of the time (#424, #425, #426).
+
+**What changes.**
+- [recommended] **A full disk blames nobody.** The train checks the disk under its worktrees and the temp directory (`PROCESS_DISK_LIMIT_PCT`, default 90 %) before building a tree, before the gates and around each suite run. Over the limit it halts: `result="environment"`, `red_path="disk-full"`, nobody blamed, nothing merged, passengers dropped earlier still reported. A red run that leaves the disk full is an abort under the v2.95 rule, without waiting for load and without a fresh base. A passenger that fills the disk inside its own tree is still found; one that leaves files outside it halts the train instead of being blamed. dispatch's disk refusal inside a suite writes an abort line. `train-phases` counts `disk-full` apart.
+- [recommended] **The plan phase reads only branches that can board.** A branch with no archived plan of its own and no `review-pass` report is counted after its ahead/behind check and gets a short line (`not read further: it cannot board`); the expensive reads are skipped. Decisions stay the same. In a bench with 200 such branches the plan took 7.3 s instead of 12.9 s. `PROCESS_TRAIN_PLAN_PROFILE` prints the time per section.
+- [optional] **A claim by `(#N)` names its commit and the way out.** The rule is unchanged: `(#N)` at the end of a subject and closing words claim the issue. The review finding now names each claiming commit and says how to resolve it (reword to `see #N`, drop the closing word, or review #N's plan); a `Closes #N` written by the train names the passenger. `commits.md` tells a claim from a reference. `finish` shows a red gate's findings instead of only its summary line.
+
+**Effect.**
+- Trains stop losing hours to a full disk; the plan phase stops growing with stale branches; a commit that only mentions another issue is fixed in one step.
+
+**Changed sections.**
+- `commits.md` (Message format)
+- `testing.md` (Unmeasurable is not red)
+- `tower.md` (Dispatch and the model policy)
+- `train.md` (Departure; The run; Red, undefined, aborted)
+- `modules/telemetry.md` (The KPI cockpit)
+
+**Update.**
+- Pure update. No new configuration key.
+- A train on a disk over 90 % now halts as `disk-full` instead of running; free space or set `PROCESS_DISK_LIMIT_PCT`.
+- `train.py plan` shows branches that cannot board in one short line.
+
+Details: [Plan](docs/analysis/2026-11-16-v2.98.md) #424 #425 #426
+
 ## v2.97.0 — Steering with limits: open work measured and held, lanes for heavy runs · 2026-11-13
 
 **Why.**
