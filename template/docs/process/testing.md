@@ -527,6 +527,13 @@ when its wait runs out. An aborted run is repeated after the load falls;
 it never blames a passenger by itself. Nested runs, and tests that provoke
 an abort on purpose, run without that variable.
 
+A full disk is unmeasurable too (v2.98, `train.md`, "A full disk"): the
+train halts `disk-full` before a build, a judge or a suite run on a disk
+over `PROCESS_DISK_LIMIT_PCT`, and a red run that leaves a disk over it is
+an abort, repeated at once, not a finding. A `dispatch.py start` refused
+inside the suite appends `disk-full <path> <use>%` to the marker, so a test
+that starts a session reads as unmeasured, not red.
+
 ## Suite discipline
 
 - A **flaky test is a defect**, not weather: fix it or quarantine it the same
