@@ -463,7 +463,9 @@ Its repeat waits for no load (a full disk is not emptied by waiting) and
 rebuilds at once; the check before it decides. Still full: `disk-full`. Free:
 the run goes, and a rebuilt tree that fills the disk again counts **red**
 without a fresh base — no base fills a disk, it carries no passenger — and
-the search finds the passenger whose tests fill it. The base itself aborting
+the search finds the passenger whose tests fill it, also where the base has
+no suite. Only a run and its repeat that both end `disk-full` count so; one
+`disk-full` beside a load abort asks the fresh base, as v2.95. The base itself aborting
 that way twice stays `suite-aborted`. A suite that fills the disk and cleans
 up stays red: nothing was measured over the limit.
 

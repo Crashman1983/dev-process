@@ -333,6 +333,59 @@ def test_a_passenger_that_fills_the_disk_in_its_tree_is_found_without_a_wait(ren
     assert "flaky" not in r.log.lower()
 
 
+def test_one_disk_full_beside_a_load_abort_still_asks_the_fresh_base(render, tmp_path, monkeypatch):
+    """Refute v2.98: a load abort, then a repeat that left the disk full, was red at once — one
+    `disk-full` observation blamed b2 without a fresh base. Only a run and a repeat that both
+    filled the disk skip it; here the fresh base runs, and b2 runs once more."""
+    full = [False]
+    _disk(monkeypatch, lambda: full[0])
+    seen: list[int] = []
+
+    def on_build(subset):
+        full[0] = False
+
+    def sh(sub, cmd, nth):
+        if "b2" not in sub:
+            return "green"
+        seen.append(1)
+        if len(seen) == 1:
+            return "abort"  # the load: a marker line
+        if len(seen) == 2:
+            full[0] = True  # its repeat leaves the disk full
+            return "red"
+        return "green"
+    r = _aborting(render, tmp_path, monkeypatch, on_build=on_build, sh=sh)
+    assert r.rc is None and r.written == [], r.err
+    assert _subsets(r)[:4] == [("b1", "b2"), ("b1", "b2"), (), ("b1", "b2")], _subsets(r)
+    assert not str(r.measure["rounds"][0]["red_path"]).startswith("dropped:"), r.measure
+    assert "the base runs fresh" in r.log, r.log
+
+
+def test_a_passenger_that_fills_the_disk_twice_is_found_where_the_base_has_no_suite(render, tmp_path,
+                                                                                       monkeypatch):
+    """DeepSeek F2: the base has no suite (`undefined`); a probe with b1 fills the disk on its run
+    and its repeat — red, b1 dropped, not `SuiteAborted` (the disk branch comes before the
+    `undefined` base's)."""
+    full = [False]
+    _disk(monkeypatch, lambda: full[0])
+
+    def on_build(subset):
+        full[0] = False
+
+    def sh(sub, cmd, nth):
+        if not sub:
+            return "undefined"
+        if "b1" in sub:
+            full[0] = True
+            return "red"
+        return "green"
+    r = _aborting(render, tmp_path, monkeypatch, on_build=on_build, sh=sh)
+    assert r.raised is None and r.written == [], (r.raised, r.err)
+    assert [x["red_path"] for x in r.measure["rounds"]] == ["dropped:b1", "green"], r.measure
+    assert ("b1",) in _subsets(r), _subsets(r)  # the probe ran, and was judged
+    assert "the disk filled on the run and on its repeat with b1 aboard" in r.log, r.log
+
+
 def test_a_disk_filled_from_outside_with_a_dispatch_test_aboard_blames_nobody(render, tmp_path, monkeypatch):
     """r2 M1: the disk fills from outside during the run; a passenger's test calls dispatch,
     which refuses and appends `disk-full <path> <use>%` to the marker. The repeat finds the disk
