@@ -942,6 +942,31 @@ def test_a_foreign_subject_claim_blocks_finish_through_its_gate_run(render, tmp_
     assert "reword it to `see #3000` — otherwise review #3000's plan for it" in gate, gate
 
 
+def test_a_red_gate_blocker_carries_the_failing_gates_findings_only(render, tmp_path, monkeypatch):
+    """Refute v2.98: the blocker carried the run's whole tail (OK lines, `== running` headers)
+    and dropped every line with `: note` in it, a finding that quotes the word too. It carries
+    the red gate's `FAILED` line and findings and the summary; a note goes by its prefix
+    (`<tool>: note`); a line is at most 400 characters, its head and its tail kept."""
+    out = _repo_on_feature(render, tmp_path)
+    finish = _finish_module(out)
+    monkeypatch.setattr(finish, "ROOT", out)
+    long = "x" * 300 + " — the way out: " + "y" * 300 + " END"
+    said = ["== running decision-records ==", "decision-records: OK", "== running review ==",
+            "gate-runner: note: review: area(s) docs not on the list", "review: FAILED:",
+            "  - the plan quotes review: note of the owner — answer it", f"  - {long}",
+            "  review: note — held back", "== running ui-check ==", "ui-check: OK", "FAILED gates: review"]
+    runner = tmp_path / "runner.py"
+    runner.write_text(f"import sys\nprint({chr(10).join(said)!r})\nsys.exit(1)\n", encoding="utf-8")
+    monkeypatch.setattr(finish, "gate_runner_argv", lambda root: [sys.executable, str(runner)])
+    blockers, _steps = finish.check(out)
+    red = [b for b in blockers if b.startswith("gate suite red: ")]
+    assert len(red) == 1, blockers
+    parts = red[0].removeprefix("gate suite red: ").split(" | ")
+    assert parts[:2] == ["review: FAILED:", "- the plan quotes review: note of the owner — answer it"], parts
+    assert len(parts[2]) == 400 and parts[2].startswith("- xxx") and parts[2].endswith("y END"), parts[2]
+    assert parts[3:] == ["FAILED gates: review"], parts
+
+
 def _apply_in_process(out, tmp_path, monkeypatch, *, tests):
     finish = _finish_module(out)
     monkeypatch.setattr(finish, "ROOT", out)
