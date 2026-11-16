@@ -163,7 +163,7 @@ def test_a_path_beginning_with_a_dash_reaches_the_runner_as_a_path(repo):
 
 def _lane_repo(repo, tmp_path):
     (repo / "scripts/process").mkdir(parents=True, exist_ok=True)
-    for name in ("lane.py", "testing_config.py"):
+    for name in ("lane.py", "testing_config.py", "process_git.py"):
         shutil.copy(PROC / name, repo / "scripts/process" / name)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "lane")
