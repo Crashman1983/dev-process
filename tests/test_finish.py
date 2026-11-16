@@ -888,6 +888,58 @@ def _counting_runner(finish, tmp_path, monkeypatch) -> Path:
     return log
 
 
+def test_a_foreign_subject_claim_blocks_finish_through_its_gate_run(render, tmp_path, monkeypatch):
+    """v2.98 A1 (#424 Fall 2): in `finish` greift ein fremdes `(#N)` über den Gate-Lauf
+    auf dem Branch, nicht über die eigene Schleife (nur aktive Pläne) — der Befund dort
+    nennt den Commit und den Weg zu `see #N`."""
+    out = render(tmp_path / "repo", {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    fork = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "-b", "3000-p5")
+    archive = out / PLANS / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    (archive / "2026-11-10-p5.md").write_text("# Plan\n\ntier: 3\nissue: #3000\n\n## Decisions\n",
+                                              encoding="utf-8")
+    (out / "p5.py").write_text("x = 1\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: P5 (#3000)")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _journal(out, "REVIEW work=3000 tier=3 reviewer=fresh model=cross "
+                  "independence=bundle,non-implementing,cross-model verdict=pass round=1 "
+                  f"base={fork} head={head}")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "merge", "-q", "--no-ff", "-m", "merge 3000-p5", "3000-p5")
+    _git(out, "checkout", "-q", "-b", "roadmap")
+    (out / "ROADMAP.md").write_text("- [x] P5\n", encoding="utf-8")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: mark P5 done (#3000)")
+    sha = _git(out, "rev-parse", "HEAD").stdout.strip()
+
+    finish = _finish_module(out)
+    monkeypatch.setattr(finish, "ROOT", out)
+    seen = tmp_path / "gate-output.log"
+    wrapper = tmp_path / "tee_gates.py"
+    real = finish.gate_runner_argv(out)
+    wrapper.write_text(
+        "import subprocess, sys\n"
+        f"r = subprocess.run({real!r}, capture_output=True, text=True)\n"
+        f"open({str(seen)!r}, 'a').write(r.stdout + r.stderr)\n"
+        "sys.stdout.write(r.stdout); sys.stderr.write(r.stderr)\n"
+        "sys.exit(r.returncode)\n", encoding="utf-8")
+    monkeypatch.setattr(finish, "gate_runner_argv", lambda root: [sys.executable, str(wrapper)])
+    blockers, _steps = finish.check(out)
+    assert any("gate suite red" in b and "FAILED gates: review" in b for b in blockers), blockers
+    gate = seen.read_text()
+    assert f"`{sha[:9]} docs: mark P5 done (#3000)` claims #3000 with `(#3000)`" in gate, gate
+    assert "reword it to `see #3000` — otherwise review #3000's plan for it" in gate, gate
+
+
 def _apply_in_process(out, tmp_path, monkeypatch, *, tests):
     finish = _finish_module(out)
     monkeypatch.setattr(finish, "ROOT", out)
