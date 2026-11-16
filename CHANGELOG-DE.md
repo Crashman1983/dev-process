@@ -9,6 +9,34 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.98.0 — Der Zug verliert keine Stunden mehr an fremde Gründe · 2026-11-16
+
+**Warum.**
+- Gemessen in Kenni (letzte 50 Züge): Ein Issue wartete im Median 4,8 h gegen 1,1 h Arbeit; 21 von 50 Zügen endeten rot; ein Bisect dauerte bis zu 3,7 h; die Phase `plan` brauchte vor jedem Zug im Median 346 s.
+- Die letzten zwei Kenni-Züge liefen 6 h und 4 h, rot aus Gründen außerhalb des Codes der Passagiere — eine volle Platte und ein Review-Befund zu einem Commit, der ein anderes Issue nur erwähnte —, und der Bisect fraß den größten Teil (#424, #425, #426).
+
+**Was sich ändert.**
+- [recommended] **Eine volle Platte beschuldigt niemanden.** Der Zug prüft die Platte unter seinen Worktrees und das Temp-Verzeichnis (`PROCESS_DISK_LIMIT_PCT`, Vorgabe 90 %) vor dem Bau eines Baums, vor den Gates und um jeden Suite-Lauf. Über der Grenze hält er: `result="environment"`, `red_path="disk-full"`, niemand beschuldigt, nichts gemergt, früher Abgesetzte gemeldet. Ein roter Lauf, der die Platte voll hinterlässt, ist ein Abbruch nach der Regel aus v2.95, ohne Lastwarten und ohne frische Basis. Ein Passagier, der die Platte in seinem Baum füllt, wird weiter gefunden; einer, der Dateien außerhalb liegen lässt, hält den Zug an, statt beschuldigt zu werden. Die Plattenverweigerung von dispatch in einer Suite schreibt eine Abbruch-Zeile. `train-phases` zählt `disk-full` getrennt.
+- [recommended] **Die Phase `plan` liest nur Branches, die einsteigen können.** Ein Branch ohne eigenen archivierten Plan und ohne Bericht `review-pass` wird nach seinem Vorsprung gezählt und bekommt eine kurze Zeile (`not read further: it cannot board`); die teuren Lesungen entfallen. Die Entscheidungen bleiben gleich. Im Bench mit 200 solchen Branches dauerte `plan` 7,3 s statt 12,9 s. `PROCESS_TRAIN_PLAN_PROFILE` gibt die Zeit je Abschnitt aus.
+- [optional] **Ein Anspruch über `(#N)` nennt seinen Commit und den Ausweg.** Die Regel bleibt: `(#N)` am Ende des Betreffs und schließende Wörter beanspruchen das Issue. Der Review-Befund nennt jetzt jeden beanspruchenden Commit und sagt, wie es aufzulösen ist (zu `see #N` umformulieren, das schließende Wort streichen oder den Plan von #N reviewen); ein vom Zug geschriebenes `Closes #N` nennt den Passagier. `commits.md` unterscheidet Anspruch und Verweis. `finish` zeigt die Befunde eines roten Gates statt nur der Zusammenfassung.
+
+**Wirkung.**
+- Züge verlieren keine Stunden mehr an eine volle Platte; die Phase `plan` wächst nicht mehr mit alten Branches; ein Commit, der ein anderes Issue nur erwähnt, ist in einem Schritt behoben.
+
+**Geänderte Abschnitte.**
+- `commits.md` (Message format)
+- `testing.md` (Unmeasurable is not red)
+- `tower.md` (Dispatch and the model policy)
+- `train.md` (Departure; The run; Red, undefined, aborted)
+- `modules/telemetry.md` (The KPI cockpit)
+
+**Update.**
+- Reines Update. Kein neuer Konfigurationsschlüssel.
+- Ein Zug auf einer Platte über 90 % hält jetzt als `disk-full`, statt zu laufen; Platz schaffen oder `PROCESS_DISK_LIMIT_PCT` setzen.
+- `train.py plan` zeigt Branches, die nicht einsteigen können, in einer kurzen Zeile.
+
+Details: [Plan](docs/analysis/2026-11-16-v2.98.md) #424 #425 #426
+
 ## v2.97.0 — Steuerung mit Grenzen: offene Arbeit gemessen und begrenzt, Lanes für schwere Läufe · 2026-11-13
 
 **Warum.**

@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.98.0 — Der Zug verliert keine Stunden mehr an fremde Gründe
+
+Eine volle Platte auf der Maschine, die den Merge-Zug fährt, führt nicht mehr dazu, dass der Zug nach stundenlanger Suche eine unschuldige Arbeit beschuldigt und absetzt; er hält sofort an und sagt, dass die Platte voll ist. Der Planungsschritt des Zugs wird nicht mehr mit jedem alten Branch langsamer, und ein Commit, der ein anderes Issue nur erwähnt, bekommt eine klare Meldung, wie es zu beheben ist.
+
 ## v2.97.0 — Steuerung mit Grenzen: offene Arbeit gemessen und begrenzt, Lanes für schwere Läufe
 
 Die Optimierungsschleife sieht jetzt offene Arbeit, nicht nur gemergte: wie viele Issues gleichzeitig in Arbeit sind, wie lange jedes schon läuft und wie stark es wächst, und ob neue Issues schneller kommen als geschlossene. Die Wert-Messung findet lange laufende Produkt-Epics, die sie bisher übersah. Die Startlast einer Sitzung wird je Harness gemessen, und ein Trockenlauf des Template-Updates sagt, welche Änderungen ein Projekt jetzt übernehmen muss; ab diesem Release ist jede Änderung in den Notes als verlangt, empfohlen oder optional markiert. Ein Projekt kann jetzt in seinem Mandat Grenzen setzen: wie viele Issues je Track gleichzeitig in Arbeit sein dürfen (der Steward startet dann nichts in einem vollen Track), wie groß der Anteil reiner Prozessarbeit werden darf und wie oft Template-Updates übernommen werden. Zwei schwere Testläufe auf einer Maschine kollidieren nicht mehr.
