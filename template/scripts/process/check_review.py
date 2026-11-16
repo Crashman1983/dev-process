@@ -1444,6 +1444,26 @@ _ISSUE_CLOSING = re.compile(
 _ISSUE_SUBJECT = re.compile(r"\(#(\d+)\)\s*$")
 
 
+class Claim(NamedTuple):
+    """One commit's claim on an issue. `kind`: `subject` (`… (#N)` ending the
+    subject) or `closing` (a closing word anywhere in the message)."""
+    number: int
+    sha: str
+    subject: str
+    kind: str
+
+
+def _claims_in_message(body: str) -> list[tuple[int, str]]:
+    """The claim grammar of one commit message, the one owner: (number, kind)
+    in message order, the subject first, each pair once."""
+    body = body.strip()
+    if not body:
+        return []
+    found = [(int(n), "subject") for n in _ISSUE_SUBJECT.findall(body.splitlines()[0])]
+    found += [(int(n), "closing") for n in _ISSUE_CLOSING.findall(body)]
+    return list(dict.fromkeys(found))
+
+
 def push_targets(env: dict[str, str], *sources: list[str]) -> list[str]:
     """Every remote ref any source names: the arguments, git's ref lines and BOTH
     environment variables — the one owner of "where does this push go". A union, so a
@@ -1630,29 +1650,36 @@ def push_base(root: Path, tip: str, remote_sha: str) -> str | None:
     return out.decode(errors="replace").strip() if out is not None and out.strip() else None
 
 
+def issue_claims_in_range(root: Path, tip: str = "HEAD", *, base: str | None = None,
+                          strict: bool = False) -> list[Claim]:
+    """Every claim the commits since the merge-base make (`_claims_in_message`),
+    with the commit that makes it — the one reader of claims in a range, read
+    from the local repo only, so the gate stays offline like its neighbours.
+    A plan is this push's business when the push carries its file
+    (`paths_in_flight`) or claims its issue here; both arms mean the same
+    thing by "this push's proof". `strict`: a failing `git log` raises
+    GitReadError instead of reading as "claims nothing"."""
+    base = base or merge_base(root, tip)
+    if base is None:
+        return []
+    out = _git_read(root, "log", "--reverse", "--format=%H%n%B%x00", f"{base}..{tip}", strict=strict)
+    if out is None:
+        return []
+    claims: list[Claim] = []
+    for record in out.decode(errors="replace").split("\0"):
+        sha, _, body = record.strip().partition("\n")
+        if not sha:
+            continue
+        subject = body.strip().splitlines()[0].strip() if body.strip() else ""
+        claims += [Claim(number, sha, subject, kind) for number, kind in _claims_in_message(body)]
+    return claims
+
+
 def issue_refs_in_range(root: Path, tip: str = "HEAD", *, base: str | None = None,
                         strict: bool = False) -> set[int]:
     """The issue numbers the commits since the merge-base CLAIM as their own
-    (`_ISSUE_CLOSING`, `_ISSUE_SUBJECT`) — read from the local repo only, so
-    the gate stays offline like its neighbours. A plan is this push's
-    business when the push carries its file (`paths_in_flight`) or claims
-    its issue here; both arms mean the same thing by "this push's proof".
-    `strict`: a failing `git log` raises GitReadError instead of reading as
-    "claims nothing"."""
-    base = base or merge_base(root, tip)
-    if base is None:
-        return set()
-    out = _git_read(root, "log", "--format=%B%x00", f"{base}..{tip}", strict=strict)
-    if out is None:
-        return set()
-    refs: set[int] = set()
-    for message in out.decode(errors="replace").split("\0"):
-        body = message.strip()
-        if not body:
-            continue
-        refs |= {int(n) for n in _ISSUE_CLOSING.findall(body)}
-        refs |= {int(n) for n in _ISSUE_SUBJECT.findall(body.splitlines()[0])}
-    return refs
+    (`issue_claims_in_range`, without the commits)."""
+    return {c.number for c in issue_claims_in_range(root, tip, base=base, strict=strict)}
 
 
 def paths_in_flight(root: Path, tip: str = "HEAD", *, base: str | None = None,
@@ -2908,14 +2935,8 @@ def issues_on_integration(root: Path, limit: int = 2000) -> set[int]:
     for ref in integration_refs(root):
         out = _git_bytes(root, "log", "--format=%B%x00", f"-{limit}", ref)
         if out is not None:
-            refs: set[int] = set()
-            for message in out.decode(errors="replace").split("\0"):
-                body = message.strip()
-                if not body:
-                    continue
-                refs |= {int(n) for n in _ISSUE_CLOSING.findall(body)}
-                refs |= {int(n) for n in _ISSUE_SUBJECT.findall(body.splitlines()[0])}
-            return refs
+            return {number for message in out.decode(errors="replace").split("\0")
+                    for number, _kind in _claims_in_message(message)}
     return set()
 
 

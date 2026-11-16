@@ -2420,14 +2420,10 @@ _HISTORY_TIMEOUT = 600  # s, the whole-history reads (merge_events, the Regressi
 
 
 def _claims(message: str) -> set[int]:
-    """The issues a commit message claims, in check_review's grammar (`_ISSUE_CLOSING`
-    anywhere, `_ISSUE_SUBJECT` on the subject), imported unchanged. `Regression-of:` is no claim."""
+    """The issues a commit message claims, in check_review's grammar
+    (`_claims_in_message`), imported unchanged. `Regression-of:` is no claim."""
     import check_review as _review  # noqa: PLC0415
-    body = message.strip()
-    if not body:
-        return set()
-    return ({int(n) for n in _review._ISSUE_CLOSING.findall(body)}
-            | {int(n) for n in _review._ISSUE_SUBJECT.findall(body.splitlines()[0])})
+    return {number for number, _kind in _review._claims_in_message(message)}
 
 
 def _commit_table(root: Path, ref: str) -> dict[str, dict] | None:
