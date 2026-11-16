@@ -83,7 +83,8 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
-GATE_LINES = 15  # the red gate run's last lines a blocker carries (notes left out)
+GATE_LINES = 15  # at most this many lines of the red gate run a blocker carries
+GATE_LINE_CHARS = 400  # … each at most this long
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 import certificate  # noqa: E402
@@ -189,6 +190,44 @@ def _branches_to_finish(root: Path, default: str, limit: int = 8) -> str:
     more = f" | … {len(unmerged) - limit} more (git branch --no-merged {default})" \
         if len(unmerged) > limit else ""
     return "check out the branch first: " + " | ".join(ways) + more
+
+
+# the gate runner's output (gate_runner.py): `== running <gate> ==` opens a gate's section,
+# a red gate says `<gate>: FAILED` and its findings below, the run ends `FAILED gates: …`.
+# A note is a line `<tool>: note …` — by its prefix, never a finding that quotes the word
+_GATE_HEADER = re.compile(r"^== running \S")
+_GATE_FAILED = re.compile(r"^[\w.-]+: FAILED\b")
+_GATE_SUMMARY = re.compile(r"^FAILED gates:")
+_GATE_NOTE = re.compile(r"^\s*[\w.-]+: note\b")
+
+
+def gate_findings(output: str, said: list[str]) -> list[str]:
+    """What a red gate run's blocker carries: each red gate's `<gate>: FAILED` line and its
+    findings (up to the next `== running` header), and the final `FAILED gates: …` line — no
+    OK lines, no headers, no notes, no finding whose text a blocker in `said` already carries
+    (finish names it there itself). Output without a red section (a runner that crashed):
+    its last lines. At most GATE_LINES lines (the summary kept), each GATE_LINE_CHARS — a
+    longer one keeps its head and its tail, where a finding names the way out."""
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip() and not _GATE_NOTE.match(ln)]
+    picked: list[str] = []
+    inside = False
+    for ln in lines:
+        if _GATE_HEADER.match(ln):
+            inside = False
+        elif _GATE_FAILED.match(ln) or _GATE_SUMMARY.match(ln):
+            inside = not _GATE_SUMMARY.match(ln)
+            picked.append(ln)
+        elif inside:
+            text = ln.removeprefix("- ").strip()
+            if not any(text in b for b in said):
+                picked.append(ln)
+    if not picked:
+        picked = lines[-GATE_LINES:]
+    elif len(picked) > GATE_LINES:
+        picked = picked[:GATE_LINES - 1] + picked[-1:]
+    half = (GATE_LINE_CHARS - 3) // 2
+    return [ln if len(ln) <= GATE_LINE_CHARS else f"{ln[:GATE_LINE_CHARS - 3 - half]} … {ln[-half:]}"
+            for ln in picked]
 
 
 def _journal_passes(root: Path) -> list[dict]:
@@ -355,10 +394,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                             env=git_environment({**os.environ, PUSH_TARGETS_ENV: target}))
         if gr.returncode != 0:
             # the findings, not only the summary: a red gate's own lines say what to do
-            # (v2.98: the issue arm names the claiming commit and the way out); notes stay out
-            said = [ln for ln in (gr.stdout + gr.stderr).splitlines()
-                    if ln.strip() and ": note" not in ln]
-            blockers.append("gate suite red: " + " | ".join(said[-GATE_LINES:]))
+            # (v2.98: the issue arm names the claiming commit and the way out)
+            blockers.append("gate suite red: " + " | ".join(gate_findings(gr.stdout + gr.stderr, blockers)))
         elif head and not dirty:
             check.green_at = (head, target)  # the local merge reuses it (v2.94 B3)
 
