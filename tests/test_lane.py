@@ -168,7 +168,7 @@ def test_lane_readers_use_the_projects_own_script_then_the_template_one(tmp_path
     root = tmp_path / "repo"
     (root / "scripts/process").mkdir(parents=True)
     env = {**os.environ, "PROCESS_LANE_DIR": str(tmp_path / "lanes"), "PYTHONDONTWRITEBYTECODE": "1"}
-    for name in ("lane.py", "testing_config.py"):
+    for name in ("lane.py", "testing_config.py", "process_git.py"):  # what lane.py imports
         shutil.copy(PROC / name, root / "scripts/process" / name)
     assert cfg.lane_status(root, env) == []  # no test configuration: no lanes shown
     (root / "docs/process").mkdir(parents=True)

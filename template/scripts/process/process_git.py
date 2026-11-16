@@ -105,6 +105,32 @@ def is_disk_full_line(line: str) -> bool:
     return line.split(maxsplit=1)[:1] == [DISK_FULL]
 
 
+# the abort marker of the train's suite run (train.py, `docs/process/train.md`, "Red,
+# undefined, aborted"): a writer inside the run marks it aborted, not red
+SUITE_ABORT_ENV = "PROCESS_SUITE_ABORT"
+
+
+def note_suite_abort(line: str) -> None:
+    """Append `line` (its line breaks made spaces) to the train's abort marker, when
+    `PROCESS_SUITE_ABORT` is set — the one writer, for lane.py (`lane-busy …`) and dispatch
+    (`disk-full …`): one `os.write`, append only, never creating the file (a marker the
+    train has removed stays gone), never blocking (a FIFO nobody reads). A failure to write
+    changes nothing."""
+    path = os.environ.get(SUITE_ABORT_ENV)
+    if not path:
+        return
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except (OSError, ValueError):
+        return
+    try:
+        os.write(fd, f"{' '.join(line.splitlines())}\n".encode("utf-8", "replace"))
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def git_environment(extra=None):
     return {**(os.environ if extra is None else extra), "GIT_NO_REPLACE_OBJECTS": "1"}
 
