@@ -1243,6 +1243,10 @@ def test_a_spec_plans_dod_deviation_rides_along_and_plan_shows_the_count(render,
     _git(out, "add", "-A")
     _git(out, "commit", "-q", "-m", "feat: export spec")
     _git(out, "checkout", "-q", "main")
+    # ein review-pass-Bericht: ohne ihn und ohne archivierten Plan kann keiner einsteigen, und
+    # `plan` zeigt nur die kurze Zeile ohne Abweichungen (#426 D1)
+    for worker in ("55-dev", "56-spec"):
+        _report(out, worker)
     shown = _train(out, "plan")
     assert shown.returncode == 0, shown.stderr
     line = {ln.split()[1]: ln for ln in shown.stdout.splitlines() if ln.startswith("  ")
@@ -4416,6 +4420,166 @@ def test_a_second_holding_run_overwrites_the_hold_log(render, tmp_path):
     held = (out / ".git/process-train/last-hold.txt").read_text()
     assert "waiting for 6" in held and "waiting for 5" not in held, held
     assert held.count("holding") == 1, held
+
+
+# --- v2.98 D1 (#426): `plan` reads only the branches that can board ------------------------
+
+def _stale_branches(out: Path, n: int, prefix: str = "s") -> dict[str, str]:
+    """`n` Branches mit eigenem Commit und aktivem Plan, ohne archivierten Plan, ohne REVIEW,
+    ohne Bericht (wie in Kenni) — über einen `fast-import`; {Branch: SHA}."""
+    main = _git(out, "rev-parse", "main").stdout.strip()
+    now = int(time.time())
+
+    def blob(data: str) -> str:
+        return f"data {len(data.encode())}\n{data}\n"
+
+    stream = "".join(
+        f"commit refs/heads/{prefix}{i:03}\ncommitter t <t@t> {now - 3600 * (i + 1)} +0000\n"
+        + blob(f"wip {prefix}{i:03}") + f"from {main}\n"
+        + f"M 100644 inline src/{prefix}{i:03}.py\n" + blob(f"S = {i}\n")
+        + f"M 100644 inline .process-work/plans/2026-10-22-{prefix}{i:03}-stale.md\n"
+        + blob(f"# {prefix}{i:03}\n\ntier: 2\nissue: #{5000 + i}\n\n## Decisions\n") + "\n"
+        for i in range(n))
+    subprocess.run(["git", "fast-import", "--quiet"], cwd=out, input=stream, text=True, check=True,
+                   capture_output=True)
+    return {f"{prefix}{i:03}": _git(out, "rev-parse", f"{prefix}{i:03}").stdout.strip() for i in range(n)}
+
+
+def _boarding_repo(out: Path) -> None:
+    """Kandidaten jeder Art, an denen sich nichts ändern darf: zwei, die einsteigen und sich
+    streiten (alpha × gamma), einer auf seinem review-pass-Bericht (70-p1-slice), einer, dessen
+    archivierter Plan einen datumslosen Namensvetter auf main hat (login, `dedated`), einer
+    ohne REVIEW (beta) und ein aktiver Plan, dessen Slug einer der veralteten trägt (ns)."""
+    a = out / ".process-work/plans/archive"
+    a.mkdir(parents=True, exist_ok=True)
+    (a / "2026-01-05-login.md").write_text("# old\n\ntier: 3\n")
+    j = out / ".process-work/journal"
+    j.mkdir(parents=True, exist_ok=True)
+    (j / "2026-01-05.md").write_text("REVIEW work=login tier=3 reviewer=fresh model=cross "
+                                     "independence=bundle,non-implementing verdict=pass round=1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "history")
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _branch(out, "gamma", {"src/a.py": "conflict\n", "src/g.py": "g\n"})
+    _branch(out, "beta", {"src/b.py": "b\n"}, reviewed=False)
+    _branch(out, "login", {"src/l.py": "l\n"}, tier=3, reviewed=False)
+    _package_branch(out, "70-p1-slice", "71")
+    _report(out, "70-p1-slice")
+    _dispatched(out, 71, "70-p1-slice")
+    _slug_branch(out, "ns", "2026-10-01-s000-stale.md", issue=4999, work="s000-stale",
+                 files={"src/ns.py": "ns\n"})
+    _report(out, "ns")
+
+
+def _decisions(cands: list[dict]) -> dict[str, dict]:
+    """Was `plan` über einen Kandidaten entscheidet und zeigt — ohne die Uhr (`hours_waiting`)."""
+    return {c["branch"]: {k: v for k, v in c.items() if k != "hours_waiting"} for c in cands}
+
+
+def test_branches_that_cannot_board_cost_no_main_loop_work(render, tmp_path, monkeypatch):
+    """#426 D1: 100 Branches ohne archivierten Plan und ohne Bericht — die Hauptschleife liest
+    für sie nur das `rev-list` der Zählung; die Vorab-Schleifen bleiben für alle."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    stale = _stale_branches(out, 100)
+    train = _load_train(out)
+    base = _git(out, "rev-parse", "main").stdout.strip()
+    calls = _git_calls(monkeypatch)
+    by = {c["branch"]: c for c in train.candidates(out, "main", "main")}
+    assert by["alpha"]["eligible"], by["alpha"]["reasons"]
+    def allowed(tip: str) -> list[list[str]]:
+        """Die Lesungen der Vorab-Schleifen und die Zählung — sonst nichts."""
+        return [["diff", "--name-only", "-z", "--diff-filter=A", f"{base}...{tip}", "--", train.ARCHIVE],
+                ["diff", "--name-status", "-M", "-z", f"{base}...{tip}", "--", train.PLANS],
+                ["merge-base", base, tip], ["rev-list", f"{base}..{tip}"],
+                ["rev-list", "--left-right", "--count", f"{base}...{tip}"]]
+
+    for branch, tip in stale.items():
+        named = [c for c in calls if any(tip in arg for arg in c)]
+        assert all(c in allowed(tip) for c in named), [c for c in named if c not in allowed(tip)][:3]
+        assert named.count(["rev-list", "--left-right", "--count", f"{base}...{tip}"]) == 1, named
+        c = by[branch]
+        assert c["skipped"] and not c["eligible"] and (c["ahead"], c["behind"]) == (1, 0), c
+    alpha_tip = by["alpha"]["sha"]
+    assert any(c[:1] == ["log"] and alpha_tip in c for c in calls), "alpha wurde nicht gelesen"
+
+
+def test_skipping_changes_no_candidate_conflict_or_dedated_result(render, tmp_path, monkeypatch):
+    """#426 D1: dieselben Entscheidungen wie vorher (ohne den Sprung) für jeden Branch, und für
+    die übrigen dieselben Kandidaten, Konflikte und `dedated`-Ergebnisse mit und ohne die
+    100 veralteten Branches."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _boarding_repo(out)
+    stale = _stale_branches(out, 100)
+    train = _load_train(out)
+    skipping = train.candidates(out, "main", "main")
+    with monkeypatch.context() as m:
+        m.setattr(train, "_cannot_board", lambda *a: False)  # the main loop for every branch, as before
+        reading = train.candidates(out, "main", "main")
+    assert [c["branch"] for c in skipping] == [c["branch"] for c in reading]
+    for before, now in zip(reading, skipping):
+        assert (now["eligible"], now["by"]) == (before["eligible"], before["by"]), (before, now)
+    kept = {b: c for b, c in _decisions(skipping).items() if b not in stale}
+    assert kept == {b: c for b, c in _decisions(reading).items() if b not in stale}
+    # the pre-loops still see every branch: the stale s000's active plan shares ns's slug
+    assert not kept["ns"]["eligible"], kept["ns"]
+    for name in stale:
+        _git(out, "branch", "-q", "-D", name)
+    without_cands = train.candidates(out, "main", "main")
+    without = _decisions(without_cands)
+    assert without.pop("ns")["eligible"], "ohne den Namensvetter steigt ns ein"
+    kept.pop("ns")
+    assert kept == without
+    assert train.conflict_hints(out, skipping) == train.conflict_hints(out, without_cands) == [
+        {"branches": ["alpha", "gamma"], "paths": ["src/a.py"]}]
+    login = kept["login"]
+    assert not login["eligible"] and "without a REVIEW pass covering the branch head" in login["reasons"][0], login
+    assert sorted(b for b, c in kept.items() if c["eligible"]) == ["70-p1-slice", "alpha", "gamma"], kept
+
+
+def test_a_skipped_branch_keeps_a_short_reason_and_line(render, tmp_path):
+    """#426 D1 (r3 n7): ein übersprungener Branch zeigt einen kurzen Grund aus dem, was schon
+    gelesen ist — Hold, letzter Bericht, sonst „run /finish first“ — und eine kurze Zeile ohne
+    Dateien, Stunden und Abweichungen, in `plan` und in `last-hold.txt`."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _stale_branches(out, 3)
+    _report(out, "s001", None, "blocked", note="waits for the API")
+    _report(out, "s002", None, "done")
+    by = {c["branch"]: c for c in json.loads(_train(out, "plan", "--json").stdout)["candidates"]}
+    assert all(by[b]["skipped"] and not by[b]["eligible"] for b in ("s000", "s001", "s002")), by
+    assert by["s000"]["reasons"] == ["no archived plan on the branch and no review-pass report (run /finish first)"]
+    assert by["s001"]["reasons"][0].startswith("latest report `blocked` (") and "waits for the API" in \
+        by["s001"]["reasons"][0], by["s001"]
+    assert by["s001"]["reasons"][1:] == by["s000"]["reasons"], by["s001"]
+    assert by["s002"]["reasons"] == ["report `done` boards nothing — commits after a merge need their own "
+                                     "REVIEW pass (review the new commits, then attest)"], by["s002"]
+    assert all(k not in by["s000"] for k in ("files", "hours_waiting", "deviations", "keeps_open")), by["s000"]
+    text = _train(out, "plan").stdout
+    line = next(ln for ln in text.splitlines() if ln.startswith("  · s000 "))
+    assert line == "  · s000 (+1/-0, not read further: it cannot board)", line
+    assert "      - no archived plan on the branch and no review-pass report (run /finish first)" in text, text
+    r = _train(out, "run", "--suite", "true")
+    assert r.returncode == 0 and "nothing to do" in r.stdout, r.stdout + r.stderr
+    held = (out / ".git/process-train/last-hold.txt").read_text().splitlines()
+    assert line in held and not any("file(s)" in ln for ln in held), held
+
+
+def test_an_unreadable_archive_diff_is_not_skipped(render, tmp_path, monkeypatch):
+    """#426 D1: liest git die archivierten Pläne eines Branches nicht (`None`), läuft er durch
+    die Hauptschleife — „git could not read“ bleibt sein Grund."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    tip = _stale_branches(out, 1)["s000"]
+    train = _load_train(out)
+    real = train._paths
+    monkeypatch.setattr(train, "_paths", lambda root, *a: None if "--diff-filter=A" in a and any(
+        tip in x for x in a) else real(root, *a))
+    c = next(c for c in train.candidates(out, "main", "main") if c["branch"] == "s000")
+    assert not c.get("skipped") and "files" in c, c
+    assert any("git could not read the plans s000 archives" in r for r in c["reasons"]), c["reasons"]
 
 
 # --- v2.95: a load abort is no finding about a passenger ------------------------------------

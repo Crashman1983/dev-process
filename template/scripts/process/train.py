@@ -368,6 +368,27 @@ def _without_lead(root: Path, base_sha: str, tips: dict[str, str]) -> set[str]:
 
 
 PROFILE_ENV = "PROCESS_TRAIN_PLAN_PROFILE"  # set: `candidates()` prints its section times on stderr
+NOT_FINISHED = "no archived plan on the branch and no review-pass report (run /finish first)"
+# `done` is what a train writes after merging: it clears nothing the branch committed since
+# (downstream: a merged branch got new commits and showed as boardable on the old report)
+DONE_BOARDS_NOTHING = ("report `done` boards nothing — commits after a merge need their own "
+                       "REVIEW pass (review the new commits, then attest)")
+
+
+def _cannot_board(added: list[str] | None, report: dict | None) -> bool:
+    """A branch no rule of `candidates()` can board (#426): it archives no plan
+    (`added` read, without a `.md`) and its latest report is not `review-pass` —
+    every kind of `eligible` needs one of the two (an archived own plan, or the
+    report). Unread (`None`) is no "none": that branch is read, and refused as
+    unreadable."""
+    return added is not None and not any(p.endswith(".md") for p in added) \
+        and not (report and report["state"] == "review-pass")
+
+
+def _hold_reason(hold: dict) -> str:
+    note = f": {hold['note']}" if hold.get("note") else ""
+    return (f"latest report `blocked` ({hold['minutes_ago']} min ago{note}) — "
+            f"`report.py pushed` after the fix, or `review-pass`, releases it")
 
 
 def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) -> list[dict]:
@@ -457,6 +478,7 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
     same_plan = _stacked_renames(root, base_sha, branches, new_by, unreadable, tips)
     lap("pair_loop")
     out: list[dict] = []
+    read_in_full = 0
     for b in sorted(branches):
         tip = tips[b]  # its content, as boarded; `b` stays its identity
         counts = _out(root, "rev-list", "--left-right", "--count", f"{base_sha}...{tip}")
@@ -467,6 +489,15 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
             if counts:  # git read it: contained after all (an unreadable listing, a branch moved since the snapshot)
                 no_lead += 1
             continue  # an unreadable count stays unboarded as before, but is no "merged or empty"
+        hold, rep = holds.get(b), reports.get(b)
+        if _cannot_board(added_by[b], rep):
+            # nothing below could board it (#426): say why from what is read, read no further
+            c["skipped"] = True
+            c["reasons"] += ([_hold_reason(hold)] if hold else []) + [
+                DONE_BOARDS_NOTHING if rep and rep["state"] == "done" else NOT_FINISHED]
+            out.append(c)
+            continue
+        read_in_full += 1
         listed = _paths(root, "diff", "--name-only", "-z", f"{base_sha}...{tip}")
         files = set(listed or ())
         c["files"] = len(files)
@@ -582,13 +613,9 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
             template_blocked = True
             c["reasons"].append(f'template verification failed: {exc}')
-        hold = holds.get(b)
         report_blocked = bool(hold)
         if report_blocked:
-            note = f": {hold['note']}" if hold.get("note") else ""
-            c["reasons"].append(f"latest report `blocked` ({hold['minutes_ago']} min ago{note}) — "
-                                f"`report.py pushed` after the fix, or `review-pass`, releases it")
-        rep = reports.get(b)
+            c["reasons"].append(_hold_reason(hold))
         process_unreviewed = bool(touches_process) and not _covers(root, passes, own_ids, 2, tip, branch_passes, base_sha)
         if process_unreviewed:
             more = f" and {len(touches_process) - 1} more" if len(touches_process) > 1 else ""
@@ -621,16 +648,12 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
             c["reasons"].append("archived Tier 2+ plan without a REVIEW pass covering the branch head "
                                 "(run /review, then attest)")
         elif rep and rep["state"] == "done":
-            # `done` is what a train writes after merging: it clears nothing
-            # the branch committed since (downstream: a merged branch got new
-            # commits and showed as boardable on the old report)
-            c["reasons"].append("report `done` boards nothing — commits after a merge need their own "
-                                "REVIEW pass (review the new commits, then attest)")
+            c["reasons"].append(DONE_BOARDS_NOTHING)
         elif housekeeping:
             c["reasons"].append(f"archives {len(housekeeping)} plan(s) of other work only — none is this "
                                 "branch's own, and another work's clearance does not clear this branch")
         else:
-            c["reasons"].append("no archived plan on the branch and no review-pass report (run /finish first)")
+            c["reasons"].append(NOT_FINISHED)
         # a file shared with a branch aboard is no reason to wait: git merges
         # the batch, a conflict drops the later candidate (`build_train`), and
         # the gates read reviewed content as git's merge of the reviewed works
@@ -641,7 +664,9 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         out.append(c)
     lap("main_loop")
     if os.environ.get(PROFILE_ENV):
-        print(json.dumps({"train_plan_profile": {**profile, "branches": len(branches)}}), file=sys.stderr)
+        print(json.dumps({"train_plan_profile": {**profile, "branches": len(branches), "read": read_in_full,
+                                                 "skipped": sum(1 for c in out if c.get("skipped"))}}),
+              file=sys.stderr)
     if snapshot is not None:
         snapshot["no_lead"] = no_lead
     return out
@@ -2998,14 +3023,18 @@ def conflict_hints(root: Path, cands: list[dict]) -> list[dict]:
 
 
 def _candidate_lines(c: dict) -> list[str]:
-    """One candidate as `plan` shows it: its line, then its reasons."""
+    """One candidate as `plan` shows it: its line, then its reasons. A branch
+    that cannot board was read no further (#426): a short line."""
+    reasons = [f"      - {r}" for r in c["reasons"]]
+    if c.get("skipped"):
+        return [f"  · {c['branch']} (+{c['ahead']}/-{c['behind']}, not read further: it cannot board)"] + reasons
     mark = "✓" if c["eligible"] else "·"
     extra = f" — {c['by']}" if c.get("by") and c["eligible"] else ""
     held = c.get("keeps_open") or []
     keeps = f", keeps {', '.join(f'#{n}' for n in held)} open" if held else ""
     line = (f"  {mark} {c['branch']} (+{c['ahead']}/-{c['behind']}, {c.get('files', 0)} file(s), "
             f"{c.get('hours_waiting', '?')} h, {c.get('deviations', 0)} DoD deviation(s){keeps}){extra}")
-    return [line] + [f"      - {r}" for r in c["reasons"]]
+    return [line] + reasons
 
 
 def _no_lead_lines(p: dict) -> list[str]:
