@@ -5371,3 +5371,23 @@ def test_train_phases_counts_lane_held_apart_from_the_preflight(render, tmp_path
     assert ("0/4 runs ended red, 1 stopped by the preflight (the host, not a passenger), "
             "2 held at the lane full (another run held it), nobody blamed") in out, out
 
+
+# --- v2.98 B1: train-phases counts a full disk apart -----------------------------------
+
+def test_train_phases_counts_disk_full_apart_and_shows_its_series(render, tmp_path):
+    """`disk-full` is neither the preflight nor a suite abort; a series of trains halted on the
+    same disk shows as a count, compared over the first two words (`disk-full <path>`)."""
+    def halted(line):
+        return {"result": "environment", "rounds": [{"red_path": "disk-full", "runs": {}, "disk_full": line}]}
+
+    def aborted(line):
+        return {"result": "environment", "rounds": [
+            {"red_path": "suite-aborted", "runs": {}, "aborts": [{"reason": line, "wait_s": 0.0, "ended": None}]}]}
+    rows = [halted("disk-full /srv 91%"), {"result": "environment", "rounds": [{"red_path": "environment"}]},
+            aborted("disk-full /tmp 97%"), aborted("disk-full /tmp 99%"),
+            halted("disk-full /tmp 92%"), halted("disk-full /srv 93%"), halted("disk-full /srv 95%")]
+    out = _train_phases(render, tmp_path, rows)
+    assert ("0/7 runs ended red, 1 stopped by the preflight (the host, not a passenger), "
+            "2 suite aborted, nobody blamed, 4 halted on a full disk (disk-full), nobody blamed") in out, out
+    assert 'suite aborted on "disk-full /tmp 99%" — 2 trains in a row (not the latest train)' in out, out
+    assert 'halted on "disk-full /srv 95%" — 2 trains in a row' in out, out

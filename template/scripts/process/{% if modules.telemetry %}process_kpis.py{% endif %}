@@ -2196,25 +2196,46 @@ def _abort_key(line: str) -> tuple[str, ...]:
     return tuple(line.split()[:2])
 
 
-def _suite_abort_lines(every: list[dict], window: list[dict]) -> list[str]:
-    """v2.95: the latest train of the window that ended `suite-aborted`, the marker line it
-    stopped on, and how many trains in a row (over all of `phases.jsonl`, up to it) ended on
-    the same kind and subject (`_abort_key`) — a test or a lane that aborts every train
-    shows as a count that grows."""
-    latest = next((row for row in reversed(window) if _abort_line(row) is not None), None)
+def _streak_lines(every: list[dict], window: list[dict], read, said: str) -> list[str]:
+    """The latest train of the window that `read` names a line for, that line, and how many
+    trains in a row (over all of `phases.jsonl`, up to it) carry a line of the same kind and
+    subject (`_abort_key`) — what stops every train shows as a count that grows."""
+    latest = next((row for row in reversed(window) if read(row) is not None), None)
     if latest is None:
         return []
-    line = _abort_line(latest)
+    line = read(latest)
     key = _abort_key(line)
     at = max(i for i, row in enumerate(every) if row is latest)
     streak = 0
     for row in reversed(every[:at + 1]):
-        other = _abort_line(row)
+        other = read(row)
         if other is None or _abort_key(other) != key:
             break
         streak += 1
-    return [f'  suite aborted on "{line}" — {streak} train{"" if streak == 1 else "s"} in a row'
+    return [f'  {said} "{line}" — {streak} train{"" if streak == 1 else "s"} in a row'
             + ("" if latest is window[-1] else " (not the latest train)")]
+
+
+def _suite_abort_lines(every: list[dict], window: list[dict]) -> list[str]:
+    """v2.95: the latest train that ended `suite-aborted` and the marker line it stopped on,
+    with its trains in a row — a test or a lane that aborts every train."""
+    return _streak_lines(every, window, _abort_line, "suite aborted on")
+
+
+def _disk_full_line(row: dict) -> str | None:
+    """v2.98 B1: the disk a train halted on (`disk-full <path> <use>%`, its last round's
+    `disk_full`); None for any other train, "unknown" for one without the field."""
+    last = _ending(row)
+    if last is None or last.get("red_path") != "disk-full":
+        return None
+    line = last.get("disk_full")
+    return line if isinstance(line, str) and line else "unknown"
+
+
+def _disk_full_lines(every: list[dict], window: list[dict]) -> list[str]:
+    """v2.98 B1: the latest train that halted on a full disk, with its trains in a row on the
+    same disk (`disk-full <path>`) — a disk nobody frees (`tidy.py --apply`)."""
+    return _streak_lines(every, window, _disk_full_line, "halted on")
 
 
 def train_phases(runs: int = 20) -> int:
@@ -2258,19 +2279,24 @@ def train_phases(runs: int = 20) -> int:
     results = [row.get("result") for row in rows]
     # `preboard`: the preboard check dropped every candidate — no red train, nothing built
     stopped = results.count("preboard")
-    # `environment` is three stops (v2.95, v2.97 B7): the preflight, a suite run that aborted
-    # with nobody to blame (its last round `suite-aborted`), and a train that found its lane
-    # `full` held (its one round `lane-held`) — nothing ran
+    # `environment` is four stops (v2.95, v2.97 B7, v2.98 B1): the preflight, a suite run that
+    # aborted with nobody to blame (its last round `suite-aborted`), a train that found its lane
+    # `full` held (its one round `lane-held`) — nothing ran — and a disk over the limit
+    # (`disk-full`)
     aborted = sum(1 for row in rows if row.get("result") == "environment" and _abort_line(row) is not None)
     lane_held = sum(1 for row in rows if row.get("result") == "environment"
                     and (_ending(row) or {}).get("red_path") == "lane-held")
+    disk_full = sum(1 for row in rows if row.get("result") == "environment" and _disk_full_line(row) is not None)
     print(f"  {results.count('red')}/{len(rows)} runs ended red, "
-          f"{results.count('environment') - aborted - lane_held} stopped by the preflight "
+          f"{results.count('environment') - aborted - lane_held - disk_full} stopped by the preflight "
           f"(the host, not a passenger)"
           + (f", {aborted} suite aborted, nobody blamed" if aborted else "")
           + (f", {lane_held} held at the lane full (another run held it), nobody blamed" if lane_held else "")
+          + (f", {disk_full} halted on a full disk (disk-full), nobody blamed" if disk_full else "")
           + (f", {stopped} ended at the preboard check (every candidate dropped)" if stopped else ""))
     for line in _suite_abort_lines(every, rows):
+        print(line)
+    for line in _disk_full_lines(every, rows):
         print(line)
     n = len(rows)
     print(f"  {confidence(n)} · {action(_level(n, False, False, _N_THRESHOLD), 'shorten the phase with the largest median first: plan → fewer unmerged stale branches to read (tidy.py), suite → test selection and certificates, bisect → smaller batches, retry → flaky tests (failure-catalog.md)', thin='let more trains run before acting on a phase')}")
