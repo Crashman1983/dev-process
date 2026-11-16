@@ -749,6 +749,39 @@ def test_commit_claiming_issue_of_a_spec_plan_is_hard_on_merge_push(render, tmp_
     assert _run(out, env=env).returncode == 0
 
 
+def test_one_claim_grammar_reads_range_and_integration(tmp_path):
+    """r2 m5, r3 m5: `issue_claims_in_range` ist die einzige Leserin, `issue_refs_in_range`
+    ihre Menge, und `issues_on_integration` liest dieselbe Grammatik."""
+    cr, root = _cr(), tmp_path / "p"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    _commit_file(root, "README.md", "base\n")
+    _git(root, "checkout", "-q", "-b", "feature")
+    messages = ["feat: a (#1)", "docs: b, see #2", "fix: c\n\nCloses #3\nResolves: #1",
+                "chore: Merge pull request #4", "fix #5 at once (#6)"]
+    shas = []
+    for i, message in enumerate(messages):
+        (root / f"f{i}.txt").write_text(f"{i}\n")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", message)
+        shas.append(_git(root, "rev-parse", "HEAD").stdout.strip())
+    claims = cr.issue_claims_in_range(root)
+    got = sorted((c.number, c.sha, c.subject, c.kind) for c in claims)
+    assert got == sorted([
+        (1, shas[0], "feat: a (#1)", "subject"),
+        (3, shas[2], "fix: c", "closing"),
+        (1, shas[2], "fix: c", "closing"),
+        (6, shas[4], "fix #5 at once (#6)", "subject"),
+        (5, shas[4], "fix #5 at once (#6)", "closing"),
+    ]), got
+    assert cr.issue_refs_in_range(root) == {1, 3, 5, 6}
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--ff-only", "feature")
+    assert cr.issues_on_integration(root) == {1, 3, 5, 6}
+
+
 def test_tier2_active_plan_is_hard_on_merge_push(render, tmp_path):
     # observed downstream: a Tier 2 plan merged to main without a review, every
     # gate green — from Tier 2 on the proof is due at the merge push
