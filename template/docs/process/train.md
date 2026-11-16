@@ -34,7 +34,8 @@ one); `--preflight ""` replaces the global check with none for this train —
 the stacks' own still run. Red there is the host's, not a
 passenger's: the run stops, nobody is blamed, nothing is retried or bisected,
 and no branch is reported blocked. Downstream, an expired login and a full
-disk each cost a whole release run that read as a red train.
+disk each cost a whole release run that read as a red train; the disk the
+train now checks itself, with or without a preflight ("A full disk", below).
 
 `preboard` in `testing.local.json` (`preboard_timeout`, 120 s without one;
 `--preboard ""` switches it off for one run) is a guard that takes seconds,
@@ -315,8 +316,9 @@ per round: the first, and one more after each drop. Each entry has:
   `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`,
   `environment`, `suite-aborted` (a suite run aborted and nobody could be
   blamed), `lane-held` (the train could not take lane `full`; nothing ran,
-  nobody blamed), `push-rejected` or `aborted` (the train itself crashed or was
-  interrupted).
+  nobody blamed), `disk-full` (a disk the train writes to was over its limit;
+  nobody blamed — the round's `disk_full` names it, see "A full disk"),
+  `push-rejected` or `aborted` (the train itself crashed or was interrupted).
 - `runs`, every run of the round by kind (`first`, `retry_gates`,
   `retry_failed`, `retry_full`, `base`, `probe`, `retry_abort`), each with
   its count, its build-and-gates seconds and its suite seconds kept apart.
@@ -423,13 +425,51 @@ times the wait.
 
 The wait is the phase `abort_wait`. Each round's `aborts` lists every aborted
 run: `reason` (the marker's first line), `wait_s` (the wait before its
-repeat) and `ended` (`load`, `budget`, `unread`, or null when nothing was
-repeated after it); a round that ends green keeps them. `train-phases`
-counts `suite-aborted` and `lane-held` apart from the preflight and names the line the
+repeat) and `ended` (`load`, `budget`, `unread`, `disk-full` when nothing
+waited because the disk was full, or null when nothing was repeated after
+it); a round that ends green keeps them. `train-phases` counts
+`suite-aborted`, `lane-held` and `disk-full` apart from the preflight and names the line the
 latest one stopped on, with the number of trains in a row that ended on
 the same kind and subject (its first two words: `lane-busy full`,
-`watchdog <nodeid>`; pids, times and loads vary) — a test or a lane that
-aborts every train shows there.
+`watchdog <nodeid>`, `disk-full <path>`; pids, times, loads and percentages
+vary) — a test, a lane or a disk that stops every train shows there.
+
+**A full disk (v2.98).** The train checks the disks it writes to — the one
+holding its worktrees, measured at the nearest directory that exists (before
+the first train there is no `<root>-train`), and the temp dir's — against
+`PROCESS_DISK_LIMIT_PCT` (90 % by default, the limit `dispatch.py start`
+refuses at):
+- before every build, once the old tree is gone and before `worktree add`
+  and the merges, and again where git fails in them;
+- before every judge, ahead of the preflight and the gates;
+- before every suite run: the first run, the repeats, the base, the probes,
+  the `--retry` run and the gates retry in the same tree, the preboard
+  probes.
+
+A disk over the limit there was not filled by anyone of this run: the train
+halts, `result="environment"`, `red_path="disk-full"`, the line
+`disk-full <path> <use>%` in the round's `disk_full`. Nobody is blamed,
+nothing merged; passengers dropped for a real red in an earlier round are
+reported. A full disk never reads as a merge conflict, a crash (`aborted`)
+or a red main.
+
+A suite run that ends red (or undefined) and leaves a disk over the limit
+measured nothing: an abort, its reason `disk-full <path> <use>%`, read by the
+train itself (at 100 % no marker file can be written). A refused
+`dispatch.py start` inside a suite run appends the same line to the marker.
+Its repeat waits for no load (a full disk is not emptied by waiting) and
+rebuilds at once; the check before it decides. Still full: `disk-full`. Free:
+the run goes, and a rebuilt tree that fills the disk again counts **red**
+without a fresh base — no base fills a disk, it carries no passenger — and
+the search finds the passenger whose tests fill it. The base itself aborting
+that way twice stays `suite-aborted`. A suite that fills the disk and cleans
+up stays red: nothing was measured over the limit.
+
+The price, chosen: a passenger that leaves files outside its tree (in
+`/tmp`) is not blamed. The train halts `disk-full` and names the disk;
+`tidy.py --apply` frees the merged worktrees, and `train-phases` shows a
+series. A limit that is no percentage in (0, 100] is a note in the log and
+on stderr, never a halt. A project's `--preflight` may still check the disk.
 
 ## Who pushes to main — the merge route
 

@@ -160,7 +160,8 @@ told does); a held `full` or `scoped` lane blocks no start (a session's own test
 also refuses while the filesystem holding the worktrees is at or above
 90% use (`PROCESS_DISK_LIMIT_PCT`), naming the usage and
 `python3 scripts/process/tidy.py --apply` — each worktree carries its own
-environments, and merged ones are removed by the train and by tidy. Both runners strip
+environments, and merged ones are removed by the train and by tidy. The
+train halts at the same limit, blaming nobody (`train.md`, "A full disk"). Both runners strip
 the steward's own `CLAUDECODE`/`CLAUDE_CODE_*` variables from the
 worker's environment: a worker is a session of its own. Local workers
 start under `nice` (policy `worker_nice`, default 10, 0 = off): the merge
