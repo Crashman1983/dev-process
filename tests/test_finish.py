@@ -935,6 +935,8 @@ def test_a_foreign_subject_claim_blocks_finish_through_its_gate_run(render, tmp_
     monkeypatch.setattr(finish, "gate_runner_argv", lambda root: [sys.executable, str(wrapper)])
     blockers, _steps = finish.check(out)
     assert any("gate suite red" in b and "FAILED gates: review" in b for b in blockers), blockers
+    # finish's own blocker carries the finding and its way out, not only the summary
+    assert any("reword it to `see #3000`" in b for b in blockers), blockers
     gate = seen.read_text()
     assert f"`{sha[:9]} docs: mark P5 done (#3000)` claims #3000 with `(#3000)`" in gate, gate
     assert "reword it to `see #3000` — otherwise review #3000's plan for it" in gate, gate

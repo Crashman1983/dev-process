@@ -83,6 +83,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
+GATE_LINES = 15  # the red gate run's last lines a blocker carries (notes left out)
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 from process_git import git_environment  # noqa: E402
 import certificate  # noqa: E402
@@ -353,9 +354,11 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         gr = subprocess.run(argv, cwd=str(root), capture_output=True, text=True,
                             env=git_environment({**os.environ, PUSH_TARGETS_ENV: target}))
         if gr.returncode != 0:
-            last = [ln for ln in (gr.stdout + gr.stderr).splitlines()
-                    if ln.strip()][-3:]
-            blockers.append("gate suite red: " + " | ".join(last))
+            # the findings, not only the summary: a red gate's own lines say what to do
+            # (v2.98: the issue arm names the claiming commit and the way out); notes stay out
+            said = [ln for ln in (gr.stdout + gr.stderr).splitlines()
+                    if ln.strip() and ": note" not in ln]
+            blockers.append("gate suite red: " + " | ".join(said[-GATE_LINES:]))
         elif head and not dirty:
             check.green_at = (head, target)  # the local merge reuses it (v2.94 B3)
 
