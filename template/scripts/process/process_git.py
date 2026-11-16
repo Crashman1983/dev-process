@@ -67,25 +67,32 @@ class DiskUse(NamedTuple):
         return self.use_pct is not None and self.limit is not None and self.use_pct >= self.limit
 
 
-def disk_use(path: Path) -> DiskUse:
+def disk_use(path: Path, *, fallback: bool = False) -> DiskUse:
     """The use of the filesystem holding `path` (used / (used + available), as `df` counts
     it) and the limit (`PROCESS_DISK_LIMIT_PCT`, default 90). A limit that is no percentage
-    in (0, 100] is a problem, neither silently off nor silently the default."""
+    in (0, 100] is a problem, neither silently off nor silently the default: without
+    `fallback` (dispatch refuses on it) `limit` is None and nothing is read; with it (the
+    train, which must not stop checking) the use is read against the default, the problem
+    still named."""
     raw = os.environ.get(DISK_LIMIT_ENV, "").strip()
     try:
         limit = float(raw) if raw else float(DISK_LIMIT_PCT)
     except ValueError:
         limit = math.nan
+    misconfigured = None
     if not (math.isfinite(limit) and 0 < limit <= 100):
-        return DiskUse(None, f"{DISK_LIMIT_ENV}={raw!r} is no percentage in (0, 100] — fix or unset it "
-                             f"(default {DISK_LIMIT_PCT})")
+        misconfigured = (f"{DISK_LIMIT_ENV}={raw!r} is no percentage in (0, 100] — fix or unset it "
+                         f"(default {DISK_LIMIT_PCT})")
+        if not fallback:
+            return DiskUse(None, misconfigured)
+        limit = float(DISK_LIMIT_PCT)
     try:
         u = shutil.disk_usage(path)
     except OSError as exc:
         return DiskUse(None, f"disk use of {path} not checked: {exc}", limit)
     if u.used + u.free <= 0:
-        return DiskUse(None, None, limit, u.free)
-    return DiskUse(100.0 * u.used / (u.used + u.free), None, limit, u.free)
+        return DiskUse(None, misconfigured, limit, u.free)
+    return DiskUse(100.0 * u.used / (u.used + u.free), misconfigured, limit, u.free)
 
 
 def disk_full_line(path: Path, use_pct: float) -> str:

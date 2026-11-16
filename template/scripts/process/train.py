@@ -1285,18 +1285,20 @@ def _temp_root() -> Path:
 
 def _disk_full(where: Path, log) -> str | None:
     """`disk-full <path> <use>%` for the first disk over the limit — the one holding `where`
-    (measured at the nearest directory that exists), then the temp dir's — or None. A limit
-    that is misconfigured, or a use that cannot be read, is a note, never full."""
+    (measured at the nearest directory that exists), then the temp dir's — or None. A use
+    that cannot be read is a note, never full; a misconfigured limit is a note, and the
+    default limit holds (dispatch refuses on it; a train that stopped checking would read
+    a full disk as red passengers again)."""
     for path in (_nearest_dir(Path(where)), _nearest_dir(_temp_root())):
-        use = process_git.disk_use(path)
+        use = process_git.disk_use(path, fallback=True)
         if use.problem:
             log(f"disk: note — {use.problem}")
             if use.problem not in _DISK_NOTES:
                 _DISK_NOTES.add(use.problem)
-                print(f"train: note — {use.problem}; the disk is not checked", file=sys.stderr)
-            if use.limit is None:
-                return None  # the same limit for every disk
-        elif use.full and use.use_pct is not None:
+                checked = "not checked" if use.use_pct is None else \
+                    f"checked against the default {process_git.DISK_LIMIT_PCT}%"
+                print(f"train: note — {use.problem}; the disk is {checked}", file=sys.stderr)
+        if use.full and use.use_pct is not None:
             return process_git.disk_full_line(path, use.use_pct)
     return None
 
