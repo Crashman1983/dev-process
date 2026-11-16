@@ -1509,6 +1509,36 @@ def test_a_full_disk_refusal_appends_the_abort_line_for_the_train(render, tmp_pa
     assert added == ([f"disk-full {tmp_path} 95%"] if marked else []), added
 
 
+def test_lane_and_dispatch_write_the_abort_marker_through_one_writer(render, tmp_path, monkeypatch):
+    """Refute v2.98: lane.py and dispatch each had a copy of the marker writer. Both call
+    `process_git.note_suite_abort` now, and the bytes are that writer's: one line each, line
+    breaks made spaces, appended."""
+    import importlib.util
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    d = _load_dispatch(out)
+    spec = importlib.util.spec_from_file_location("lane_one_writer", out / "scripts/process/lane.py")
+    lane = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lane)
+    real = d.process_git.note_suite_abort
+    calls: list[str] = []
+    for mod in {id(m): m for m in (d.process_git, lane.process_git)}.values():
+        monkeypatch.setattr(mod, "note_suite_abort", lambda line: calls.append(line) or real(line))
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(95))
+    monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    marker, again = tmp_path / "marker", tmp_path / "again"
+    marker.write_text("")
+    again.write_text("")
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
+    lane._note_suite_abort("full", "held by pid 1 — a\nlabel")
+    assert d.disk_refusal(tmp_path)
+    assert calls == ["lane-busy full held by pid 1 — a\nlabel", f"disk-full {tmp_path} 95%"], calls
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(again))
+    for line in calls[:]:
+        real(line)
+    assert marker.read_bytes() == again.read_bytes() == \
+        f"lane-busy full held by pid 1 — a label\ndisk-full {tmp_path} 95%\n".encode()
+
+
 def test_a_full_disk_refusal_never_creates_the_marker(render, tmp_path, monkeypatch):
     """Append only, never creating it: a marker the train removed stays gone."""
     d = _load_dispatch(render(tmp_path / "repo", {"project_name": "d", "modules": {}}))

@@ -880,8 +880,6 @@ def _worktrees(root: Path) -> dict[str, Path]:
 DISK_LIMIT_PCT = process_git.DISK_LIMIT_PCT
 DISK_LIMIT_ENV = process_git.DISK_LIMIT_ENV
 CLEANUP_CMD = process_git.CLEANUP_CMD
-# the train's abort marker of a suite run (train.py, v2.95): a refusal inside it appends its line
-SUITE_ABORT_ENV = "PROCESS_SUITE_ABORT"
 
 
 def _toplevel(path: Path) -> Path | None:
@@ -1101,25 +1099,6 @@ def remove_worktree(root: Path, path: Path, base: str) -> str | None:
     return None
 
 
-def _note_suite_abort(line: str) -> None:
-    """Append `line` to the train's abort marker when the variable is set (a dispatch test
-    inside the train's suite): one `os.write`, append only, never creating the file, never
-    blocking — `lane.py`'s contract. A failure to write changes nothing."""
-    path = os.environ.get(SUITE_ABORT_ENV)
-    if not path:
-        return
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-    except (OSError, ValueError):
-        return
-    try:
-        os.write(fd, f"{' '.join(line.splitlines())}\n".encode("utf-8", "replace"))
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
-
-
 def disk_refusal(path: Path) -> str | None:
     """Why no session may start while the filesystem holding `path` is too full
     (`process_git.disk_use`), or None. A limit that is no percentage in (0, 100] refuses
@@ -1135,7 +1114,7 @@ def disk_refusal(path: Path) -> str | None:
         return None
     if not use.full or use.use_pct is None:
         return None
-    _note_suite_abort(process_git.disk_full_line(path, use.use_pct))
+    process_git.note_suite_abort(process_git.disk_full_line(path, use.use_pct))
     return (f"the filesystem holding {path} is {use.use_pct:.0f}% full (limit {use.limit:g}%, "
             f"{(use.free or 0) / 2**30:.1f} GiB free) — every worktree carries its own environments; "
             f"remove the merged ones with `{CLEANUP_CMD}`")
