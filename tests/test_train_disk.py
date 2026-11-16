@@ -242,6 +242,28 @@ def test_a_host_over_the_limit_halts_the_real_train(render, tmp_path, monkeypatc
     assert not (out.parent / f"{out.name}-train").exists()
 
 
+@pytest.mark.parametrize("var", ["TMPDIR", "TEMP", "TMP"])
+def test_the_temp_dir_is_read_from_the_environment_not_from_tempfile(render, tmp_path, monkeypatch, var):
+    """Refute v2.98: `tempfile.gettempdir()` falls back to another dir when $TMPDIR's disk is
+    full (its test write fails) and caches the answer — the full disk was never checked. The
+    train reads TMPDIR, TEMP, TMP as Python does, without writing there."""
+    import tempfile
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    train = _load_train(out)
+    full_tmp, free = tmp_path / "full-tmp", tmp_path / "free"
+    full_tmp.mkdir()
+    free.mkdir()
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(var, str(full_tmp))
+    monkeypatch.setattr(tempfile, "tempdir", str(free))  # what a fallback left in the cache
+    monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "90")
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(100, 95, 5) if Path(p) == full_tmp
+                        else _Usage(100, 10, 90))
+    assert train._disk_full(free, lambda line: None) == f"disk-full {full_tmp} 95%"
+    assert sorted(p.name for p in full_tmp.iterdir()) == []  # nothing written to test it
+
+
 def _enospc_on(monkeypatch, *names: str) -> None:
     """`Path.open` raises ENOSPC for the train's files named `names` (`*.log`: every run log)."""
     import errno

@@ -116,7 +116,6 @@ import signal
 import stat
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -1271,11 +1270,24 @@ def _nearest_dir(path: Path) -> Path:
     return path
 
 
+def _temp_root() -> Path:
+    """The temp dir the suite's children write to, read as they read it: `TMPDIR`, `TEMP`,
+    `TMP` (Python's order), else the platform's default. Never `tempfile.gettempdir()`: it
+    test-writes, falls back to another dir (or the cwd) when that disk is full, and caches
+    the answer — the full disk would never be checked."""
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        if value := os.environ.get(name):
+            return Path(value)
+    if os.name == "nt":
+        return Path(os.environ.get("SYSTEMROOT") or r"C:\Windows") / "Temp"
+    return Path("/tmp")
+
+
 def _disk_full(where: Path, log) -> str | None:
     """`disk-full <path> <use>%` for the first disk over the limit — the one holding `where`
     (measured at the nearest directory that exists), then the temp dir's — or None. A limit
     that is misconfigured, or a use that cannot be read, is a note, never full."""
-    for path in (_nearest_dir(Path(where)), Path(tempfile.gettempdir())):
+    for path in (_nearest_dir(Path(where)), _nearest_dir(_temp_root())):
         use = process_git.disk_use(path)
         if use.problem:
             log(f"disk: note — {use.problem}")

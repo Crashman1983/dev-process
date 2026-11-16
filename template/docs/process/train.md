@@ -436,7 +436,9 @@ vary) — a test, a lane or a disk that stops every train shows there.
 
 **A full disk (v2.98).** The train checks the disks it writes to — the one
 holding its worktrees, measured at the nearest directory that exists (before
-the first train there is no `<root>-train`), and the temp dir's — against
+the first train there is no `<root>-train`), and the temp dir's (`TMPDIR`,
+`TEMP`, `TMP`, else `/tmp`: read as the suite's children read it, never
+test-written, so a full one is not swapped for another) — against
 `PROCESS_DISK_LIMIT_PCT` (90 % by default, the limit `dispatch.py start`
 refuses at):
 - before every build, once the old tree is gone and before `worktree add`
