@@ -389,6 +389,11 @@ def _cannot_board(added: list[str] | None, report: dict | None) -> bool:
         and not (report and report["state"] == "review-pass")
 
 
+def _unread_reason(unread: list[str]) -> str:
+    return (f"git could not read {', '.join(unread)} — an unread name or plan is no Tier 0 plan; "
+            "repair the clone (`git fsck`, fetch) and run the train again")
+
+
 def _hold_reason(hold: dict) -> str:
     note = f": {hold['note']}" if hold.get("note") else ""
     return (f"latest report `blocked` ({hold['minutes_ago']} min ago{note}) — "
@@ -499,6 +504,8 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
             c["skipped"] = True
             c["reasons"] += ([_hold_reason(hold)] if hold else []) + [
                 DONE_BOARDS_NOTHING if rep and rep["state"] == "done" else NOT_FINISHED]
+            if unreadable:  # what git could not read for every branch (the base's archive): said here too
+                c["reasons"].append(_unread_reason(unreadable))
             out.append(c)
             continue
         read_in_full += 1
@@ -605,8 +612,7 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
                 f"`DECISION <date> <who>: …` line in place of it, or mark the question "
                 f"`(answered <date>)` before its colon")
         if branch_unreadable:
-            c["reasons"].append(f"git could not read {', '.join(branch_unreadable)} — an unread name or plan "
-                                f"is no Tier 0 plan; repair the clone (`git fsck`, fetch) and run the train again")
+            c["reasons"].append(_unread_reason(branch_unreadable))
         from template_verify import verify
         template_blocked = False
         try:
