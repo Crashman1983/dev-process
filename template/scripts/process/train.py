@@ -1328,7 +1328,8 @@ def _clear_hint(disk: Path, where: Path) -> str:
     are on it, and what lies there — old test basetemps in the temp dir, merged worktrees
     with their environments beside the train's (v2.98: `tidy.py` alone frees no basetemp)."""
     tmp = _temp_root()
-    on = [what for what, path in ((f"the train's tree {where}", where), (f"the temp dir {tmp}", tmp))
+    tree = "the checkout" if (where / ".git").exists() else "the train's tree"
+    on = [what for what, path in ((f"{tree} {where}", where), (f"the temp dir {tmp}", tmp))
           if _on_disk(path, disk)]
     clear = ([f"old test basetemps under {tmp} (pytest-of-*, other runs' leftovers)"]
              if _on_disk(tmp, disk) else []) + [f"merged worktrees and their environments (`{process_git.CLEANUP_CMD}`)"]
@@ -1498,8 +1499,12 @@ def _remember_green_suite(root: Path, key: str) -> None:
         lines = f.read_text(encoding="utf-8").splitlines() if f.is_file() else []
         lines = [ln for ln in lines if ln != key][-(GREEN_SUITES_KEPT - 1):] + [key]
         tmp = f.with_name(f"{f.name}.{os.getpid()}.tmp")
-        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.replace(tmp, f)
+        try:
+            tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError:
+            tmp.unlink(missing_ok=True)  # a full disk leaves no orphan per run
+            raise
     except OSError:
         pass  # a memo that cannot be written only costs a later run
 

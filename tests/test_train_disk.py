@@ -518,3 +518,25 @@ def test_the_base_aborting_on_a_full_disk_twice_stays_suite_aborted(render, tmp_
     r = _aborting(render, tmp_path, monkeypatch, n=1, on_build=on_build, sh=sh)
     assert isinstance(r.raised, r.train.SuiteAborted) and not isinstance(r.raised, r.train.DiskFull), r.raised
     assert r.written == [] and _subsets(r) == [("b1",), ("b1",), (), ()]
+
+
+def test_a_green_memo_that_cannot_be_written_leaves_no_temp_file(render, tmp_path, monkeypatch):
+    """On a full disk the memo's write fails: its `<name>.<pid>.tmp` is removed, not left per run."""
+    from pathlib import Path as _P
+
+    from test_train import _load_train, _repo
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    real = _P.write_text
+
+    def full(self, *a, **k):
+        if self.name.endswith(".tmp"):
+            real(self, "", encoding="utf-8")  # the inode exists, the bytes do not fit
+            raise OSError(28, "No space left on device")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(_P, "write_text", full)
+    train._remember_green_suite(out, train._suite_key(out, "s"))
+    monkeypatch.setattr(_P, "write_text", real)
+    assert not list(train._train_dir(out).glob("*.tmp"))
