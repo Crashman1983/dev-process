@@ -2616,33 +2616,38 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         runs once more, and only if that run aborts too it is red (a test that hangs on
         every run; a load that passed meanwhile blames nobody); red — `BaseRed`;
         aborted, or no base to ask (`subset` is the base, the base has no suite) —
-        `SuiteAborted`. A repeat that filled the disk again (`disk-full`) is red at once:
-        no wait before it, no fresh base after it (v2.98 B1)."""
+        `SuiteAborted`. A run and its repeat that both filled the disk (`disk-full`) are red
+        at once: no wait before the repeat, no fresh base after it (v2.98 B1) — a base with no
+        suite included: the subset filled a disk that was under the limit before each run."""
         nonlocal base_state, base_from_memo, retried
         if state != "aborted":
             return state, merged, br
+        reasons = [last_abort]  # the abort's and each repeat's: the disk branch needs all of them
         for _ in range(ABORT_RETRIES):
             state, merged, br = _repeat(subset, memo=memo, fresh=fresh)
             if state != "aborted":
                 return state, merged, br
+            reasons.append(last_abort)
         repeated = _note_abort()
         if not subset:
             raise SuiteAborted(f"the base's suite run aborted, and so did its repeat ({last_abort})")
-        if base_state == "undefined":
-            # a passenger brings the suite: nothing tells a hang from the load — nobody is blamed
-            raise SuiteAborted(f"a suite run aborted, and so did its repeat ({last_abort}); the base has "
-                               "no suite to tell a hang from the load")
-        if process_git.is_disk_full_line(last_abort):
-            # the repeat ran on a rebuilt tree whose disks were under the limit before it (else
-            # `DiskFull`): the subset filled them — red, no fresh base (v2.98 B1); its repeat
-            # was the flake run, and an abort measures no red tests
+        if all(process_git.is_disk_full_line(r) for r in reasons):
+            # every run of the subset ran on a rebuilt tree whose disks were under the limit
+            # before it (else `DiskFull`), and filled them: red, no fresh base (v2.98 B1) — also
+            # where the base has no suite, it carries no passenger. The repeat was the flake run,
+            # and an abort measures no red tests. One `disk-full` beside a load abort is no such
+            # finding: the fresh base below decides
             if kind == "first":
                 retried = True
                 if red_ids:
                     rounds[-1]["red_tests"] = "suite-aborted"
-            log(f"the disk filled twice with {', '.join(subset)} aboard, free before each run ({last_abort}) "
-                "— counted red")
+            log(f"the disk filled on the run and on its repeat with {', '.join(subset)} aboard, under the "
+                f"limit before each ({'; '.join(reasons)}) — counted red")
             return "red", merged, br
+        if base_state == "undefined":
+            # a passenger brings the suite: nothing tells a hang from the load — nobody is blamed
+            raise SuiteAborted(f"a suite run aborted, and so did its repeat ({last_abort}); the base has "
+                               "no suite to tell a hang from the load")
         log(f"a suite run aborted twice ({last_abort}) — the base runs fresh to tell a hang from the load")
         bstate, _m, _b = attempt([], kind="base", fresh=True)
         if bstate == "aborted":
