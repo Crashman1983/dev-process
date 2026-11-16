@@ -71,6 +71,9 @@ project's: another heavy run of the host waits for the whole loop, the
 suite's own `lane.py run --lane full` passes through, and the push's hook
 takes the lane itself. A lane still held after at most 60 s ends the run
 in a round `lane-held`: nothing ran, nobody is blamed.
+A disk the train writes to over `PROCESS_DISK_LIMIT_PCT` (90) before a build,
+a judge or a suite run halts it in a round `disk-full`, nobody blamed; a red
+run that left a disk over the limit is an abort, repeated at once (v2.98 B1).
 Every tree of a run — first, retry, base, probe, rebuild, preboard — is
 the SHAs boarding judged on the base's SHA, from one snapshot (#391): a
 commit after boarding rides a later train, a fetch moves no run. After
@@ -113,6 +116,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -126,6 +130,7 @@ from gate_invoke import gate_runner_argv, not_runnable_reason  # noqa: E402
 import report as _report  # noqa: E402
 import tower as _tower  # noqa: E402
 
+import process_git  # noqa: E402
 from process_git import REGRESSION_LINE, git_environment  # noqa: E402
 
 ARCHIVE = ".process-work/plans/archive"
@@ -1252,12 +1257,56 @@ def _clear_aborts(root: Path, stamp: str) -> None:
         pass
 
 
+# --- a full disk (v2.98 B1) -----------------------------------------------------------------
+# The train checks the disks it writes to — the one under its worktrees, the temp dir's —
+# before every build (after the old tree is gone), before every judge and around every suite
+# run. Over the limit (`process_git.disk_use`) nobody of this run filled it: `DiskFull`.
+_DISK_NOTES: set[str] = set()  # a misconfigured limit is said once per process, logged per check
+
+
+def _nearest_dir(path: Path) -> Path:
+    """`path` or its nearest ancestor that exists: before the first train `<root>-train` is not there."""
+    while not path.exists() and path.parent != path:
+        path = path.parent
+    return path
+
+
+def _disk_full(where: Path, log) -> str | None:
+    """`disk-full <path> <use>%` for the first disk over the limit — the one holding `where`
+    (measured at the nearest directory that exists), then the temp dir's — or None. A limit
+    that is misconfigured, or a use that cannot be read, is a note, never full."""
+    for path in (_nearest_dir(Path(where)), Path(tempfile.gettempdir())):
+        use = process_git.disk_use(path)
+        if use.problem:
+            log(f"disk: note — {use.problem}")
+            if use.problem not in _DISK_NOTES:
+                _DISK_NOTES.add(use.problem)
+                print(f"train: note — {use.problem}; the disk is not checked", file=sys.stderr)
+            if use.limit is None:
+                return None  # the same limit for every disk
+        elif use.full and use.use_pct is not None:
+            return process_git.disk_full_line(path, use.use_pct)
+    return None
+
+
+def _halt_if_disk_full(where: Path, log) -> None:
+    """A check point: `DiskFull` when a disk the train writes to is over the limit."""
+    why = _disk_full(where, log)
+    if why:
+        log(f"{why} — the train halts: no passenger of this run filled it")
+        raise DiskFull(why)
+
+
 def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) -> tuple[str, str]:
     """One suite run with its own abort marker: `_sh` with the marker, then
     `(state, reason)` — the reason of an "aborted" run is the marker's first line
     (or exit 75), "" otherwise. The marker is removed afterwards: a writer that keeps
     the contract (append, never create) cannot bring it back. A marker that cannot be
-    made runs the suite without one, and says so."""
+    made runs the suite without one, and says so.
+    The disk (v2.98 B1): over the limit before the run, `DiskFull`; a run that is not
+    green and left a disk over the limit measured nothing — "aborted", the reason
+    `disk-full <path> <use>%` (read here, not from the marker: at 100 % it cannot be made)."""
+    _halt_if_disk_full(cwd, log)
     path = _abort_marker(root, stamp)
     lines: tuple[str, ...] = ()
     if path is None:
@@ -1270,6 +1319,11 @@ def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) ->
         finally:
             with contextlib.suppress(OSError):
                 path.unlink()
+    if state in ("red", "undefined"):
+        full = _disk_full(cwd, log)
+        if full:
+            log(f"$ {cmd} → {state}, and {full} after it — the run measured nothing: aborted")
+            return "aborted", full
     if state != "aborted":
         return state, ""
     # no marker line: only an exit 75 at the top aborts a run
@@ -1430,14 +1484,20 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log, *,
     `base` as the caller pinned it (#391) — a branch that moves after boarding
     changes no run; without one, its name. Names stay the identity (messages,
     issues, the merged list). Returns (worktree, branch, merged,
-    dropped_for_conflict)."""
+    dropped_for_conflict).
+    A full disk (v2.98 B1) is checked once the old tree is gone, before `worktree add`
+    and the merges, and again where git fails: `DiskFull`, never a conflict or a crash."""
     wt = worktree if worktree is not None else _train_worktree(root)
     branch = f"train/{stamp}"
     if wt.exists():
         _git(root, "worktree", "remove", "--force", str(wt))
         shutil.rmtree(wt, ignore_errors=True)
     _git(root, "branch", "-D", branch)
-    _git(root, "worktree", "add", "-q", "-b", branch, str(wt), base, check=True)
+    _halt_if_disk_full(wt, log)
+    r = _git(root, "worktree", "add", "-q", "-b", branch, str(wt), base)
+    if r.returncode != 0:
+        _halt_if_disk_full(wt, log)
+        raise SystemExit(f"train: git worktree add -q -b {branch} {wt} {base} failed:\n{r.stderr.strip()}")
     merged: list[str] = []
     dropped: list[str] = []
     for b in aboard:
@@ -1479,6 +1539,7 @@ def build_train(root: Path, base: str, aboard: list[str], stamp: str, log, *,
                 + (f" — closes {', '.join(f'#{n}' for n in sorted(issues))}" if issues else ""))
         else:
             _git(wt, "merge", "--abort")
+            _halt_if_disk_full(wt, log)  # ENOSPC in the merge or its commit: no conflict of b's
             dropped.append(b)
             log(f"conflict: {b} dropped ({r.stderr.strip().splitlines()[-1] if r.stderr.strip() else 'merge failed'})")
     return wt, branch, merged, dropped
@@ -1657,6 +1718,12 @@ class BaseRed(Exception):
 class LaneHeld(EnvironmentRed):
     """The lane `full` stayed held past the train's wait: nothing ran, nobody is blamed,
     nothing merges (`red_path` "lane-held"; "lane-busy" is a kind of abort-marker line)."""
+
+
+class DiskFull(EnvironmentRed):
+    """A disk the train writes to is over the limit before a build, a judge or a suite run
+    (v2.98 B1): no passenger of this run filled it — nobody is blamed, nothing merges
+    (`red_path` "disk-full"). The message is the line `disk-full <path> <use>%`."""
 
 
 TRAIN_LANE = "full"
@@ -2084,6 +2151,8 @@ def pre_board(root: Path, base: str, aboard: list[str], stamp: str, cmd: str, ti
         try:
             built, _br, merged, _dropped = build_train(root, base, subset, probe_stamp, log, worktree=wt,
                                                        shas=shas)
+        except DiskFull:
+            raise  # the host's disk, not this probe: the train halts before boarding (v2.98 B1)
         except (Exception, SystemExit) as exc:  # noqa: BLE001 — `_git(check=True)` exits
             # a probe that cannot be built checks nothing, and never aborts the train
             log(f"preboard: probe tree not built — {type(exc).__name__}: {exc}")
@@ -2238,6 +2307,17 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
               f"(see {logfile})", file=sys.stderr)
         _cleanup(root, stamp)
         return rc
+    except DiskFull as full:
+        # before the general branch: its own red path, and the disk it halted on (v2.98 B1)
+        result = "environment"
+        _end_round(measure, "disk-full")
+        if measure.get("rounds"):
+            measure["rounds"][-1]["disk_full"] = str(full)
+        print(f"train: {full} — a disk the train writes to is over its limit "
+              f"({process_git.DISK_LIMIT_ENV}); nobody is blamed, nothing merged — free it "
+              f"(`{process_git.CLEANUP_CMD}`) and the next run departs (see {logfile})", file=sys.stderr)
+        _cleanup(root, stamp)
+        return rc
     except SuiteAborted as aborted:
         # before the general branch: its own red path, never overwritten as "environment"
         result = "environment"
@@ -2381,7 +2461,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             kept, _c = timed("preboard", lambda *a: pre_board(*a, shas=shas), root, base, aboard, stamp,
                              preboard, preboard_timeout, log, preflight, preflight_timeout, checks)
         except EnvironmentRed:
-            # the preflight on the base's tree stopped it: an environment round, counts kept
+            # the preflight on the base's tree stopped it: an environment round, counts kept (a
+            # full disk's too: `run` ends it "disk-full")
             rounds.append({"red_path": "environment", "runs": {}})
             raise
         finally:
@@ -2424,8 +2505,10 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         "aborted" (passed through from the suite run). The bare base skips the suite
         when this train saw it green on that tree — provisionally: before the first
         passenger is blamed it runs for real. `fresh` runs the suite whatever this
-        train or an earlier one saw on the tree (the abort rule's base, v2.95)."""
+        train or an earlier one saw on the tree (the abort rule's base, v2.95). A full disk
+        halts before the preflight and the gates: a gate red on ENOSPC is no red base."""
         nonlocal base_from_memo, red_in, preflight_done
+        _halt_if_disk_full(wt, log)
         if not preflight_done:
             if timed("preflight", _sh, wt, preflight, log, preflight_timeout) != "green":
                 raise EnvironmentRed(f"the preflight `{preflight}` is red")
@@ -2482,9 +2565,15 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         come back green from this train's memory, nor the guard from the memo). `entry`:
         the aborted run's `aborts` entry when it is noted already — its wait is filled in."""
         reason = last_abort if entry is None else entry["reason"]
-        log(f"a suite run aborted ({reason}) — waiting for the load, then once more ({_load()})")
-        waited, ended = wait_for_load(log)
-        phases["abort_wait"] = phases.get("abort_wait", 0.0) + waited
+        if process_git.is_disk_full_line(reason):
+            # waiting empties no disk (v2.98 B1): the rebuild frees the tree's residue, and the
+            # check before the repeat tells a passenger's disk from the host's
+            log(f"a suite run aborted ({reason}) — no wait for the load: rebuilding at once")
+            waited, ended = 0.0, process_git.DISK_FULL
+        else:
+            log(f"a suite run aborted ({reason}) — waiting for the load, then once more ({_load()})")
+            waited, ended = wait_for_load(log)
+            phases["abort_wait"] = phases.get("abort_wait", 0.0) + waited
         if entry is None:
             _note_abort(waited, ended)
         else:
@@ -2500,7 +2589,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         runs once more, and only if that run aborts too it is red (a test that hangs on
         every run; a load that passed meanwhile blames nobody); red — `BaseRed`;
         aborted, or no base to ask (`subset` is the base, the base has no suite) —
-        `SuiteAborted`."""
+        `SuiteAborted`. A repeat that filled the disk again (`disk-full`) is red at once:
+        no wait before it, no fresh base after it (v2.98 B1)."""
         nonlocal base_state, base_from_memo, retried
         if state != "aborted":
             return state, merged, br
@@ -2515,6 +2605,17 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             # a passenger brings the suite: nothing tells a hang from the load — nobody is blamed
             raise SuiteAborted(f"a suite run aborted, and so did its repeat ({last_abort}); the base has "
                                "no suite to tell a hang from the load")
+        if process_git.is_disk_full_line(last_abort):
+            # the repeat ran on a rebuilt tree whose disks were under the limit before it (else
+            # `DiskFull`): the subset filled them — red, no fresh base (v2.98 B1); its repeat
+            # was the flake run, and an abort measures no red tests
+            if kind == "first":
+                retried = True
+                if red_ids:
+                    rounds[-1]["red_tests"] = "suite-aborted"
+            log(f"the disk filled twice with {', '.join(subset)} aboard, free before each run ({last_abort}) "
+                "— counted red")
+            return "red", merged, br
         log(f"a suite run aborted twice ({last_abort}) — the base runs fresh to tell a hang from the load")
         bstate, _m, _b = attempt([], kind="base", fresh=True)
         if bstate == "aborted":
@@ -2700,6 +2801,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 ran = "full"
                 if how == "gates" and last_wt is not None:
                     ran = "gates"
+                    # the same tree, no judge before it: its own check point (v2.98 B1)
+                    _halt_if_disk_full(last_wt, log)
                     with counted("retry_gates"):
                         state = "green" if timed("gates", _run_gates, last_wt, log, merge_target(last_wt)) else "red"
                     if state == "green" and suite:

@@ -4608,12 +4608,12 @@ _TREES = (("one", {"a.txt": "a\n"}),
 
 
 def _aborting(render, tmp_path, monkeypatch, *, sh, n=2, retry=None, red_ids=None, seen=False, gates=None,
-              load=(0.0, 0.0, 0.0), via_run=False, preflight=None, conflicts=()):
+              load=(0.0, 0.0, 0.0), via_run=False, preflight=None, conflicts=(), on_build=None):
     """b1..bn judged on real trees — main, one = [b1], both = [b1, b2], three — with a suite
     that answers `sh(subset, cmd, nth)`: green, red, undefined, abort or a command of its own,
     run by the real `_sh` (the preflight `preflight` too). The passengers in `conflicts` never
-    merge. The load is `load` on the host's CPUs; the wait's clock and sleep
-    are fake. `via_run`: through `run()`, with `plan` answering the candidates. Returns a
+    merge. `on_build(subset)` runs before each build (a disk a rebuild frees, v2.98). The load
+    is `load` on the host's CPUs; the wait's clock and sleep are fake. `via_run`: through `run()`, with `plan` answering the candidates. Returns a
     namespace: the rounds, the `_sh` calls, the log, rc, the EnvironmentRed raised, the
     `blocked` reports, the phases and what went to stderr."""
     import io
@@ -4637,6 +4637,8 @@ def _aborting(render, tmp_path, monkeypatch, *, sh, n=2, retry=None, red_ids=Non
     real_sh = train._sh
 
     def build(root, base, subset, stamp, log, **kw):
+        if on_build is not None:
+            on_build(list(subset))
         merged = [b for b in subset if b not in conflicts]
         current[:] = merged
         _git(out, "checkout", "-q", ("main", "one", "both", "three")[len(merged)])
@@ -5368,3 +5370,4 @@ def test_train_phases_counts_lane_held_apart_from_the_preflight(render, tmp_path
     out = _train_phases(render, tmp_path, rows)
     assert ("0/4 runs ended red, 1 stopped by the preflight (the host, not a passenger), "
             "2 held at the lane full (another run held it), nobody blamed") in out, out
+
