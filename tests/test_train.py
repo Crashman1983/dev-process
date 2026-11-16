@@ -4582,6 +4582,21 @@ def test_an_unreadable_archive_diff_is_not_skipped(render, tmp_path, monkeypatch
     assert any("git could not read the plans s000 archives" in r for r in c["reasons"]), c["reasons"]
 
 
+def test_a_skipped_branch_still_says_git_could_not_read_the_base_archive(render, tmp_path, monkeypatch):
+    """DeepSeek F7: is the base's archive unreadable, a skipped branch keeps the reason
+    "git could not read the archive on main", as a branch read in full does."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _stale_branches(out, 1)
+    train = _load_train(out)
+    real = train._paths
+    monkeypatch.setattr(train, "_paths", lambda root, *a: None if a[:1] == ("ls-tree",) and train.ARCHIVE in a
+                        else real(root, *a))
+    c = next(c for c in train.candidates(out, "main", "main") if c["branch"] == "s000")
+    assert c.get("skipped"), c
+    assert any(r.startswith("git could not read the archive on main") for r in c["reasons"]), c["reasons"]
+
+
 # --- v2.95: a load abort is no finding about a passenger ------------------------------------
 
 _ABORT_LINE = "watchdog tests/test_x.py::test_slow 10 8.2"

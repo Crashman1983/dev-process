@@ -180,7 +180,9 @@ not `review-pass` — is read no further than its lead (#426): `plan` shows
 it on a short line, `· <branch> (+ahead/-behind, not read further: it
 cannot board)`, without files, hours or DoD deviations, and with a short
 reason from what is already read: its hold, a `done` report, or "no
-archived plan … (run /finish first)"; `--json` marks it `"skipped": true`.
+archived plan … (run /finish first)", and "git could not read …" when
+git could not read what every branch needs (the base's archive);
+`--json` marks it `"skipped": true`.
 Its open questions and gate-code findings show once it can board. A
 branch whose archive git cannot read is read in full and refused as
 unreadable. `PROCESS_TRAIN_PLAN_PROFILE=1` prints the seconds of each
