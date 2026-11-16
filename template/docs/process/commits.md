@@ -5,9 +5,13 @@
 Conventional Commits: `type: imperative subject` where `type` is one of
 `feat | fix | docs | refactor | test | chore | perf`. Subject under 72 characters,
 imperative mood, no trailing period. Body (optional) explains *why*, wraps at ~72.
-Mention the plan slug or issue ref (subject or body) when the commit implements
-planned work — that mention is what lets `git log --grep` correlate commits
-with the story/plan/review chain.
+Name the plan slug or issue when the commit implements planned work — that
+is what lets `git log --grep` correlate commits with the story/plan/review
+chain. How an issue is named decides what it means: `(#N)` at the end of the
+subject and a closing word anywhere in the message (`Closes #N`, `Fixes #N`,
+`Resolves #N`) **claim** #N — the review gate then asks this push for #N's
+plan and its review, wherever that plan lives (active, archived, already on
+main). A mere reference is `see #N` in the subject or body; it claims nothing.
 
 **A fix for a defect that escaped earlier work names its origin** in a
 trailer: `Regression-of: #N` (the issue whose merged change introduced it;
