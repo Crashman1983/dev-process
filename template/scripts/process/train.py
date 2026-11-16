@@ -367,13 +367,26 @@ def _without_lead(root: Path, base_sha: str, tips: dict[str, str]) -> set[str]:
     return {branch for branch, sha in merged.items() if tips.get(branch) == sha}
 
 
+PROFILE_ENV = "PROCESS_TRAIN_PLAN_PROFILE"  # set: `candidates()` prints its section times on stderr
+
+
 def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) -> list[dict]:
     """Who may board, and why not. Content is read at each branch's SHA of one
     snapshot and the base at its SHA (#391) — each candidate carries its `sha`;
     identity (the branch's issues, its work ids, its reports) is read by name.
     `snapshot`, when given, receives `base_sha` and `reports_seen` — the report
     identities at boarding, which the run compares before its push (#335) — and
-    `no_lead`, how many branches the base already contains (no candidates)."""
+    `no_lead`, how many branches the base already contains (no candidates).
+    With `PROFILE_ENV` set, one JSON line on stderr gives the seconds of each
+    section (`tools/bench_train_plan.py` reads it)."""
+    clock = [time.perf_counter()]
+    profile: dict[str, float | int] = {}
+
+    def lap(section: str) -> None:
+        now = time.perf_counter()
+        profile[section] = round(now - clock[0], 3)
+        clock[0] = now
+
     tips, base_sha = _snapshot(root, base)
     # the reports first: a hold written after this read is new to the run's check,
     # one written before it is in the hold read below
@@ -404,6 +417,7 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
     if listed is None:
         unreadable.append(f"the archive on {local}")
     archived_stems = [Path(r).stem for r in listed or ()]
+    lap("setup")
     added_by: dict[str, list[str] | None] = {}
     for b in branches:
         added_by[b] = _paths(root, "diff", "--name-only", "-z", "--diff-filter=A", f"{base_sha}...{tips[b]}",
@@ -439,7 +453,9 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         gone_by[b] = {source or rel for letter, source, rel in changes or () if letter in ("D", "R")}
         new_by[b] = {rel for letter, _source, rel in changes or () if letter != "D"}
         merged_paths |= new_by[b]
+    lap("pre_loops")
     same_plan = _stacked_renames(root, base_sha, branches, new_by, unreadable, tips)
+    lap("pair_loop")
     out: list[dict] = []
     for b in sorted(branches):
         tip = tips[b]  # its content, as boarded; `b` stays its identity
@@ -623,6 +639,9 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         if c["by"] and not open_q and not branch_unreadable and not template_blocked and not report_blocked:
             c["eligible"] = True
         out.append(c)
+    lap("main_loop")
+    if os.environ.get(PROFILE_ENV):
+        print(json.dumps({"train_plan_profile": {**profile, "branches": len(branches)}}), file=sys.stderr)
     if snapshot is not None:
         snapshot["no_lead"] = no_lead
     return out

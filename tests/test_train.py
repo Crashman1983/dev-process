@@ -4106,6 +4106,41 @@ def test_the_plan_bench_builds_a_repo_and_reports_the_time(tmp_path):
     assert again.returncode == 2 and "not empty" in again.stderr, again.stderr  # DeepSeek v2.91: kein FileExistsError
 
 
+def test_the_plan_bench_adds_stale_branches_and_reports_the_sections(tmp_path):
+    """#426 D1: `--stale-ahead` baut Branches mit eigenem Commit und aktivem Plan, die nicht
+    einsteigen können; der Bench meldet die Abschnitte aus der Profilzeile von `candidates()`."""
+    tool = Path(__file__).resolve().parents[1] / "tools/bench_train_plan.py"
+    r = subprocess.run([sys.executable, str(tool), "--branches", "20", "--plans", "20", "--runs", "1",
+                        "--stale-ahead", "3", "--workdir", str(tmp_path / "bench")],
+                       capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stdout + r.stderr
+    result = json.loads(r.stdout)
+    assert result["stale_ahead"] == 3 and result["candidates"] == result["ahead"] + 3, result
+    assert result["eligible"] == result["ahead"], result
+    sections = result["sections"]
+    assert {"setup", "pre_loops", "pair_loop", "main_loop"} <= set(sections), sections
+    assert sections["branches"] == result["ahead"] + 3, sections
+
+
+def test_the_plan_profile_line_is_printed_only_when_asked(render, tmp_path, monkeypatch, capsys):
+    """#426 D1: nur mit `PROCESS_TRAIN_PLAN_PROFILE` schreibt `candidates()` eine JSON-Zeile
+    mit den Sekunden je Abschnitt auf stderr."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    train = _load_train(out)
+    monkeypatch.delenv(train.PROFILE_ENV, raising=False)
+    train.candidates(out, "main", "main")
+    assert "train_plan_profile" not in capsys.readouterr().err
+    monkeypatch.setenv(train.PROFILE_ENV, "1")
+    train.candidates(out, "main", "main")
+    lines = [ln for ln in capsys.readouterr().err.splitlines() if "train_plan_profile" in ln]
+    assert len(lines) == 1, lines
+    profile = json.loads(lines[0])["train_plan_profile"]
+    assert {"setup", "pre_loops", "pair_loop", "main_loop"} <= set(profile), profile
+    assert profile["branches"] == 1 and all(profile[k] >= 0 for k in ("setup", "main_loop")), profile
+
+
 def _git_calls(monkeypatch) -> list[list[str]]:
     """Jeder git-Aufruf des Prozesses, als argv hinter `git -C <root>` — gezählt, nicht verändert."""
     calls: list[list[str]] = []
