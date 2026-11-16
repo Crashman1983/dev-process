@@ -242,6 +242,46 @@ def test_a_host_over_the_limit_halts_the_real_train(render, tmp_path, monkeypatc
     assert not (out.parent / f"{out.name}-train").exists()
 
 
+def _enospc_on(monkeypatch, *names: str) -> None:
+    """`Path.open` raises ENOSPC for the train's files named `names` (`*.log`: every run log)."""
+    import errno
+    import fnmatch
+    real_open = Path.open
+
+    def opened(self, *a, **k):
+        if self.parent.name == "process-train" and any(fnmatch.fnmatch(self.name, n) for n in names):
+            raise OSError(errno.ENOSPC, "No space left on device", str(self))
+        return real_open(self, *a, **k)
+    monkeypatch.setattr(Path, "open", opened)
+
+
+@pytest.mark.parametrize("lost", [("*.log",), ("*.log", "phases.jsonl")])
+def test_a_disk_too_full_for_the_trains_own_log_still_halts_disk_full(render, tmp_path, monkeypatch, capsys,
+                                                                       lost):
+    """Refute v2.98 (BLOCKER): at 100 % the train's own log line (the departure record, the
+    halt's line, `_record_phases`' line) raised ENOSPC before `DiskFull` — the round ended
+    `aborted` and the `finally` raised again. Log and record writes are best effort: the run
+    halts `disk-full`, says once that its log is lost, and a phases row it cannot write is
+    said on stderr."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    train = _load_train(out)
+    _disk(monkeypatch, lambda: True)
+    _enospc_on(monkeypatch, *lost)
+    rc = train.run(out, suite="true", deploy=None, push=False, min_candidates=1, max_wait_hours=0,
+                   force=True, keep_branches=True, dry_run=False, suite_note="a deliberate exception")
+    err = capsys.readouterr().err
+    assert rc == 1 and "nobody is blamed" in err and "disk-full" in err, err
+    assert err.count("cannot be written") == 1, err  # said once, not per line
+    assert not list((out / ".git/process-train").glob("2*.log"))
+    if "phases.jsonl" in lost:
+        assert "phases row" in err and "not written" in err and not _phases(out), err
+    else:
+        row = _phases(out)[-1]
+        assert row["result"] == "environment" and [x["red_path"] for x in row["rounds"]] == ["disk-full"], row
+
+
 # --- after a red run: the disk tells an abort from a finding --------------------------------
 
 def test_a_passenger_that_fills_the_disk_in_its_tree_is_found_without_a_wait(render, tmp_path, monkeypatch):

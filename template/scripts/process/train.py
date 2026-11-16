@@ -1455,6 +1455,24 @@ def _remember_green_suite(root: Path, key: str) -> None:
     except OSError:
         pass  # a memo that cannot be written only costs a later run
 
+_LOGS_LOST: set[str] = set()  # logs a line could not be appended to: said once each on stderr
+
+
+def _append_log(logfile: Path, *lines: str) -> None:
+    """Append `lines` to the run's log, each with the time — best effort (v2.98): the log
+    sits on a disk the train checks, and at 100 % its own line must not crash the run before
+    it reaches `DiskFull`. A line that cannot be written is lost, said once per log on stderr."""
+    now = _dt.datetime.now().isoformat(timespec="seconds")
+    try:
+        with logfile.open("a", encoding="utf-8") as fh:
+            fh.writelines(f"{now} {line}\n" for line in lines)
+    except OSError as exc:
+        if str(logfile) not in _LOGS_LOST:
+            _LOGS_LOST.add(str(logfile))
+            print(f"train: note — the log {logfile} cannot be written ({exc}); the train goes on "
+                  "without it", file=sys.stderr)
+
+
 def _train_dir(root: Path) -> Path:
     """Logs and bookkeeping: inside the git common dir, never committed."""
     common = Path(_out(root, "rev-parse", "--git-common-dir"))
@@ -2021,7 +2039,8 @@ def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str
     configured, so a row without it reads as before. `held`: who left before the push
     on a hold set during the run (#335), `[]` when nobody did."""
     spent = {k: round(phases.get(k, 0.0), 1) for k in PHASES}
-    log(f"phases ({result}): " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
+    with contextlib.suppress(OSError):  # the log line is best effort: the row below matters more
+        log(f"phases ({result}): " + ", ".join(f"{k} {v:.0f} s" for k, v in spent.items() if v))
     outcome = outcome or {}
     row = {"stamp": stamp, "result": result, "aboard": len(aboard), **spent,
            "stages": stages or {},
@@ -2034,8 +2053,9 @@ def _record_phases(root: Path, stamp: str, phases: dict[str, float], result: str
     try:
         with (_train_dir(root) / PHASES_FILE).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row) + "\n")
-    except OSError:
-        pass  # a lost timing line costs a KPI, never the merge
+    except OSError as exc:
+        # a lost timing line costs a KPI, never the merge — but it is said (v2.98: a full disk)
+        print(f"train: the phases row of {stamp} ({result}) is not written — {exc}", file=sys.stderr)
 
 
 def _certify_merge(wt: Path, suite: str, before: str | None, env_names: list[str], log,
@@ -2281,9 +2301,7 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
     # the deliberate exception stays on the run's record, beside what it ran; and who
     # stays behind, and why (#399), before the first build
     if record := ([suite_note] if suite_note else []) + behind:
-        now = _dt.datetime.now().isoformat(timespec="seconds")
-        with logfile.open("a", encoding="utf-8") as fh:
-            fh.writelines(f"{now} {line}\n" for line in record)
+        _append_log(logfile, *record)
     phases: dict[str, float] = {"plan": planned}
     outcome: dict = {}
     stages: dict[str, dict] = {}
@@ -2342,11 +2360,9 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
                   file=sys.stderr)
         raise
     finally:
-        def _log(line: str) -> None:
-            with logfile.open("a", encoding="utf-8") as fh:
-                fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
         _clear_aborts(root, stamp)
-        _record_phases(root, stamp, phases, result, aboard, _log, outcome, stages, measure)
+        _record_phases(root, stamp, phases, result, aboard, lambda line: _append_log(logfile, line),
+                       outcome, stages, measure)
 
 
 def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, logfile: Path, *,
@@ -2358,8 +2374,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                measure: dict | None = None, red_ids: list[dict] | None = None,
                preboard: str | None = None, preboard_timeout: float | None = None) -> int:
     def log(line: str) -> None:
-        with logfile.open("a", encoding="utf-8") as fh:
-            fh.write(f"{_dt.datetime.now().isoformat(timespec='seconds')} {line}\n")
+        _append_log(logfile, line)
 
     phases = {} if phases is None else phases
     stages = {} if stages is None else stages
