@@ -470,9 +470,11 @@ that way twice stays `suite-aborted`. A suite that fills the disk and cleans
 up stays red: nothing was measured over the limit.
 
 The price, chosen: a passenger that leaves files outside its tree (in
-`/tmp`) is not blamed. The train halts `disk-full` and names the disk;
-`tidy.py --apply` frees the merged worktrees, and `train-phases` shows a
-series. A limit that is no percentage in (0, 100] is a note in the log and
+`/tmp`) is not blamed. The train halts `disk-full` and names the disk, which
+of its tree and the temp dir are on it, and what to clear there: old test
+basetemps under the temp dir (`pytest-of-*` and other runs' leftovers —
+`tidy.py` does not touch them) and the merged worktrees with their
+environments (`tidy.py --apply`); `train-phases` shows a series. A limit that is no percentage in (0, 100] is a note in the log and
 on stderr, and the train checks against the default 90 % (`dispatch.py
 start` refuses on it). A project's `--preflight` may still check the disk.
 
