@@ -80,7 +80,8 @@ neither cap nor lane. A
 local start also refuses while the filesystem holding the worktrees is
 at or above 90% use (`PROCESS_DISK_LIMIT_PCT`) and names `tidy.py
 --apply`: each worktree carries its own venv/node_modules (downstream:
-111 merged worktrees filled the disk). Whether a merged worktree may be
+111 merged worktrees filled the disk). Inside a train's suite run the refusal
+appends `disk-full <path> <use>%` to its abort marker (v2.98). Whether a merged worktree may be
 removed has one owner here (`merged_worktrees`); the train and tidy ask it.
 
 Steering (the mandate's `steering` block, `optimize.steering`): an issue's
@@ -125,6 +126,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
 import report as _report  # noqa: E402
 import check_review as _review  # noqa: E402
 
+import process_git  # noqa: E402
 from process_git import git_environment  # noqa: E402
 from gate_invoke import RUNNER_REL, gate_runner_argv, not_runnable_reason  # noqa: E402
 
@@ -873,9 +875,13 @@ def _worktrees(root: Path) -> dict[str, Path]:
 # every session stalled). The train (after its merge) and tidy (`--apply`) remove
 # them — and both ask this one owner whether a worktree may go, and if not, why.
 
-DISK_LIMIT_PCT = 90  # `start` refuses while the worktrees' filesystem is this full
-DISK_LIMIT_ENV = "PROCESS_DISK_LIMIT_PCT"
-CLEANUP_CMD = "python3 scripts/process/tidy.py --apply"
+# `start` refuses while the worktrees' filesystem is this full; the reader and the limit are
+# process_git's, shared with the train (v2.98 B1)
+DISK_LIMIT_PCT = process_git.DISK_LIMIT_PCT
+DISK_LIMIT_ENV = process_git.DISK_LIMIT_ENV
+CLEANUP_CMD = process_git.CLEANUP_CMD
+# the train's abort marker of a suite run (train.py, v2.95): a refusal inside it appends its line
+SUITE_ABORT_ENV = "PROCESS_SUITE_ABORT"
 
 
 def _toplevel(path: Path) -> Path | None:
@@ -1095,31 +1101,44 @@ def remove_worktree(root: Path, path: Path, base: str) -> str | None:
     return None
 
 
+def _note_suite_abort(line: str) -> None:
+    """Append `line` to the train's abort marker when the variable is set (a dispatch test
+    inside the train's suite): one `os.write`, append only, never creating the file, never
+    blocking — `lane.py`'s contract. A failure to write changes nothing."""
+    path = os.environ.get(SUITE_ABORT_ENV)
+    if not path:
+        return
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except (OSError, ValueError):
+        return
+    try:
+        os.write(fd, f"{' '.join(line.splitlines())}\n".encode("utf-8", "replace"))
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def disk_refusal(path: Path) -> str | None:
     """Why no session may start while the filesystem holding `path` is too full
-    (use = used / (used + available), as `df` counts it), or None. A limit that is no
-    percentage in (0, 100] refuses too: a misconfigured guard is neither silently off
-    nor silently the default. A usage that cannot be read lets the start through,
-    with a note."""
-    raw = os.environ.get(DISK_LIMIT_ENV, "").strip()
-    try:
-        limit = float(raw) if raw else float(DISK_LIMIT_PCT)
-    except ValueError:
-        limit = math.nan
-    if not (math.isfinite(limit) and 0 < limit <= 100):
-        return f"{DISK_LIMIT_ENV}={raw!r} is no percentage in (0, 100] — fix or unset it (default {DISK_LIMIT_PCT})"
-    try:
-        u = shutil.disk_usage(path)
-    except OSError as exc:
-        print(f"dispatch: note — disk use of {path} not checked: {exc}", file=sys.stderr)
+    (`process_git.disk_use`), or None. A limit that is no percentage in (0, 100] refuses
+    too: a misconfigured guard is neither silently off nor silently the default. A usage
+    that cannot be read lets the start through, with a note. A refusal for a full disk
+    inside a train's suite run marks the run aborted (`disk-full <path> <use>%`): nobody
+    aboard is blamed for the host's disk."""
+    use = process_git.disk_use(path)
+    if use.problem and use.limit is None:
+        return use.problem
+    if use.problem:
+        print(f"dispatch: note — {use.problem}", file=sys.stderr)
         return None
-    if u.used + u.free <= 0:
+    if not use.full or use.use_pct is None:
         return None
-    pct = 100.0 * u.used / (u.used + u.free)
-    if pct < limit:
-        return None
-    return (f"the filesystem holding {path} is {pct:.0f}% full (limit {limit:g}%, {u.free / 2**30:.1f} GiB free) — "
-            f"every worktree carries its own environments; remove the merged ones with `{CLEANUP_CMD}`")
+    _note_suite_abort(process_git.disk_full_line(path, use.use_pct))
+    return (f"the filesystem holding {path} is {use.use_pct:.0f}% full (limit {use.limit:g}%, "
+            f"{(use.free or 0) / 2**30:.1f} GiB free) — every worktree carries its own environments; "
+            f"remove the merged ones with `{CLEANUP_CMD}`")
 
 
 def ensure_worktree(root: Path, branch: str) -> Path:

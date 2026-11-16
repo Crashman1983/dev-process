@@ -1,8 +1,11 @@
 """Environment for git readers: judge the objects the push actually carries."""
+import math
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 # `Regression-of: #N` (commits.md): a fix names the issue whose merged change
 # it repairs. One grammar for both readers — the train must not take #N for
@@ -40,6 +43,59 @@ REGRESSION_LINE = re.compile(r"(?im)^[ \t]*Regression-of:.*$")
 def regression_refs(body: str) -> list[int]:
     """The issue numbers a commit message's `Regression-of:` trailers name."""
     return [int(n) for m in REGRESSION_TRAILER.finditer(body) for n in re.findall(r"#(\d+)", m.group(1))]
+
+
+# --- the disk (v2.98 B1): one reader for dispatch's start and the train -------------------
+DISK_LIMIT_PCT = 90  # a filesystem this full refuses a start (dispatch) and halts the train
+DISK_LIMIT_ENV = "PROCESS_DISK_LIMIT_PCT"
+CLEANUP_CMD = "python3 scripts/process/tidy.py --apply"
+# the abort-marker line of a full disk (train.md, "Red, undefined, aborted"): `disk-full <path> <use>%`
+DISK_FULL = "disk-full"
+
+
+class DiskUse(NamedTuple):
+    """What `disk_use` read: the use in percent (None: not read), and why not (`problem`: a
+    misconfigured limit — then `limit` is None — or a use that could not be read)."""
+    use_pct: float | None
+    problem: str | None
+    limit: float | None = None
+    free: int | None = None
+
+    @property
+    def full(self) -> bool:
+        """At or over the limit. A problem is never full: a guard that cannot read is a note."""
+        return self.use_pct is not None and self.limit is not None and self.use_pct >= self.limit
+
+
+def disk_use(path: Path) -> DiskUse:
+    """The use of the filesystem holding `path` (used / (used + available), as `df` counts
+    it) and the limit (`PROCESS_DISK_LIMIT_PCT`, default 90). A limit that is no percentage
+    in (0, 100] is a problem, neither silently off nor silently the default."""
+    raw = os.environ.get(DISK_LIMIT_ENV, "").strip()
+    try:
+        limit = float(raw) if raw else float(DISK_LIMIT_PCT)
+    except ValueError:
+        limit = math.nan
+    if not (math.isfinite(limit) and 0 < limit <= 100):
+        return DiskUse(None, f"{DISK_LIMIT_ENV}={raw!r} is no percentage in (0, 100] — fix or unset it "
+                             f"(default {DISK_LIMIT_PCT})")
+    try:
+        u = shutil.disk_usage(path)
+    except OSError as exc:
+        return DiskUse(None, f"disk use of {path} not checked: {exc}", limit)
+    if u.used + u.free <= 0:
+        return DiskUse(None, None, limit, u.free)
+    return DiskUse(100.0 * u.used / (u.used + u.free), None, limit, u.free)
+
+
+def disk_full_line(path: Path, use_pct: float) -> str:
+    """`disk-full <path> <use>%`: the reason of a train that halts and the marker line of a
+    refused start — one grammar, counted by its first two words (`train-phases`)."""
+    return f"{DISK_FULL} {path} {use_pct:.0f}%"
+
+
+def is_disk_full_line(line: str) -> bool:
+    return line.split(maxsplit=1)[:1] == [DISK_FULL]
 
 
 def git_environment(extra=None):

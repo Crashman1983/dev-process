@@ -124,6 +124,10 @@ def _outside_ci(monkeypatch):
     # the host's /tmp towards that limit, and a test about something else then fails
     # on the host's disk. The disk-guard tests set or drop the variable themselves.
     monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "100")
+    # this repository's own train runs this suite with its abort marker set (v2.95): a dispatch
+    # test that refuses a start appends `disk-full …` to it (v2.98 B1), and a lane test its
+    # `lane-busy …` — every train would abort on its own tests. A test about the marker sets it.
+    monkeypatch.delenv("PROCESS_SUITE_ABORT", raising=False)
     # a suite run inside a dispatched worker inherits its PROCESS_WORKER — a branch of the
     # outer repository, none of a test's: report.py would refuse it (v2.97 B8)
     monkeypatch.delenv("PROCESS_WORKER", raising=False)

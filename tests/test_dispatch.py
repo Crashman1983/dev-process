@@ -1456,7 +1456,8 @@ def test_a_full_disk_refuses_a_local_start_and_names_the_cleanup(render, tmp_pat
     d = _load_dispatch(out)
     monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
     seen = []
-    monkeypatch.setattr(d.shutil, "disk_usage", lambda p: seen.append(Path(p)) or _usage(pct))
+    # one reader of the disk (v2.98): process_git.disk_use
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: seen.append(Path(p)) or _usage(pct))
     rc = d.start(out, issue=4, phase="plan", tier=None, branch="b4", title=None, dry_run=True)
     err = capsys.readouterr().err
     assert seen and seen[0] == out.parent  # the filesystem the worktrees go to
@@ -1469,7 +1470,7 @@ def test_a_full_disk_refuses_a_local_start_and_names_the_cleanup(render, tmp_pat
 @pytest.mark.parametrize("value", ["abc", "0", "-5", "150", "nan", "inf"])
 def test_a_misconfigured_disk_limit_refuses_naming_it(render, tmp_path, monkeypatch, value):
     d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
-    monkeypatch.setattr(d.shutil, "disk_usage", lambda p: _usage(10))
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(10))
     monkeypatch.setenv(d.DISK_LIMIT_ENV, value)
     why = d.disk_refusal(tmp_path)
     assert why and d.DISK_LIMIT_ENV in why and repr(value) in why
@@ -1482,10 +1483,59 @@ def test_an_unreadable_disk_use_lets_the_start_through_with_a_note(render, tmp_p
     def broken(_p):
         raise OSError(5, "I/O error")
 
-    monkeypatch.setattr(d.shutil, "disk_usage", broken)
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", broken)
     assert d.disk_refusal(tmp_path) is None
     err = capsys.readouterr().err
     assert "not checked" in err and "I/O error" in err
+
+
+@pytest.mark.parametrize("pct, limit, marked", [(95, None, True), (40, None, False), (95, "abc", False)])
+def test_a_full_disk_refusal_appends_the_abort_line_for_the_train(render, tmp_path, monkeypatch, pct, limit,
+                                                                  marked):
+    """v2.98 B1: a refusal for a full disk inside a train's suite run (PROCESS_SUITE_ABORT set)
+    appends `disk-full <path> <use>%` to the marker — the run aborts, nobody is blamed. A free
+    disk or a misconfigured limit writes nothing."""
+    d = _load_dispatch(render(tmp_path / "repo", {"project_name": "d", "modules": {}}))
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(pct))
+    if limit is None:
+        monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    else:
+        monkeypatch.setenv(d.DISK_LIMIT_ENV, limit)
+    marker = tmp_path / "marker"
+    marker.write_text("earlier line\n")
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
+    assert bool(d.disk_refusal(tmp_path)) is (pct == 95)
+    added = marker.read_text().splitlines()[1:]
+    assert added == ([f"disk-full {tmp_path} 95%"] if marked else []), added
+
+
+def test_a_full_disk_refusal_never_creates_the_marker(render, tmp_path, monkeypatch):
+    """Append only, never creating it: a marker the train removed stays gone."""
+    d = _load_dispatch(render(tmp_path / "repo", {"project_name": "d", "modules": {}}))
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(95))
+    monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    gone = tmp_path / "gone"
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(gone))
+    assert d.disk_refusal(tmp_path)
+    assert not gone.exists()
+
+
+def test_conftest_drops_the_suite_abort_marker_of_an_outer_train(tmp_path):
+    """This repository's own train runs its suite with PROCESS_SUITE_ABORT set; a dispatch test
+    that refuses a start would append `disk-full …` to the outer marker and abort that train.
+    The conftest removes the variable for every test."""
+    here = Path(__file__).resolve().parent
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    shutil.copy2(here / "conftest.py", suite / "conftest.py")
+    (suite / "test_env.py").write_text(
+        "import os\n\ndef test_no_marker():\n    assert 'PROCESS_SUITE_ABORT' not in os.environ\n")
+    marker = tmp_path / "outer-marker"
+    marker.write_text("")
+    env = {**os.environ, "PROCESS_SUITE_ABORT": str(marker), "PYTHONDONTWRITEBYTECODE": "1"}
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", str(suite),
+                        "--basetemp", str(tmp_path / "bt")], cwd=suite, env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
 
 
 def test_the_disk_limit_reaches_the_command_line(render, tmp_path):
