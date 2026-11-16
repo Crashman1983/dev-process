@@ -749,6 +749,138 @@ def test_commit_claiming_issue_of_a_spec_plan_is_hard_on_merge_push(render, tmp_
     assert _run(out, env=env).returncode == 0
 
 
+# --- v2.98 A1 (#424 Fall 2): die Meldung zu einem fremden `(#N)` sagt, was zu tun ist ---
+
+def _main_with_reviewed_plan(render, tmp_path, *, number=3000):
+    """main trägt den archivierten Tier-3-Plan von #N mit seiner Review (head
+    gebunden); ausgecheckt ist `roadmap`, ein Branch ohne Issue im Namen."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    fork = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _git(out, "checkout", "-q", "-b", f"{number}-p5")
+    _archived_plan(out, "2026-11-10-p5.md",
+                   f"# Plan\n\ntier: 3\nissue: #{number}\n\n## Decisions\n")
+    (out / "p5.py").write_text("x = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", f"feat: P5 (#{number})")
+    head = _git(out, "rev-parse", "HEAD").stdout.strip()
+    _journal(out, _review(work=str(number), tier="3",
+                          independence="bundle,non-implementing,cross-model",
+                          artifact=(fork, head)))
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "docs: attest")
+    _git(out, "checkout", "-q", "main")
+    _git(out, "merge", "-q", "--no-ff", "-m", f"merge {number}-p5", f"{number}-p5")
+    _git(out, "checkout", "-q", "-b", "roadmap")
+    return out
+
+
+def _commit_roadmap(out, message, line="- [x] P5\n"):
+    with (out / "ROADMAP.md").open("a", encoding="utf-8") as f:
+        f.write(line)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", message)
+    return _git(out, "rev-parse", "HEAD").stdout.strip()
+
+
+def _finding_lines(stdout, needle):
+    return [ln for ln in stdout.splitlines() if needle in ln]
+
+
+def test_a_subject_claim_on_a_branch_without_issue_names_the_commit_and_the_way_out(render, tmp_path):
+    """Fall 2: „mark P5 done (#3000)“ bleibt ein Anspruch — der Befund nennt jetzt den
+    Commit und den Weg zu `see #N`."""
+    out = _main_with_reviewed_plan(render, tmp_path)
+    sha = _commit_roadmap(out, "docs: mark P5 done (#3000)")
+    r = _merge_push(out)
+    assert r.returncode == 1, r.stdout  # unverändert hart
+    lines = _finding_lines(r.stdout, "#3000 (.process-work/plans/archive/2026-11-10-p5.md)")
+    assert len(lines) == 1, r.stdout
+    assert f"`{sha[:9]} docs: mark P5 done (#3000)` claims #3000 with `(#3000)` at the end of its subject" \
+        in lines[0], lines[0]
+    assert "commits.md" in lines[0]
+    assert "if it only refers to #3000, reword it to `see #3000` — otherwise review #3000's plan for it" \
+        in lines[0], lines[0]
+    assert "drop the closing word" not in r.stdout
+
+
+def test_a_reference_is_no_claim_on_the_same_branch(render, tmp_path):
+    out = _main_with_reviewed_plan(render, tmp_path)
+    _commit_roadmap(out, "docs: mark P5 done, see #3000")
+    r = _merge_push(out)
+    assert r.returncode == 0, r.stdout
+    assert "#3000" not in r.stdout
+
+
+def test_a_closing_word_names_the_commit_and_says_drop_it(render, tmp_path):
+    out = _main_with_reviewed_plan(render, tmp_path)
+    sha = _commit_roadmap(out, "docs: mark P5 done\n\nCloses #3000")
+    r = _merge_push(out)
+    assert r.returncode == 1, r.stdout
+    lines = _finding_lines(r.stdout, "#3000 (.process-work/plans/archive/2026-11-10-p5.md)")
+    assert len(lines) == 1, r.stdout
+    assert f"`{sha[:9]} docs: mark P5 done` closes #3000; if it does not, drop the closing word" \
+        in lines[0], lines[0]
+    assert "reword it" not in r.stdout
+
+
+def test_several_commits_claiming_one_issue_are_all_named_in_one_finding(render, tmp_path):
+    out = _main_with_reviewed_plan(render, tmp_path)
+    first = _commit_roadmap(out, "docs: mark P5 done (#3000)")
+    second = _commit_roadmap(out, "docs: link P5\n\nFixes #3000", line="- P5 linked\n")
+    r = _merge_push(out)
+    assert r.returncode == 1, r.stdout
+    lines = _finding_lines(r.stdout, "#3000 (.process-work/plans/archive/2026-11-10-p5.md)")
+    assert len(lines) == 1, r.stdout
+    assert f"`{first[:9]} docs: mark P5 done (#3000)` claims #3000" in lines[0], lines[0]
+    assert f"`{second[:9]} docs: link P5` closes #3000; if it does not, drop the closing word" \
+        in lines[0], lines[0]
+
+
+def test_a_claim_of_an_issue_no_plan_declares_names_the_commit(render, tmp_path):
+    out = _main_with_reviewed_plan(render, tmp_path)
+    sha = _commit_roadmap(out, "docs: note it (#3999)")
+    r = _merge_push(out)
+    assert r.returncode == 0, r.stdout  # unverändert eine Notiz
+    assert f"`{sha[:9]} docs: note it (#3999)` claims #3999" in r.stdout, r.stdout
+    assert "but no plan declares that issue" in r.stdout
+
+
+def test_a_closing_word_of_a_train_merge_names_the_passenger_and_its_plan(render, tmp_path):
+    """r3 m6: das `Closes #N` eines `train: merge <b>` schrieb der Zug aus dem Plan des
+    Passagiers — der Hinweis nennt Passagier und Plan statt „drop the closing word“."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "4000-widget")
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-11-15-widget.md").write_text("# Plan\n\ntier: 3\nissue: #4000\n\n## Decisions\n")
+    (out / "widget.py").write_text("X = 1\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget")
+    _git(out, "checkout", "-q", "-b", "train/20261116-0544", "main")
+    _git(out, "merge", "-q", "--no-ff", "--no-commit", "4000-widget")
+    (out / ARCHIVE).mkdir(parents=True, exist_ok=True)
+    _git(out, "mv", ".process-work/plans/2026-11-15-widget.md", f"{ARCHIVE}/2026-11-15-widget.md")
+    _git(out, "commit", "-q", "--no-verify", "-m", "train: merge 4000-widget\n\nCloses #4000")
+    sha = _git(out, "rev-parse", "HEAD").stdout.strip()
+    r = _merge_push(out)
+    assert r.returncode == 1, r.stdout  # unverändert hart
+    lines = _finding_lines(r.stdout, f"`{sha[:9]} train: merge 4000-widget` closes #4000")
+    assert lines, r.stdout
+    assert all("passenger `4000-widget`" in ln and f"{ARCHIVE}/2026-11-15-widget.md" in ln
+               for ln in lines), lines
+    assert "drop the closing word" not in r.stdout
+
+
 def test_one_claim_grammar_reads_range_and_integration(tmp_path):
     """r2 m5, r3 m5: `issue_claims_in_range` ist die einzige Leserin, `issue_refs_in_range`
     ihre Menge, und `issues_on_integration` liest dieselbe Grammatik."""

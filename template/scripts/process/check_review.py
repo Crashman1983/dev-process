@@ -1442,6 +1442,7 @@ PRE_COMMIT_TARGET_ENV = "PRE_COMMIT_REMOTE_BRANCH"
 _ISSUE_CLOSING = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b", re.IGNORECASE)
 _ISSUE_SUBJECT = re.compile(r"\(#(\d+)\)\s*$")
+_TRAIN_MERGE = re.compile(r"^train: merge (\S+)\s*$")  # train.py writes it, `Closes #N` below
 
 
 class Claim(NamedTuple):
@@ -2886,6 +2887,39 @@ def no_clearing_review(rel: str, tier: int, ids) -> str:
             f"'review-waived: <reason> #<issue>' (journal-state-plans.md)")
 
 
+def _claim_origin(claim: Claim) -> str:
+    """The claiming commit and how it claims (`Claim.kind`)."""
+    who, n = f"`{claim.sha[:9]} {claim.subject}`", claim.number
+    if claim.kind == "subject":
+        return f"{who} claims #{n} with `(#{n})` at the end of its subject (commits.md)"
+    return f"{who} closes #{n}"
+
+
+def claim_note(claim: Claim, passenger_plans: list[str] | None = None) -> str:
+    """The claiming commit and the way out by kind (#424 Fall 2): a reference
+    written as a claim pulls a foreign plan into this push. A `Closes #N` of a
+    `train: merge <b>` the train wrote from passenger `b`'s plan
+    (`passenger_plans`, when the merge archives it): the review is `b`'s."""
+    n = claim.number
+    if claim.kind == "subject":
+        return (f"{_claim_origin(claim)}; if it only refers to #{n}, reword it to `see #{n}` "
+                f"— otherwise review #{n}'s plan for it")
+    train = _TRAIN_MERGE.match(claim.subject)
+    if train:
+        plan = f" {', '.join(passenger_plans)}" if passenger_plans else ""
+        return (f"{_claim_origin(claim)}: the train wrote it from passenger `{train.group(1)}`'s "
+                f"plan{plan}, so the review is `{train.group(1)}`'s to clear")
+    return f"{_claim_origin(claim)}; if it does not, drop the closing word"
+
+
+def _plans_archived_by(root: Path, sha: str) -> set[str]:
+    """The archived plans a merge adds against its first parent — a train merge
+    settles its passenger's plans there. Unreadable: none, the note then names
+    the passenger alone."""
+    return _names(_git_bytes(root, "diff", "--name-only", "--no-renames", "--diff-filter=A", "-z",
+                             f"{sha}^1", sha, "--", PLANS_ARCHIVE)) or set()
+
+
 def _residue(rel: str) -> str:
     return (f"{rel}: belongs to work already merged (its reviewed head is on the integration "
             f"branch) — later changes are not its code; archive the plan (a merge that "
@@ -3636,17 +3670,35 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     # the commit-anchored arm: what exists at every merge is the issue plus
     # the commits that CLAIM it (a closing trailer or the `… (#N)` subject —
-    # a bare mention is somebody else's business, see issue_refs_in_range).
+    # a bare mention is somebody else's business, see issue_claims_in_range).
     # The tier still comes from the plan — a gate that invents its own tier
     # would be worse than the gap it closes — so a claimed issue without a
     # findable plan is a note, not a failure.
+    # Every finding names the claiming commits and the way out by kind (#424):
+    # a mere reference worded as a claim is reworded, not a foreign plan re-reviewed.
     phases.enter("stale_review-by-issue")
-    for number in sorted(issue_refs_in_range(root) if base_error is None else ()):
+    claims_of: dict[int, list[Claim]] = {}
+    for claim in (issue_claims_in_range(root) if base_error is None else ()):
+        claims_of.setdefault(claim.number, []).append(claim)
+    archived_by: dict[str, set[str]] = {}
+
+    def owed_because(number: int, rel: str) -> str:
+        notes = []
+        for claim in claims_of[number]:
+            plans: list[str] = []
+            if claim.kind == "closing" and _TRAIN_MERGE.match(claim.subject):
+                if claim.sha not in archived_by:
+                    archived_by[claim.sha] = _plans_archived_by(root, claim.sha)
+                plans = [rel] if rel in archived_by[claim.sha] else []
+            notes.append(claim_note(claim, plans))
+        return " — why this push owes it: " + "; ".join(notes)
+
+    for number in sorted(claims_of):
         matching = [(rel, text, tier, ids) for rel, text, tier, ids in tiered_plans
                     if number in _plan_issue_numbers(text)]
         if not matching:
             if number not in _declared_anywhere(root):
-                soft.append(f"a commit in the pushed range claims #{number}, but no "
+                soft.append(f"{', '.join(_claim_origin(c) for c in claims_of[number])}, but no "
                             f"plan declares that issue (neither in {PLANS_ACTIVE} nor in "
                             f"{SPECS_DIR}/*/{SPEC_PLAN}) — no tier to key on, so review "
                             f"presence is not enforced for it")
@@ -3656,17 +3708,15 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if tier < 2 or review_waived(text) or rel in deleted:
                 continue  # a deleted plan has its finding above, once
             if not _cleared(passes, ids, tier):
-                presence(f"a commit in the pushed range claims #{number} — "
-                         + no_clearing_review(rel, min(tier, 3), ids))
+                presence(no_clearing_review(rel, min(tier, 3), ids) + owed_because(number, rel))
                 continue
             own = clearing_passes(root, passes, tier, scope_base)
             if not _cleared(own, ids, tier):
-                presence(f"a commit in the pushed range claims #{number} — "
-                         + own_family_missing(rel, tier, own_from))
+                presence(own_family_missing(rel, tier, own_from) + owed_because(number, rel))
                 continue
             stale = stale_review(root, own, ids, tier, in_flight, _reviewed_heads(own, tier, known_work))
             if stale:
-                presence(f"#{number} ({rel}): {stale}")
+                presence(f"#{number} ({rel}): {stale}" + owed_because(number, rel))
 
     # a standing block: the committed records of the pushed range, whatever
     # the tier (see standing_block_findings). `check` may read a directory
