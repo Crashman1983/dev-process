@@ -1289,6 +1289,12 @@ def _disk_full(where: Path, log) -> str | None:
     that cannot be read is a note, never full; a misconfigured limit is a note, and the
     default limit holds (dispatch refuses on it; a train that stopped checking would read
     a full disk as red passengers again)."""
+    over = _disk_over(where, log)
+    return over[1] if over else None
+
+
+def _disk_over(where: Path, log) -> tuple[Path, str] | None:
+    """`_disk_full` with the directory it measured: `(path, line)`, or None."""
     for path in (_nearest_dir(Path(where)), _nearest_dir(_temp_root())):
         use = process_git.disk_use(path, fallback=True)
         if use.problem:
@@ -1299,16 +1305,38 @@ def _disk_full(where: Path, log) -> str | None:
                     f"checked against the default {process_git.DISK_LIMIT_PCT}%"
                 print(f"train: note — {use.problem}; the disk is {checked}", file=sys.stderr)
         if use.full and use.use_pct is not None:
-            return process_git.disk_full_line(path, use.use_pct)
+            return path, process_git.disk_full_line(path, use.use_pct)
     return None
+
+
+def _on_disk(path: Path, disk: Path) -> bool:
+    """Is `path` (its nearest directory that exists) on the filesystem of `disk`? Unreadable: yes."""
+    try:
+        return os.stat(_nearest_dir(path)).st_dev == os.stat(disk).st_dev
+    except OSError:
+        return True
+
+
+def _clear_hint(disk: Path, where: Path) -> str:
+    """What the steward clears on the full disk: which of the train's tree and the temp dir
+    are on it, and what lies there — old test basetemps in the temp dir, merged worktrees
+    with their environments beside the train's (v2.98: `tidy.py` alone frees no basetemp)."""
+    tmp = _temp_root()
+    on = [what for what, path in ((f"the train's tree {where}", where), (f"the temp dir {tmp}", tmp))
+          if _on_disk(path, disk)]
+    clear = ([f"old test basetemps under {tmp} (pytest-of-*, other runs' leftovers)"]
+             if _on_disk(tmp, disk) else []) + [f"merged worktrees and their environments (`{process_git.CLEANUP_CMD}`)"]
+    return (f"on it: {', '.join(on) or f'{disk}'}; clear there: " + "; ".join(clear))
 
 
 def _halt_if_disk_full(where: Path, log) -> None:
     """A check point: `DiskFull` when a disk the train writes to is over the limit."""
-    why = _disk_full(where, log)
-    if why:
-        log(f"{why} — the train halts: no passenger of this run filled it")
-        raise DiskFull(why)
+    over = _disk_over(where, log)
+    if over:
+        disk, why = over
+        hint = _clear_hint(disk, Path(where))
+        log(f"{why} — the train halts: no passenger of this run filled it ({hint})")
+        raise DiskFull(why, hint)
 
 
 def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) -> tuple[str, str]:
@@ -1755,7 +1783,12 @@ class LaneHeld(EnvironmentRed):
 class DiskFull(EnvironmentRed):
     """A disk the train writes to is over the limit before a build, a judge or a suite run
     (v2.98 B1): no passenger of this run filled it — nobody is blamed, nothing merges
-    (`red_path` "disk-full"). The message is the line `disk-full <path> <use>%`."""
+    (`red_path` "disk-full"). The message is the line `disk-full <path> <use>%`; `hint`
+    names what lies on that disk and what to clear there."""
+
+    def __init__(self, line: str, hint: str = "") -> None:
+        super().__init__(line)
+        self.hint = hint
 
 
 TRAIN_LANE = "full"
@@ -2346,8 +2379,9 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         if measure.get("rounds"):
             measure["rounds"][-1]["disk_full"] = str(full)
         print(f"train: {full} — a disk the train writes to is over its limit "
-              f"({process_git.DISK_LIMIT_ENV}); nobody is blamed, nothing merged — free it "
-              f"(`{process_git.CLEANUP_CMD}`) and the next run departs (see {logfile})", file=sys.stderr)
+              f"({process_git.DISK_LIMIT_ENV}); nobody is blamed, nothing merged. "
+              f"{full.hint or f'Free it (`{process_git.CLEANUP_CMD}`)'} — then the next run departs "
+              f"(see {logfile})", file=sys.stderr)
         _cleanup(root, stamp)
         return rc
     except SuiteAborted as aborted:

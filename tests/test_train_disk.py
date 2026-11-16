@@ -126,6 +126,26 @@ def test_enospc_in_a_merge_through_run_blames_nobody(render, tmp_path, monkeypat
     assert "alpha" in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
 
 
+def test_the_halt_names_the_temp_dir_and_the_tree_and_what_to_clear(render, tmp_path, monkeypatch, capsys):
+    """Refute v2.98: the halt said only `tidy.py --apply`, which frees no test basetemp. It
+    names the train's tree and the temp dir on the full disk, and what to clear there."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    train = _load_train(out)
+    _disk(monkeypatch, lambda: True)
+    rc = train.run(out, suite="true", deploy=None, push=False, min_candidates=1, max_wait_hours=0,
+                   force=True, keep_branches=True, dry_run=False)
+    err = capsys.readouterr().err
+    assert rc == 1 and "nobody is blamed" in err, err
+    assert f"the train's tree {out.parent / (out.name + '-train')}" in err, err
+    assert f"the temp dir {tmp}" in err and f"old test basetemps under {tmp} (pytest-of-*" in err, err
+    assert "tidy.py --apply" in err, err
+
+
 def test_a_gate_on_a_full_disk_is_disk_full_not_a_red_main(render, tmp_path, monkeypatch):
     """Check point (b): `judge` checks before the preflight and the gates — a gate that would
     fail on ENOSPC never runs, and the base is never read red."""
