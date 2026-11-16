@@ -174,6 +174,16 @@ out with one `for-each-ref --merged`, before any diff; `plan --json` counts
 them in `no_lead`. Record texts are read once per blob, the conflict notes
 of `plan` come from one `merge-tree --stdin` for all pairs, and two
 candidates that share no commit beyond the base cost no `merge-base`.
+A branch that cannot board — it archives no plan and its latest report is
+not `review-pass` — is read no further than its lead (#426): `plan` shows
+it on a short line, `· <branch> (+ahead/-behind, not read further: it
+cannot board)`, without files, hours or DoD deviations, and with a short
+reason from what is already read: its hold, a `done` report, or "no
+archived plan … (run /finish first)"; `--json` marks it `"skipped": true`.
+Its open questions and gate-code findings show once it can board. A
+branch whose archive git cannot read is read in full and refused as
+unreadable. `PROCESS_TRAIN_PLAN_PROFILE=1` prints the seconds of each
+planning section as one JSON line on stderr.
 
 ## The run
 
