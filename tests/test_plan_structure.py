@@ -238,6 +238,22 @@ def test_a_ref_off_the_strict_id_pattern_fails(render, tmp_path):
         assert r.returncode == 1 and f"story {ref} does not match the registry's id pattern" in r.stdout, r.stdout
 
 
+def test_a_plan_may_name_a_tombstone_but_not_a_deleted_story(render, tmp_path):
+    # v2.99 G1 (#428 AC-2): a retired story stays as its tombstone, so its id stays known;
+    # the project file stands at the integration ref, else the red half would check nothing
+    out = _project_registry(_with_registry_module(render, tmp_path))
+    stone = out / "docs/feature-registry/documents/DOC-US-002.json"
+    stone.write_text(json.dumps({"id": "DOC-US-002", "acceptance": [], "retired": [{"id": "AC1"}],
+                                 "retired_into": ["DOC-US-001"]}))
+    out = _repo(out)
+    _plan(out, GOOD + "\nStories: DOC-US-002\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    stone.unlink()
+    r = _run(out)
+    assert r.returncode == 1 and "story DOC-US-002 is not in the registry" in r.stdout, r.stdout
+
+
 def test_a_registry_config_only_on_the_branch_binds_nothing(render, tmp_path):
     # a branch cannot set the pattern its own plan is checked against (MINOR-6)
     out = _repo(_project_registry(_with_registry_module(render, tmp_path), local=False))

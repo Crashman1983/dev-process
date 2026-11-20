@@ -437,6 +437,17 @@ def item_ids(data: object) -> tuple[set[str], set[str]]:
     return ids(data.get("acceptance")), ids(data.get("retired"))
 
 
+# a retired story's marker (v2.99, #428): the stories its content went into, [] for none
+RETIRED_INTO = "retired_into"
+
+
+def is_tombstone(data: object) -> bool:
+    """Whether a parsed story (`Story.data`) is a tombstone — a retired story that stays,
+    its id held, its items all in `retired`. The key alone decides, whatever its value:
+    the registry gate judges the form; filters and views ask here."""
+    return isinstance(data, dict) and RETIRED_INTO in data
+
+
 def paired_stories(reg: Registry, base: Registry) -> list[tuple[Story, Story]]:
     """(story today, the same story at the base) for every story in both (v2.93 I4.2).
     A story is found by its `id`; one whose id the base does not hold is looked up by its

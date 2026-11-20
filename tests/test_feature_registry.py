@@ -1335,6 +1335,153 @@ def test_doc_and_config_state_stable_ids(render, tmp_path):
     assert cfg["stable_ids"] is True and "retired" in cfg["_comment"]["stable_ids"]
 
 
+# --- v2.99 G1: a retired story stays as its tombstone (#428 AC-1, AC-3, AC-4) ---
+
+def _tombstone(out, *retired, sid="STORY-0003", into=("STORY-0002",), **over):
+    """`sid` retired into `into`: no item, the ids it gave in `retired`, no tests; a None
+    in `over` drops that key."""
+    data = {"id": sid, "title": "Old widget", "story": "As a user, the old widget did it.",
+            "acceptance": [], "retired": [{"id": f"AC{n}"} for n in retired],
+            "retired_into": list(into), **over}
+    (out / REG).mkdir(parents=True, exist_ok=True)
+    (out / REG / f"{sid}.json").write_text(json.dumps({k: v for k, v in data.items() if v is not None}),
+                                           encoding="utf-8")
+
+
+def _hard(stdout):
+    return [line for line in stdout.splitlines() if line.startswith("  - ")]
+
+
+def test_a_tombstone_is_green_and_counts_as_no_missing_coverage(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, 1)
+    _tombstone(out, 1, 2, 3)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "STORY-0003" not in r.stdout, r.stdout  # no note on the tombstone either
+    assert "1 acceptance item(s) without an existing test" in r.stdout, r.stdout  # STORY-0002's
+    _tombstone(out, 1, into=())  # no successor
+    assert _gate(out).returncode == 0
+
+
+def test_a_tombstone_needs_no_status_issue_or_tests_in_the_kenni_layout(render, tmp_path):
+    out = _green_kenni(render, tmp_path)
+    p = out / KREG / "clients/CLI-US-003.json"
+    stone = {"id": "CLI-US-003", "title": "Alt", "as_a": "Seb", "i_want": "x", "so_that": "y",
+             "surfaces": ["ios"], "acceptance": [], "retired": [{"id": "AC1"}],
+             "retired_into": ["CLI-US-002"]}
+    p.write_text(json.dumps(stone), encoding="utf-8")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    p.write_text(json.dumps({**stone, "status": "covered", "test_mapping": {}}), encoding="utf-8")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout  # required_for "covered" needs no issue on a tombstone
+    p.write_text(json.dumps({**stone, "status": "done"}), encoding="utf-8")
+    r = _gate(out)
+    assert r.returncode == 1 and "invalid status 'done'" in r.stdout, r.stdout  # a status still counts
+
+
+def test_empty_acceptance_without_retired_into_names_the_marker(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, acceptance=[], retired=[{"id": "AC1"}])
+    r = _gate(out)
+    assert r.returncode == 1 and "'acceptance' must be a non-empty list" in r.stdout \
+        and "'retired_into'" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("over, want", [
+    ({"acceptance": _items(4)}, "STORY-0003#AC4 is an item of a retired story"),
+    ({"acceptance": None}, "a retired story keeps 'acceptance': []"),
+    ({"retired": []}, "a retired story lists every id it gave in 'retired'"),
+    ({"retired": None}, "a retired story lists every id it gave in 'retired'"),
+    ({"tests": ["tests/test_widget.py"]}, "a retired story proves nothing"),
+    ({"retired": [{"id": "AC1", "split_into": ["AC2"]}]},
+     "STORY-0003#AC1: a retired story splits into no item — name the successor in 'retired_into'"),
+    ({"retired_into": "STORY-0002"}, "'retired_into' must be a list of story ids"),
+    ({"retired_into": [7]}, "'retired_into' must be a list of story ids"),
+    ({"retired_into": ["STORY-0009"]}, "retired_into names STORY-0009, no story of the registry"),
+    ({"retired_into": ["STORY-0003"]}, "retired_into names STORY-0003 itself"),
+])
+def test_a_malformed_tombstone_is_hard_with_one_finding(render, tmp_path, over, want):
+    out = _render(render, tmp_path)
+    _story(out, 1)
+    _tombstone(out, 1, **over)
+    r = _gate(out)
+    assert r.returncode == 1 and want in r.stdout, r.stdout
+    assert len(_hard(r.stdout)) == 1, r.stdout
+
+
+def test_a_chain_of_tombstones_is_green_and_a_cycle_is_hard(render, tmp_path):
+    # a later retirement need not rewrite older tombstones (r2 N2) — but the chain must end
+    out = _render(render, tmp_path)
+    _story(out, 1)
+    _tombstone(out, 1, into=("STORY-0004",))
+    _tombstone(out, 1, sid="STORY-0004", into=("STORY-0002",))
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    _tombstone(out, 1, sid="STORY-0004", into=("STORY-0003",))
+    r = _gate(out)
+    assert r.returncode == 1 and "closes a cycle: STORY-0003 -> STORY-0004 -> STORY-0003" in r.stdout, r.stdout
+    assert len(_hard(r.stdout)) == 1, r.stdout
+
+
+def test_a_ref_to_a_tombstone_item_is_a_note_naming_its_successor_else_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, 1, links=["see STORY-0003#AC2"])
+    _tombstone(out, 1, 2)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    assert "STORY-0003#AC2 is retired with its story, which went into STORY-0002" in r.stdout, r.stdout
+    _tombstone(out, 1, 2, into=())
+    r = _gate(out)
+    assert r.returncode == 1 and "STORY-0003#AC2 is retired — point the ref" in r.stdout, r.stdout
+
+
+def test_a_tombstone_gone_from_the_base_is_hard(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, 1)
+    _tombstone(out, 1, 2)
+    _story(out, 1, name="STORY-0004.json", id="STORY-0004")
+    _fork(out)
+    (out / REG / "STORY-0004.json").unlink()  # a live story may still be deleted
+    assert _gate(out).returncode == 0
+    (out / REG / "STORY-0003.json").unlink()
+    want = "STORY-0003 is a retired story at the base and gone — a retired story stays as its tombstone"
+    r = _gate(out)
+    assert r.returncode == 1 and want in r.stdout, r.stdout
+    _tombstone(out, 1, 2, sid="STORY-0005")  # paired by id, not by path
+    (out / REG / "STORY-0005.json").rename(out / REG / "STORY-0003.json")
+    r = _gate(out)
+    assert r.returncode == 1 and want in r.stdout, r.stdout
+
+
+def test_reviving_a_tombstone_follows_the_stable_id_rules(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, 1)
+    _tombstone(out, 1, 2)
+    _fork(out)
+    live = {"retired_into": None, "tests": ["tests/test_widget.py"]}
+    _tombstone(out, 1, 2, acceptance=_items(2), **live)
+    r = _gate(out)
+    assert r.returncode == 1 and "STORY-0003#AC2 is retired and still an acceptance item" in r.stdout, r.stdout
+    _tombstone(out, 2, acceptance=_items(1), **live)
+    r = _gate(out)
+    assert r.returncode == 1 and "STORY-0003#AC1 is retired at the base, its 'retired' entry is gone" \
+        in r.stdout, r.stdout
+    _tombstone(out, 1, 2, acceptance=_items(3), **live)
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_doc_and_config_state_how_a_story_retires(render, tmp_path):
+    out = _render(render, tmp_path)
+    doc = (out / "docs/process/modules/feature-registry.md").read_text(encoding="utf-8")
+    assert "## Retiring a story" in doc and '"retired_into"' in doc
+    assert "a retired story stays as its tombstone" in doc and "cycle" in doc and "train" in doc
+    cfg = json.loads((out / "docs/process/feature-registry.json").read_text(encoding="utf-8"))
+    assert "retired_into" in cfg["_comment"]["stable_ids"]
+
+
 # --- v2.93 B3: an item's `design` anchor `<round>/<view>#<state>` (#404 AC-4) ---
 
 DC = "docs/process/design-contracts"

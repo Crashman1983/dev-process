@@ -23,6 +23,11 @@ removed id stands in `retired`, a new id is higher than the base's, a renumberin
 refused — and every `<story id>#AC<n>` ref inside the registry must name an item.
 Without a readable base the comparison is a note, never an error or a silent pass.
 
+A retired story stays as its tombstone (v2.99, #428): the story field `retired_into`
+(`registry_config.is_tombstone`) names the stories its content went into, [] for none.
+A tombstone holds no item and no test, lists its ids in `retired`, owes no status or
+issue, and a tombstone of the base must stand today — so its id is never given again.
+
 An item's `design` anchor `<round>/<view>#<state>` (v2.93, #404 B3) is checked only
 with the design-contracts module, whose gate owns the anchor and is imported for it.
 
@@ -81,8 +86,8 @@ class Run:
 
 
 def _known_fields(cfg: dict) -> set[str]:
-    known = {"id", "acceptance", "adr", "links", "retired", cfg["issues"]["field"], cfg["story_tests"],
-             *cfg["story_text_fields"], *cfg["extra_fields"]}
+    known = {"id", "acceptance", "adr", "links", "retired", registry_config.RETIRED_INTO,
+             cfg["issues"]["field"], cfg["story_tests"], *cfg["story_text_fields"], *cfg["extra_fields"]}
     if cfg["story_surfaces"] != "none":
         known.add("surfaces")
     if cfg["story_status"]:
@@ -195,6 +200,8 @@ def _check_status(run: Run, data: dict, rel: str) -> None:
     status_cfg = run.cfg["story_status"]
     if not status_cfg:
         return
+    if registry_config.is_tombstone(data) and "status" not in data:
+        return  # a tombstone owes no status; one it keeps is still checked
     if "status" not in data:
         run.hard.append(f"{rel}: missing 'status'")
     elif data["status"] not in status_cfg["values"]:
@@ -205,8 +212,9 @@ def _check_issues(run: Run, data: dict, rel: str) -> None:
     issues_cfg = run.cfg["issues"]
     name = issues_cfg["field"]
     refs: list = []
+    owed = not registry_config.is_tombstone(data)  # a tombstone owes no issue; its refs are checked
     if data.get(name) is None:  # absent or null: no ref (the template's `issue` is optional)
-        if issues_cfg["required"]:
+        if issues_cfg["required"] and owed:
             run.hard.append(f"{rel}: missing '{name}'")
     elif name == "issue":
         if isinstance(data[name], str):
@@ -226,11 +234,17 @@ def _check_issues(run: Run, data: dict, rel: str) -> None:
                 f"{rel}: malformed issue ref {ref!r} in '{name}' "
                 f"(want '#N', 'owner/repo#N', or a github issue URL)")
     required_for = issues_cfg["required_for"]
-    if required_for is not None and data.get("status") == required_for and not refs:
+    if owed and required_for is not None and data.get("status") == required_for and not refs:
         run.hard.append(f"{rel}: status {required_for!r} needs at least one ref in '{name}'")
 
 
 def _check_story_tests(run: Run, data: dict, rel: str, stats: dict) -> None:
+    if registry_config.is_tombstone(data):
+        name = run.cfg["story_tests"]
+        if data.get(name):
+            run.hard.append(f"{rel}: a retired story proves nothing — '{name}' stays empty; the "
+                            f"tests went with the behaviour")
+        return
     if run.cfg["story_tests"] == "tests":
         # an inventory entry asserts a proven capability — it requires at least
         # one existing test; a dead test path is a false claim of proof
@@ -359,8 +373,14 @@ def _check_item(run: Run, item: dict, label: str, story_surfaces: list[str], gro
 def _check_acceptance(run: Run, data: dict, rel: str, stats: dict, group: str,
                       story_surfaces: list[str]) -> None:
     acceptance = data.get("acceptance")
-    if not isinstance(acceptance, list) or not acceptance:
-        run.hard.append(f"{rel}: 'acceptance' must be a non-empty list")
+    tomb = registry_config.is_tombstone(data)
+    if tomb and not isinstance(acceptance, list):
+        # without the list the comparison with the base would skip the story (_compare_story)
+        run.hard.append(f"{rel}: a retired story keeps 'acceptance': [] — its ids stand in 'retired'")
+        return
+    if not tomb and (not isinstance(acceptance, list) or not acceptance):
+        run.hard.append(f"{rel}: 'acceptance' must be a non-empty list — a story without items "
+                        f"is retired with 'retired_into' (Retiring a story)")
         return
     stats["n_acc"] = len(acceptance)
     sid = data.get("id") if isinstance(data.get("id"), str) else "?"
@@ -381,6 +401,9 @@ def _check_acceptance(run: Run, data: dict, rel: str, stats: dict, group: str,
         else:
             seen.add(iid)
             label = f"{rel}: {sid}#{iid}"
+        if tomb:
+            run.hard.append(f"{label} is an item of a retired story — retire it too, or drop "
+                            f"'retired_into' to revive the story")
         text = ac.get("text")
         if not isinstance(text, str) or not text.strip():
             run.hard.append(f"{where} 'text' must be a non-empty string")
@@ -390,8 +413,12 @@ def _check_acceptance(run: Run, data: dict, rel: str, stats: dict, group: str,
 def _check_retired(run: Run, data: dict, rel: str) -> None:
     """A story's `retired` list (v2.93 I4.1): `[{"id": "AC9"}, {"id": "AC12", "split_into":
     ["AC31", "AC32"]}]` — each id an item id, once, and no longer an acceptance item;
-    `split_into` names items that stand in this story, none of them retired."""
+    `split_into` names items that stand in this story, none of them retired. A tombstone
+    lists every id it gave, and none splits: its successors are in `retired_into`."""
+    tomb = registry_config.is_tombstone(data)
     if "retired" not in data:
+        if tomb:
+            run.hard.append(f"{rel}: a retired story lists every id it gave in 'retired'")
         return
     retired = data["retired"]
     sid = data.get("id") if isinstance(data.get("id"), str) else "?"
@@ -399,6 +426,8 @@ def _check_retired(run: Run, data: dict, rel: str) -> None:
         run.hard.append(f"{rel}: 'retired' must be a list of objects with an 'id' (and maybe "
                         f"'split_into')")
         return
+    if tomb and not retired:
+        run.hard.append(f"{rel}: a retired story lists every id it gave in 'retired'")
     current, _ = registry_config.item_ids(data)
     ids: set[str] = set()
     splits: list[tuple[str, object]] = []
@@ -421,7 +450,10 @@ def _check_retired(run: Run, data: dict, rel: str) -> None:
         if iid in current:
             run.hard.append(f"{rel}: {sid}#{iid} is retired and still an acceptance item — "
                             f"a retired id names no item")
-        if "split_into" in entry:
+        if "split_into" in entry and tomb:
+            run.hard.append(f"{rel}: {sid}#{iid}: a retired story splits into no item — name the "
+                            f"successor in 'retired_into'")
+        elif "split_into" in entry:
             splits.append((iid, entry["split_into"]))
     for iid, targets in splits:
         if not (isinstance(targets, list) and targets and all(isinstance(t, str) for t in targets)):
@@ -435,6 +467,54 @@ def _check_retired(run: Run, data: dict, rel: str) -> None:
             elif target not in current:
                 run.hard.append(f"{rel}: {sid}#{iid}: split_into names {target!r}, no item of "
                                 f"this story")
+
+
+def _check_retired_into(run: Run, reg: registry_config.Registry) -> None:
+    """Each tombstone's `retired_into` (v2.99, #428): a list of story ids of today's
+    registry, never its own. A chain over tombstones is allowed — a later retirement need
+    not rewrite older tombstones — but it ends in a story that stands, or in none: a cycle
+    fails, once, at the story the walk began with."""
+    known = registry_config.story_ids(reg.stories)
+    edges: dict[str, list[str]] = {}  # tombstone id -> the ids it names, itself left out
+    rels: dict[str, str] = {}
+    for story in reg.stories:
+        data = story.data
+        if not registry_config.is_tombstone(data):
+            continue
+        rel = run.rel(story.path)
+        sid = data.get("id") if isinstance(data.get("id"), str) else None
+        into = data[registry_config.RETIRED_INTO]
+        if not (isinstance(into, list) and all(isinstance(t, str) for t in into)):
+            run.hard.append(f"{rel}: 'retired_into' must be a list of story ids — the stories its "
+                            f"content went into, [] for none")
+            continue
+        for target in into:
+            if target == sid:
+                run.hard.append(f"{rel}: retired_into names {sid} itself — name the story its "
+                                f"content went into, or none")
+            elif target not in known:
+                run.hard.append(f"{rel}: retired_into names {target}, no story of the registry")
+        if sid is not None and sid not in edges:  # a duplicate id fails in _check_id
+            edges[sid] = [t for t in into if t != sid]
+            rels[sid] = rel
+    state: dict[str, str] = {}  # "open" while on the walk's path, then "done"
+
+    def walk(path: list[str]) -> None:
+        state[path[-1]] = "open"
+        for nxt in edges[path[-1]]:
+            if nxt not in edges:
+                continue  # a story that stands, or an unknown one: the chain ends
+            if state.get(nxt) == "open":
+                cycle = " -> ".join([*path[path.index(nxt):], nxt])
+                run.hard.append(f"{rels[path[0]]}: retired_into closes a cycle: {cycle} — a chain "
+                                f"of retired stories ends in a story that stands, or in none")
+            elif nxt not in state:
+                walk([*path, nxt])
+        state[path[-1]] = "done"
+
+    for sid in sorted(edges):
+        if sid not in state:
+            walk([sid])
 
 
 def _check_entry(run: Run, story: registry_config.Story, group: str) -> None:
@@ -623,6 +703,18 @@ def _compare_story(run: Run, story: registry_config.Story, old: registry_config.
                             f"item on purpose, retire {iid} with `split_into` naming {moved[0]}")
 
 
+def _kept_tombstones(run: Run, reg: registry_config.Registry, base: registry_config.Registry) -> None:
+    """v2.99 (#428 AC-4): a tombstone of the base whose id is gone today fails — paired by
+    id, not by path, since the tombstone is what keeps its id from being given again.
+    Dropping `retired_into` revives the story under the comparison's rules instead."""
+    today = registry_config.story_ids(reg.stories)
+    for old in base.stories:
+        sid = old.data.get("id") if registry_config.is_tombstone(old.data) else None
+        if isinstance(sid, str) and sid not in today:
+            run.hard.append(f"{run.rel(old.path)}: {sid} is a retired story at the base and gone — "
+                            f"a retired story stays as its tombstone")
+
+
 def _ref_pattern(cfg: dict) -> re.Pattern:
     """A registry ref `<story id>#AC<n>` (I4.4): the loose story id, then the item id; a
     URL anchor `#AC4` without a story id in front matches nothing."""
@@ -642,14 +734,16 @@ def _strings(value: object) -> list[str]:
 
 def _check_refs(run: Run, reg: registry_config.Registry) -> None:
     """I4.4: every `<story id>#AC<n>` in a text value of a story or head file — test refs
-    included — names an item of today's registry. A retired id with `split_into` is a
-    note naming its successors; without one, an unknown story or an unknown id fails. For
-    a deleted story this is the one guard."""
-    stories: dict[str, tuple[set[str], set[str], dict[str, list[str]]]] = {}
+    included — names an item of today's registry. A retired id with `split_into`, or of a
+    tombstone with a `retired_into` story, is a note naming its successors; without one,
+    an unknown story or an unknown id fails. For a deleted story this is the one guard."""
+    stories: dict[str, tuple[set[str], set[str], dict[str, list[str]], list[str]]] = {}
     for story in reg.stories:
         if isinstance(story.data, dict) and isinstance(story.data.get("id"), str):
             ids, retired = registry_config.item_ids(story.data)
-            stories.setdefault(story.data["id"], (ids, retired, _splits(story.data)))
+            into = story.data[registry_config.RETIRED_INTO] if registry_config.is_tombstone(story.data) else []
+            into = [t for t in into if isinstance(t, str)] if isinstance(into, list) else []
+            stories.setdefault(story.data["id"], (ids, retired, _splits(story.data), into))
     pattern = _ref_pattern(run.cfg)
     files = [(story.path, story.data) for story in reg.stories]
     files += [(cap.path / registry_config.HEAD, cap.head) for cap in reg.capabilities]
@@ -662,10 +756,13 @@ def _check_refs(run: Run, reg: registry_config.Registry) -> None:
             if sid not in stories:
                 run.hard.append(f"{rel}: {ref} names no story of the registry")
                 continue
-            ids, retired, splits = stories[sid]
+            ids, retired, splits, into = stories[sid]
             if iid in ids:
                 continue
-            if iid in retired and splits.get(iid):
+            if iid in retired and into:
+                run.soft.append(f"{rel}: {ref} is retired with its story, which went into "
+                                f"{', '.join(into)} — point the ref at the item it means")
+            elif iid in retired and splits.get(iid):
                 run.soft.append(f"{rel}: {ref} is retired, split into {', '.join(splits[iid])} — "
                                 f"point the ref at the item it means")
             elif iid in retired:
@@ -683,6 +780,7 @@ def _stable(run: Run, reg: registry_config.Registry) -> None:
     if base is not None:
         for story, old in registry_config.paired_stories(reg, base):
             _compare_story(run, story, old)
+        _kept_tombstones(run, reg, base)
     _check_refs(run, reg)
 
 
@@ -708,6 +806,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         return [], ["no inventory entries yet (feature inventory empty)"]
     for story in reg.stories:
         _check_entry(run, story, run.rel(story.capability.path if story.capability else reg.path))
+    _check_retired_into(run, reg)
     _stable(run, reg)
     run.soft += [f"{group}: {n} acceptance item(s) without an existing test — "
                  f"`strict_item_tests` would fail them" for group, n in sorted(run.untested.items())]
