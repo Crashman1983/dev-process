@@ -9,6 +9,47 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.100.0 — Härtung hinter einem intakten Schutz; vier Review-Regeln; eine Regel für die Zugehörigkeit von Reports · 2026-11-20
+
+**Warum.**
+- Bei Kenni (#488) lief eine Konsolidierung hinter Schutzschichten, die in Kraft blieben, zwei Tage als Tier 3. Das Template hatte keinen Weg, eine Härtung unter Tier 3 einzustufen (#434).
+- Kennis Reviews nutzen vier Regeln, die dem Template fehlten: zuerst der Feature-Vertrag, Prozessideen nur gemeldet und nicht angewandt, ein Feld-Trace bis zum Endzustand, ein Folge-Issue pro Ursache (#436).
+- Kenni musste die Zugehörigkeitsregel aus `check_review.report_of` herauskopieren. Diese Projekt-Abweichung machte jedes Template-Update der Datei zu einem Review (#439).
+
+**Was sich ändert.**
+- [recommended] **Härtung hinter einem intakten Schutz darf Tier 2 sein** (`risk-tiers.md`). Die Ausnahme hat eine Begrenzung, drei Bedingungen und Ausschlüsse.
+  - **Begrenzung:** Sie gilt nur, wenn Tier 3 allein aus der Sicherheitsoberfläche folgt.
+  - **Bedingungen:**
+    1. Die Tier-Begründung führt die Consumer-Suche und nennt je Pfad den verbleibenden Schutz mit `file:line`.
+    2. Zwei Tests belegen sie: die gehärtete Prüfung allein, rot gegen die Vorfassung, und der verbleibende Schutz, der den Angriff ohne die Härtung abwehrt.
+    3. Die Härtung landet beim Owner der Grenze.
+  - **Ausgeschlossen:** jede Änderung an der einzigen Durchsetzungsstelle, eine gelockerte oder entfernte Sicherheitskontrolle, jede Änderung an Gate-Code und Template-Updates, die Durchsetzung verlagern.
+  - **Untergrenze:** Eine Änderung unter der Ausnahme geht nie unter Tier 2. Tabelle, die vier Fragen und die Kategorien bleiben unverändert.
+- [recommended] **Vier Review-Regeln** (`review-checklist.md`, `refute.md`):
+  - Der Report nennt nach seinem Kopfblock den Feature-Vertrag in einem Satz.
+  - Prozessideen stehen unter `## Process ideas` und werden im Review nie angewandt.
+  - Der Punkt zum Endzustand bekommt das Vokabular `persisted | emitted | displayed | cached | ignored by design | future work` und eine Tabelle für Felder, die über Persistenz, eine API oder einen Worker getragen werden; ein Feld ohne Endzustand blockiert nach der üblichen Schwelle.
+  - Folge-Issues werden nach Ursache gebündelt, die Ursache einmal genannt.
+- [optional] **`check_review.report_matches_work`** ist das öffentliche Prädikat für die Zugehörigkeit eines Reports zu einer Arbeit (`"issue"`, `"slug"` oder None). `report_of` nutzt es und verhält sich wie vorher, und `tidy.py` ruft es statt eines `report_of` mit nur einem Element.
+
+**Wirkung.**
+- Eine Härtung, die keine Grenze wieder öffnen kann, zahlt das Tier-3-Ritual nicht mehr.
+- Ein Review sagt vor seinen Befunden, wofür die Änderung da ist, und hält seine eigenen Prozessideen aus dem Diff heraus.
+
+**Geänderte Abschnitte.**
+- `risk-tiers.md` (Risk Tiers)
+- `review-checklist.md` (Review Checklist; Does the declared tier hold?; Completeness)
+- `refute.md` (Refuting a plan; What happens with the findings)
+- `modules/github-issues.md` (Discovered work keeps the form and the trail)
+- `.claude/commands/review.md`
+- `.github/prompts/review.prompt.md`
+
+**Update.**
+- Reines Update. Kein neuer Konfigurationsschlüssel.
+- Kenni: v2.99 und v2.100 in einem Update nehmen. Sein `scripts/process/check_review.py` übernimmt dann das `report_matches_work` des Templates, und danach ist die Datei der Render.
+
+Details: [Plan](docs/analysis/2026-11-20-v2.100.md) #434 #436 #439
+
 ## v2.99.0 — Eine stillgelegte Story behält ihre ID; kein grünes Gate ohne git; eine Regel für Freigaben · 2026-11-20
 
 **Warum.**

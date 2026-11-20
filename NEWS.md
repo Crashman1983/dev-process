@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.100.0 — Hardening behind an intact guard; four review rules; one rule for report membership
+
+Hardening that cannot reopen a security boundary, because another guard stays in force, may now be reviewed at Tier 2 instead of the heaviest Tier 3. It needs a search of every path, two tests and no change at the boundary's only check. Reviews now open with what the change is for, report their process ideas without applying them, trace each new field to where it ends up, and file one follow-up issue per cause. A check Kenni had to copy is now part of the template, so Kenni's next update of that file needs no review.
+
 ## v2.99.0 — A retired story keeps its id; no green gate without git; one rule for review passes
 
 A story whose content moved elsewhere can now stay as a tombstone: empty, pointing to where its content went. Old plans that name it keep working, and its number is never handed out again. If git cannot run on a machine, the checks now fail instead of quietly passing. The tool that records a review no longer writes approvals the check would reject later. A fresh branch no longer compares itself with an out-of-date copy of the main line, attest understands more of how plans and tests are actually written, and a minor old finding may stay a named leftover instead of becoming an issue.

@@ -10,6 +10,47 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.100.0 — Hardening behind an intact guard; four review rules; one rule for report membership · 2026-11-20
+
+**Why.**
+- Downstream (Kenni #488), a consolidation behind guards that stayed in force ran two days as Tier 3. The template had no way to tier hardening below Tier 3 (#434).
+- Kenni's reviews use four rules the template lacked: the feature contract first, process ideas reported but not applied, a field trace to the terminal state, one follow-up issue per cause (#436).
+- Kenni had to copy the report-membership rule out of `check_review.report_of`. That project delta made every template update of the file a review (#439).
+
+**What changes.**
+- [recommended] **Hardening behind an intact guard may be Tier 2** (`risk-tiers.md`). The exception has a limit, three conditions and exclusions.
+  - **Limit:** it applies only when Tier 3 follows from the security surface alone.
+  - **Conditions:**
+    1. the tier claim runs the consumer search and names the surviving guard per path, with `file:line`;
+    2. two tests prove it: the hardened check alone, red against the previous version, and the surviving guard blocking the attack without the hardening;
+    3. the hardening lands at the boundary's owner.
+  - **Excluded:** any change at a boundary's only enforcement point, a loosened or removed security control, any change to gate code, and template updates that migrate enforcement.
+  - **Floor:** a change under the exception never goes below Tier 2. The table, the four questions and the categories are unchanged.
+- [recommended] **Four review rules** (`review-checklist.md`, `refute.md`):
+  - the report states the feature contract in one sentence after its header block;
+  - process ideas go under `## Process ideas` and are never applied in the review;
+  - the terminal-state bullet gains the vocabulary `persisted | emitted | displayed | cached | ignored by design | future work`, and a table for fields carried across persistence, an API or a worker; a field without one blocks at the usual threshold;
+  - follow-up issues are grouped by cause, the cause named once.
+- [optional] **`check_review.report_matches_work`** is the public report-to-work predicate (`"issue"`, `"slug"` or None). `report_of` uses it and behaves as before, and `tidy.py` calls it instead of a one-element `report_of`.
+
+**Effect.**
+- Hardening that cannot reopen a boundary no longer pays the Tier-3 ritual.
+- A review names what the change is for before its findings, and keeps its own process ideas out of the diff.
+
+**Changed sections.**
+- `risk-tiers.md` (Risk Tiers)
+- `review-checklist.md` (Review Checklist; Does the declared tier hold?; Completeness)
+- `refute.md` (Refuting a plan; What happens with the findings)
+- `modules/github-issues.md` (Discovered work keeps the form and the trail)
+- `.claude/commands/review.md`
+- `.github/prompts/review.prompt.md`
+
+**Update.**
+- Pure update. No new configuration key.
+- Kenni: take v2.99 and v2.100 in one update. Its `scripts/process/check_review.py` then takes the template's `report_matches_work`, and afterwards the file is the render.
+
+Details: [Plan](docs/analysis/2026-11-20-v2.100.md) #434 #436 #439
+
 ## v2.99.0 — A retired story keeps its id; no green gate without git; one rule for review passes · 2026-11-20
 
 **Why.**

@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.100.0 — Härtung hinter einem intakten Schutz; vier Review-Regeln; eine Regel für die Zugehörigkeit von Reports
+
+Eine Härtung, die eine Sicherheitsgrenze nicht wieder öffnen kann, weil ein anderer Schutz in Kraft bleibt, darf jetzt mit Tier 2 statt dem schwersten Tier 3 geprüft werden. Dafür braucht sie eine Suche über jeden Pfad, zwei Tests und keine Änderung an der einzigen Prüfung der Grenze. Reviews nennen jetzt zuerst, wofür die Änderung da ist, melden ihre Prozessideen, ohne sie anzuwenden, verfolgen jedes neue Feld bis dorthin, wo es landet, und legen ein Folge-Issue pro Ursache an. Eine Prüfung, die Kenni kopieren musste, ist jetzt Teil des Templates, sodass Kennis nächstes Update dieser Datei kein Review braucht.
+
 ## v2.99.0 — Eine stillgelegte Story behält ihre ID; kein grünes Gate ohne git; eine Regel für Freigaben
 
 Eine Story, deren Inhalt anderswo hin gewandert ist, kann jetzt als Grabstein liegen bleiben: leer, mit einem Verweis, wohin der Inhalt ging. Alte Pläne, die sie nennen, funktionieren weiter, und ihre Nummer wird nie wieder vergeben. Kann git auf einem Rechner nicht laufen, scheitern die Prüfungen jetzt, statt still durchzugehen. Das Werkzeug, das ein Review festhält, schreibt keine Freigaben mehr, die die Prüfung danach ablehnt. Ein frischer Branch vergleicht sich nicht mehr mit einer veralteten Kopie der Hauptlinie, attest versteht mehr davon, wie Pläne und Tests tatsächlich geschrieben werden, und ein kleiner Altbefund darf ein benannter Rest bleiben, statt ein Issue zu werden.
