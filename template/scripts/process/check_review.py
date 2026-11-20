@@ -66,7 +66,7 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from process_git import NoForkPoint, fork_point, git_environment  # noqa: E402
+from process_git import NoForkPoint, fork_point, git_environment, git_ignored  # noqa: E402
 from template_update import ANSWERS  # noqa: E402
 from template_verify import carried_base, update_paths, update_seen, verify  # noqa: E402
 
@@ -3771,20 +3771,9 @@ def _gitignored(root: Path, rels: list[str]) -> set[str]:
     pushed next (observed downstream). `.gitignore` stays the one owner of
     what belongs to the repo; an untracked plan that is NOT ignored stays in
     scope on purpose — a plan just written to the wrong place is what the
-    scan exists for. Fails open: git absent or erroring ignores nothing."""
-    if not rels:
-        return set()
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(root), "check-ignore", "-z", "--stdin"],
-            input="\0".join(rels).encode(errors="surrogateescape"),
-            capture_output=True, timeout=60, env=git_environment())
-    except (OSError, subprocess.TimeoutExpired):
-        return set()
-    # 0 = some path ignored, 1 = none ignored, >1 = an error (fail open)
-    if result.returncode > 1:
-        return set()
-    return {n for n in result.stdout.decode(errors="surrogateescape").split("\0") if n}
+    scan exists for. Fails open: git absent or erroring ignores nothing
+    (`process_git.git_ignored` asks; None is "git cannot tell")."""
+    return git_ignored(root, rels) or set()
 
 
 def _unhomed_plans(root: Path) -> list[str]:

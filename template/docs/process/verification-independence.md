@@ -194,8 +194,9 @@ were plan text only, its code already accepted). **A block is verified
 before it counts** (adapted from Claude Code's `code-review` plugin): a
 finding that would block names its failure scenario — the input or state,
 the path through the changed code, the wrong outcome; a defect whose path
-never runs through the change is pre-existing, an issue rather than this
-work's block. Before a `block` is attested, a fresh
+never runs through the change is pre-existing, never this work's block —
+whether it becomes an issue or a named residual, `refute.md` decides ("What
+happens with the findings"). Before a `block` is attested, a fresh
 process that did not write the finding (a cheap model suffices) checks each
 such finding against the bundle and scores it: 0 — does not survive a
 look; 25 — unverified; 50 — real but minor or rare; 75 — verified, will be

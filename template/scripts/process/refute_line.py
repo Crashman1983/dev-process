@@ -19,7 +19,8 @@ This tool counts that report and appends
     REFUTE work=<id> round=<r>: <n> scenarios, <k> findings (<severities>) — <summary>
 
 to the plan. The summary — what became of the findings (fixed, a DECISION,
-an issue) — is the only free text. It refuses a report without a scenario or
+an issue, or `residual <label>: <reason>` for a PRE-EXISTING one below the
+threshold of `docs/process/refute.md`) — is the only free text. It refuses a report without a scenario or
 without a PATTERN line, a line that starts like a scenario but does not parse,
 a label named twice, a work id that is not the plan's own (the line would
 count for nothing), and a round the plan already records. The round defaults

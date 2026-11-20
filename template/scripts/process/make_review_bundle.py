@@ -67,7 +67,7 @@ from typing import NamedTuple
 # extraction — importing both keeps this tool byte-honest with the gates
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
-from process_git import fork_point, git_environment, path_matches  # noqa: E402
+from process_git import fork_point, git_environment, git_ignored, path_matches  # noqa: E402
 import check_kernel as _kernel_gate  # noqa: E402
 import check_review as _review_gate  # noqa: E402
 import gate_invoke as _launch  # noqa: E402  (one owner for "how to start the runner")
@@ -578,7 +578,9 @@ BLOCK_RULE = ("Block only for a defect someone would hit — a user, a caller, t
               "never blocking, unless it hides an undecided behaviour. A verdict whose findings are all minor or nit is a `pass` with residuals — "
               "no new round. A blocking finding names its failure scenario (input or state, the "
               "path through the changed code, the wrong outcome); a defect whose path never runs "
-              "through the change is pre-existing — an issue, not a block. "
+              "through the change is pre-existing — never a block; whether it becomes an issue "
+              "or a named residual, `docs/process/refute.md` (\"What happens with the "
+              "findings\") decides. "
               "What a linter, type checker or the test suite catches never blocks. Before a block "
               "is attested, a fresh process scores each blocking finding; below 80 of 100 it is a "
               "residual (`verification-independence.md`, \"What blocks\"). A measured old/new "
@@ -1266,12 +1268,12 @@ def _untracked_bundle_note(root: Path, target: Path) -> str | None:
     untracked file: finish.py reports the tree dirty, and the review gate reads
     the bundled plan's `tier:` line as a plan without a home (observed
     downstream). `.process-work/` ignores `*.bundle.md`."""
-    path = target.resolve()
-    if not path.is_relative_to(root.resolve()):
+    path, top = target.resolve(), root.resolve()
+    if not path.is_relative_to(top):
         return None
-    r = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", "--", str(path)],
-                       capture_output=True)
-    if r.returncode != 1:  # 0: ignored; 128: git cannot tell — nothing to say
+    rel = path.relative_to(top).as_posix()
+    ignored = git_ignored(top, [rel])
+    if ignored is None or rel in ignored:  # git cannot tell, or ignored — nothing to say
         return None
     return (f"make_review_bundle: note — {target} is untracked in the worktree — finish.py "
             f"reports it dirty and the review gate reads its tier: line as an unhomed plan; "
