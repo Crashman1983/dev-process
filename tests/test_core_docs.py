@@ -1386,3 +1386,60 @@ def test_the_hardening_exception_is_one_paragraph_with_its_limits(render, tmp_pa
     assert ("the changed code as its only enforcement is Tier 3. One exception for a hardening "
             "behind an intact guard: docs/process/risk-tiers.md, \"Hardening behind an intact "
             "guard\".") in refute
+
+
+# --- v2.100 H2: four review rules — contract, terminal state, ideas, cause (#436) ---------
+
+_FRAME = "\"The report frames the findings\""
+
+
+def test_the_report_states_the_contract_and_keeps_process_ideas_apart(render, tmp_path):
+    """#436: a review judged findings without the promise they break, and applied its own
+    process ideas after the verification. The checklist (bundled, so a dispatched reviewer
+    reads it too) owns both rules — in its opening, which no section map leaves out."""
+    out = render(tmp_path, {"project_name": "demo",
+                            "harnesses": {"claude": True, "copilot": True}})
+    raw = (out / "docs/process/review-checklist.md").read_text()
+    opening = " ".join(raw.split("\n## ", 1)[0].split())  # the part every bundle keeps
+    para = opening.split("**The report frames the findings.**", 1)[1]
+    assert "Right after its header block" in para and "to the first blank line" in para
+    assert "states the feature contract in one sentence" in para
+    assert "go under their own heading (`## Process ideas`) and are never applied in that review" in para
+    assert "a diff applied there lands after the verification and is an unreviewed diff" in para
+    assert not re.search(r"(?m)^## Process ideas", raw)  # no checklist section of that name
+    for adapter in (".claude/commands/review.md", ".github/prompts/review.prompt.md"):
+        text = _flat(out / adapter)
+        assert f"`review-checklist.md`, {_FRAME}" in text, adapter
+        assert "feature contract" in text and "process ideas" in text, adapter
+
+
+def test_every_carried_field_reaches_a_named_terminal_state(render, tmp_path):
+    """#436: the terminal-state question had no vocabulary and no table, so a field that
+    stopped half-way passed. The existing bullet keeps its scope and gains both."""
+    out = render(tmp_path, {"project_name": "demo"})
+    completeness = _flat(out / "docs/process/review-checklist.md").split("## Completeness", 1)[1]
+    bullet = completeness.split("Does every new field, value, or side-effect reach its **terminal state**", 1)[1]
+    bullet = bullet.split(" - ", 1)[0]
+    assert "`persisted | emitted | displayed | cached | ignored by design | future work`" in bullet
+    assert "a value that is produced and never read is dead data" in bullet  # the wide scope stays
+    assert "carried across persistence, an API or a worker" in bullet
+    assert "`field → origin → terminal state → proof`" in bullet
+    assert ("A field with no terminal state is a finding; it blocks once its failure scenario meets "
+            "the threshold in `verification-independence.md` (\"What blocks\")") in bullet
+    assert "deliberately dropped" not in bullet  # the old open list is gone
+
+
+def test_follow_up_issues_are_grouped_by_cause_in_one_owner(render, tmp_path):
+    """#436: one issue per finding split one cause over several issues. refute.md owns the
+    grouping; the github-issues module only points there."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"github_issues": True}})
+    findings = " ".join((out / "docs/process/refute.md").read_text()
+                        .split("## What happens with the findings", 1)[1].split("\n## ", 1)[0].split())
+    assert "Follow-up issues are grouped by cause: one issue per cause, which it names once" in findings
+    assert "not one issue per finding" in findings
+    assert "(mandatory rule 4)" in findings and "separate proposal (#354)" in findings
+    module = _flat(out / "docs/process/modules/github-issues.md")
+    discovered = module.split("## Discovered work keeps the form and the trail", 1)[1]
+    assert ("grouped by cause, one issue per cause — `refute.md` (\"What happens with the findings\") "
+            "owns that rule") in discovered
+    assert "not one issue per finding" not in module  # a pointer, not a copy

@@ -20,6 +20,9 @@ rule adherence against the plan or spec, working through
 completeness, correctness, security, design, decisions, product frame, tests).
 If `review.local.md` in `docs/process/` exists, read it next: the project's own
 review dimensions. They sharpen the checklist and never weaken it.
+The report states the feature contract in one sentence right after its
+header block, and process ideas go under their own heading, never applied
+in the review (`review-checklist.md`, "The report frames the findings").
 Fixes loop back through `/execute` and then `/review` again until the branch is
 clean.
 

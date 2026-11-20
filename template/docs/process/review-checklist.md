@@ -19,6 +19,15 @@ the plan decided (a deviation is itself a finding), then the questions below
 each line. A decision made only in code is found a round too late — that is
 what the Plan halves move forward.
 
+**The report frames the findings.** Right after its header block (the
+contiguous `key: value` run from the top to the first blank line — the only
+part the gates read as the header), the report states the feature contract
+in one sentence: what the change promises, and to whom. Every finding below
+is read against that sentence. Process ideas the review turns up — a rule, a
+gate, a template or command change — go under their own heading
+(`## Process ideas`) and are never applied in that review: a diff applied
+there lands after the verification and is an unreviewed diff.
+
 ## Does the declared tier hold?
 
 Asked first, from Tier 2 up, by the plan review and the code review alike:
@@ -58,10 +67,15 @@ the task that writes its news fragment (`news.md`).
   named test, not its name: does it pass on a stub, a mocked-away call, or
   state outside its temp dir? Downstream, four of six missed majors in one
   night were tests that could not go red (#225).
-- Does every new field, value, or side-effect reach its **terminal state**
-  (persisted, emitted, displayed, or deliberately dropped)? Trace it from where
-  it is created to where it is used — a value that is produced and never read is
-  dead data.
+- Does every new field, value, or side-effect reach its **terminal state**,
+  named from one vocabulary: `persisted | emitted | displayed | cached |
+  ignored by design | future work`? Trace it from where it is created to where
+  it is used — a value that is produced and never read is dead data. For a
+  field carried across persistence, an API or a worker, the report carries a
+  table `field → origin → terminal state → proof` (the test or `file:line`
+  that shows it arrive). A field with no terminal state is a finding; it
+  blocks once its failure scenario meets the threshold in
+  `verification-independence.md` ("What blocks").
 - For a changed name, version, path or constant: **run the search for the
   old value yourself** and quote it (command and hits) — any hit left outside
   the intended ones is a finding; a blast radius asserted without a search is
