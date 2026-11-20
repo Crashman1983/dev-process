@@ -136,6 +136,7 @@ from check_review import (  # noqa: E402  (one owner for grammar, digest, record
     DATE_PREFIX,
     _slug_in_name,
     work_key,
+    independence_problems,
     parse_review_lines,
     readable,
     record_kind,
@@ -499,10 +500,15 @@ def build_line(args, root: Path, journal_dir: Path | None = None,
     line = "REVIEW " + " ".join(fields)
     # a short SHA that resolves names the one to pass (#332); an ambiguous one names none
     full = {key: _commit_id(root, sha) for key, sha in (("base", base), ("head", head)) if sha}
-    for _ln, msg in parse_review_lines(line)[1]:
+    parsed, malformed = parse_review_lines(line)
+    for _ln, msg in malformed:
         key = msg.split(" ", 1)[0]
         hint = f" — use the full SHA {full[key]}" if full.get(key) and "SHA" in msg else ""
         problems.append(f"malformed: {msg}{hint}")
+    # the gate's own arithmetic (#418): a line the gate rejects is never written
+    problems += [f"independence: {problem}" for _ln, f in parsed
+                 for problem in independence_problems(int(f["tier"]), f["verdict"],
+                                                      f["independence"].split(","))]
     return line, problems
 
 

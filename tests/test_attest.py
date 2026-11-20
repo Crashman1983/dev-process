@@ -1177,3 +1177,73 @@ def test_size_lines_count_no_tests_unlike_the_telemetrys_product_lines(render, t
     (event,) = [e for e in events if e.get("product_lines") is not None]
     # widget.py (2) and tests/test_widget.py (5): the test counts there
     assert event["product_lines"] == 2 + 5, event
+
+
+# --- #418: one owner of the pass arithmetic for writer and gate ---
+
+def _journal_state(out):
+    """Every journal file with its bytes — "nothing written" is no new file and no new byte."""
+    home = out / ".process-work/journal"
+    return {str(p.relative_to(out)): p.read_bytes() for p in home.rglob("*") if p.is_file()} \
+        if home.exists() else {}
+
+
+@pytest.mark.parametrize("independence,rule", [
+    ("non-implementing,cross-model", "without 'bundle'"),
+    ("bundle,cross-model", "without 'non-implementing'"),
+])
+def test_a_tier2_pass_the_gate_would_reject_is_refused_before_writing(render, tmp_path,
+                                                                       independence, rule):
+    """#418 AC-7: attest wrote a Tier-2 pass the gate's arithmetic then rejected."""
+    out, base, head = _repo(render, tmp_path)
+    before = _journal_state(out)
+    r = _attest(out, "--base", base, "--head", head, "--independence", independence)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "nothing written" in r.stderr and rule in r.stderr, r.stderr
+    assert "REVIEW work=widget" not in r.stdout
+    assert _journal_state(out) == before
+
+
+def test_every_line_the_writer_accepts_the_gate_arithmetic_accepts(render, tmp_path):
+    """#418 AC-7: writer ⊆ gate over every subset of the tokens × tier 0-3 × verdict.
+    The rest of the gate's independence rules stay the gate's (r2 N4)."""
+    import argparse
+    import itertools
+    out = render(tmp_path, {"project_name": "d"})
+    path = str(out / "scripts/process")
+    names = ("attest", "attest_evidence", "check_review", "check_fix_streak", "dispatch",
+             "report", "process_git", "required_records")
+
+    def unload():
+        for name in [n for n, m in list(sys.modules.items())
+                     if (getattr(m, "__file__", "") or "").startswith(path)] + list(names):
+            sys.modules.pop(name, None)
+    sys.path.insert(0, path)
+    unload()
+    try:
+        attest = importlib.import_module("attest")
+        gate = importlib.import_module("check_review")
+        tokens = sorted(gate.INDEP_TOKENS)
+        subsets = [c for n in range(1, len(tokens) + 1) for c in itertools.combinations(tokens, n)]
+        accepted = refused = 0
+        for tier, verdict, subset in itertools.product(range(4), ("pass", "block"), subsets):
+            args = argparse.Namespace(work="widget", tier=str(tier), reviewer="fresh", model="cross",
+                                      independence=",".join(subset), verdict=verdict, round_=1)
+            line, problems = attest.build_line(args, out, rng=(None, None, []))
+            records, errors = gate.parse_review_lines(line)
+            assert not errors, (line, errors)
+            gate_says = gate._arithmetic_violations("j.md", records)
+            assert gate_says == [f"j.md:1: {p}" for p in
+                                 gate.independence_problems(tier, verdict, set(subset))]
+            if not problems:
+                accepted += 1
+                assert gate_says == [], (line, gate_says)
+            else:
+                refused += 1
+                assert gate_says, (line, problems)  # refused only for the arithmetic here
+                assert all(any(p.split(": ", 1)[1] in q for q in problems) for p in gate_says)
+        assert accepted and refused
+        assert gate.independence_problems(3, "block", set()) == []
+    finally:
+        sys.path.remove(path)
+        unload()
