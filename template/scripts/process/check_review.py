@@ -60,6 +60,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from collections.abc import Iterable
 from typing import NamedTuple
 from pathlib import Path
 
@@ -801,28 +802,34 @@ def parse_review_lines(text: str) -> tuple[list[tuple[int, dict]], list[tuple[in
     return records, errors
 
 
-def _arithmetic_violations(rel: str, records: list[tuple[int, dict]]) -> list[str]:
-    """The independence arithmetic: a pass verdict may not claim to clear a tier
-    its flags do not support."""
-    hard: list[str] = []
-    for lineno, f in records:
-        if f["verdict"] != "pass":
-            continue
-        tier = int(f["tier"])
-        indep = set(f["independence"].split(","))
-        # bundle/non-implementing is the Tier-2 floor: Tier 0-1 is a self-check
-        # (Quick flow reviews itself), Tier 2 is the first tier with a fresh
-        # read-only-bundle review — verification-independence.md
-        if tier >= 2 and "non-implementing" not in indep:
-            hard.append(f"{rel}:{lineno}: pass at tier {tier} without 'non-implementing' "
+def independence_problems(tier: int, verdict: str, tokens: Iterable[str]) -> list[str]:
+    """The independence arithmetic, its one owner for the writer (attest) and the gate
+    (#418): a pass verdict may not claim to clear a tier its flags do not support. A
+    block clears nothing, so it owes nothing."""
+    if verdict != "pass":
+        return []
+    indep = set(tokens)
+    problems: list[str] = []
+    # bundle/non-implementing is the Tier-2 floor: Tier 0-1 is a self-check
+    # (Quick flow reviews itself), Tier 2 is the first tier with a fresh
+    # read-only-bundle review — verification-independence.md
+    if tier >= 2 and "non-implementing" not in indep:
+        problems.append(f"pass at tier {tier} without 'non-implementing' "
                         f"— the implementer cannot certify its own work at Tier 2+")
-        if tier >= 2 and "bundle" not in indep:
-            hard.append(f"{rel}:{lineno}: pass at tier {tier} without 'bundle' "
+    if tier >= 2 and "bundle" not in indep:
+        problems.append(f"pass at tier {tier} without 'bundle' "
                         f"— Tier 2+ is reviewed from a read-only bundle, not the warm context")
-        if tier >= 3 and not (indep & {"cross-model", "single-family"}):
-            hard.append(f"{rel}:{lineno}: pass at tier 3 without 'cross-model' or "
-                        f"'single-family' — Tier 3 must cross the model family or declare it could not")
-    return hard
+    if tier >= 3 and not (indep & {"cross-model", "single-family"}):
+        problems.append("pass at tier 3 without 'cross-model' or 'single-family' "
+                        "— Tier 3 must cross the model family or declare it could not")
+    return problems
+
+
+def _arithmetic_violations(rel: str, records: list[tuple[int, dict]]) -> list[str]:
+    """`independence_problems` over the parsed records, each placed at its line."""
+    return [f"{rel}:{lineno}: {problem}" for lineno, f in records
+            for problem in independence_problems(int(f["tier"]), f["verdict"],
+                                                 f["independence"].split(","))]
 
 
 # gate code as `docs/process/refute.md` defines it, approximated by path: the
