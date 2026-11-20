@@ -13,7 +13,7 @@ those rules, and a long session may have compacted them out. Then read
 `docs/process/risk-tiers.md`. Check completeness, correctness, and rule
 adherence against the plan or spec, working through
 `docs/process/review-checklist.md`, plus `review.local.md` in `docs/process/`
-where the project has one (it sharpens the checklist, never weakens it); each section's **Plan decides:** line first — does the code do what the plan decided? A plan review (`--plan-review`) reads only those lines. The report opens with the feature contract and keeps process ideas apart, unapplied (`review-checklist.md`, "The report frames the findings"). Record the result with the
+where the project has one (it sharpens the checklist, never weakens it); each section's **Plan decides:** line first — does the code do what the plan decided? A plan review (`--plan-review`) reads only those lines. Right after its header block the report states the feature contract, and it keeps process ideas apart, unapplied (`review-checklist.md`, "The report frames the findings"). Record the result with the
 writer, never by hand: `python scripts/process/attest.py --work <id> --tier <n>
 --reviewer <id> --model <family> --independence … --verdict pass|block
 --bundle <bundle> --with .process-work/reviews/<report>.md` takes the reviewed range
