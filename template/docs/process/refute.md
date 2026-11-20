@@ -130,6 +130,8 @@ attack is on the plan's claims and gaps, each answered from the repository:
     0. TIER — does the declared tier hold? Name the boundary the change
        touches and the guard that enforces it independently of this diff
        (file:line); the changed code as its only enforcement is Tier 3.
+       One exception for a hardening behind an intact guard:
+       docs/process/risk-tiers.md, "Hardening behind an intact guard".
     1. OWNER — does the plan add a rule, parser, path list or lookup the
        code already owns? Name the owner (file:line); the plan extends it.
     2. CLAIMS — is every signature, schema, API, existing test or behaviour
