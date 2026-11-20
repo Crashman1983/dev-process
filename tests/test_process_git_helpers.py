@@ -107,3 +107,49 @@ def test_a_disk_full_line_is_known_by_its_first_word():
     assert pg.is_disk_full_line("disk-full /tmp 97%")
     assert not pg.is_disk_full_line("disk-fullish /tmp") and not pg.is_disk_full_line("lane-busy full x")
     assert not pg.is_disk_full_line("")
+
+
+def _repo(path: Path) -> Path:
+    import subprocess
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    (path / ".gitignore").write_text("*.bundle.md\nnested/\n")
+    return path
+
+
+def test_git_ignored_names_what_git_ignores_and_none_when_git_cannot_tell(tmp_path, monkeypatch):
+    """#421: one owner of "does git ignore these paths" — the review gate, the issue gate and
+    the bundle asked git each in their own way. None is "git cannot tell", never "nothing"."""
+    pg = _pg()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    root = _repo(tmp_path / "r")
+    rels = ["a.bundle.md", "plan.md", "nested/x.md", "sub dir/b.bundle.md"]
+    assert pg.git_ignored(root, rels) == {"a.bundle.md", "nested/x.md", "sub dir/b.bundle.md"}
+    assert pg.git_ignored(root, ["plan.md"]) == set()  # git told: none is ignored
+    assert pg.git_ignored(root, []) == set()
+    outside = tmp_path / "plain"
+    outside.mkdir()
+    assert pg.git_ignored(outside, ["a.bundle.md"]) is None  # no repository
+    monkeypatch.setenv("PATH", "")
+    assert pg.git_ignored(root, ["a.bundle.md"]) is None  # no git
+
+
+def test_git_ignored_reads_with_the_process_git_environment(tmp_path, monkeypatch):
+    pg = _pg()
+    seen = {}
+
+    def run(argv, **kw):
+        seen.update(argv=argv, **kw)
+        raise pg.subprocess.TimeoutExpired(argv, kw["timeout"])
+    monkeypatch.setattr(pg.subprocess, "run", run)
+    assert pg.git_ignored(tmp_path, ["a"]) is None  # a timeout is "cannot tell"
+    assert seen["argv"][-3:] == ["check-ignore", "-z", "--stdin"] and seen["timeout"] == 60
+    assert seen["env"]["GIT_NO_REPLACE_OBJECTS"] == "1"
+
+
+def test_the_ignore_readers_ask_the_one_owner():
+    # check_speckit asks another question (which pattern ignores a path, `-v --no-index`)
+    for name in ("check_review.py", "make_review_bundle.py",
+                 "{% if modules.github_issues %}check_issues.py{% endif %}.jinja"):
+        src = (PROC / name).read_text(encoding="utf-8")
+        assert "check-ignore" not in src and "git_ignored(" in src, name

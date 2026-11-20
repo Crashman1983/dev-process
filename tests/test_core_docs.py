@@ -1255,3 +1255,38 @@ def test_every_template_change_is_reviewed_with_a_regression_lens():
     # v2.81: the refute sentence stays, scoped to the template's own rule text (refute.md
     # governs project work), so the two no longer read as a contradiction
     assert "für den Regeltext dieses Templates, zusätzlich zu `template/docs/process/refute.md`" in maintaining
+
+
+# --- v2.99 G6/G7: a pre-existing finding below the threshold; the steward's start (#421, #420)
+
+def test_refute_owns_when_a_pre_existing_finding_becomes_an_issue(render, tmp_path):
+    """#421: "every pre-existing finding is an issue" filed defects nobody would hit.
+    refute.md owns the threshold; below it the finding is a named residual in the REFUTE
+    line's summary, and the two places that repeated the old rule point here."""
+    out = render(tmp_path, {"project_name": "demo", "modules": {"github_issues": True}})
+    findings = " ".join((out / "docs/process/refute.md").read_text()
+                        .split("## What happens with the findings", 1)[1].split("\n## ", 1)[0].split())
+    assert ("A PRE-EXISTING finding becomes an issue when it (a) breaks an acceptance criterion "
+            "or the Definition of Done of merged work, (b) is a correctness or security defect "
+            "on main, or (c) the owner wants it as an issue, by a `DECISION` line.") in findings
+    assert "Otherwise it is a named residual" in findings
+    assert "`residual <label>: <reason>`" in findings  # in the REFUTE line's summary
+    assert "`FINDING … action=accept`" in findings and "`action=follow-up`" in findings
+    assert "A PRE-EXISTING finding becomes an issue; it is not" not in findings  # the old rule
+    # the tool that writes the line names the residual as a summary's content
+    assert "residual <label>: <reason>" in (out / "scripts/process/refute_line.py").read_text()
+    # the repeats point to the owner instead of restating "an issue"
+    vi = _flat(out / "docs/process/verification-independence.md")
+    after = vi.split("never runs through the change is pre-existing", 1)[1][:200]
+    assert "refute.md" in after and "an issue rather than this work's block" not in vi
+    bundle = out / "scripts/process/make_review_bundle.py"
+    sys.path.insert(0, str(bundle.parent))
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("mrb_g6", bundle)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.pop(0)
+    rule = mod.BLOCK_RULE.split("never runs through the change is pre-existing", 1)[1][:200]
+    assert "refute.md" in rule and "an issue, not a block" not in mod.BLOCK_RULE

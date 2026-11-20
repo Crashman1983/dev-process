@@ -45,6 +45,7 @@ from check_review import plan_tier as _plan_tier  # noqa: E402
 from check_plan_structure import _Unreadable, _at_ref  # noqa: E402
 import registry_config  # noqa: E402  (one owner of where the registry lives and how it loads)
 from check_plan_structure import _git as _git_read  # noqa: E402
+from process_git import git_ignored  # noqa: E402  (one owner of "does git ignore it", #421)
 
 _PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 
@@ -345,20 +346,10 @@ def _canon_ref(ref: str, default_repo: str | None) -> str:
 def _git_ignored(root: Path, paths: list[Path]) -> set[Path]:
     """The paths git ignores — a reviewer's `*.bundle.md` input lies next to
     the reports by design and is never one (#186). Outside a repo, or when
-    git fails, nothing counts as ignored: the gate reads every file as before."""
-    if not paths:
-        return set()
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(root), "check-ignore", "-z", "--stdin"],
-            input="\0".join(str(p.relative_to(root)) for p in paths) + "\0",
-            capture_output=True, text=True, timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return set()
-    if r.returncode not in (0, 1):  # 1 = none ignored, 128 = no repo / error
-        return set()
-    return {root / rel for rel in r.stdout.split("\0") if rel}
+    git fails, nothing counts as ignored: the gate reads every file as before.
+    `process_git.git_ignored` asks; this keeps the signature importers use."""
+    ignored = git_ignored(root, [str(p.relative_to(root)) for p in paths])
+    return {root / rel for rel in ignored or ()}
 
 
 _NO_RANGE = ("no branch range against an integration ref (on it, or none in this repository) — "

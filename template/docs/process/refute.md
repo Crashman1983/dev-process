@@ -181,8 +181,18 @@ refute run where the table above asks for one.
 
 Every NEW finding is fixed and becomes a regression test that fails against
 the version before the fix — or it is accepted on purpose with a `DECISION`
-line naming why. A PRE-EXISTING finding becomes an issue; it is not this
-work's fix round.
+line naming why.
+
+A PRE-EXISTING finding is not this work's fix round. This section owns
+what becomes of it; the review docs and the reviewer brief point here. A
+PRE-EXISTING finding becomes an issue when it (a) breaks an acceptance
+criterion or the Definition of Done of merged work, (b) is a correctness or
+security defect on main, or (c) the owner wants it as an issue, by a
+`DECISION` line. Otherwise it is a named residual: the REFUTE line's summary
+records it as `residual <label>: <reason>`, with the scenario's label from
+the report. A review report with the GitHub-issues module records the same
+residual as `FINDING … action=accept`; `action=follow-up` stays a finding
+that needs its issue.
 
 A second owner proven by a differential test blocks at every tier, unless the
 plan carries a `DECISION` naming why the rule has two owners — a deliberate
@@ -196,7 +206,7 @@ Spec Kit plan after its last line and a blank line, where the attestation
 commit adds it without making the plan's own review stale
 (`verification-independence.md`):
 
-    REFUTE work=<id> round=<r>: <n> scenarios, <k> findings — <fixed / DECISION …>
+    REFUTE work=<id> round=<r>: <n> scenarios, <k> findings — <fixed / DECISION / issue / residual …>
 
 `scripts/process/refute_line.py <report> --plan <plan> --summary "<fixed /
 DECISION …>"` writes it: it counts the report's `SCENARIO` lines (findings by

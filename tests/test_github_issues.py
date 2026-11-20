@@ -729,6 +729,29 @@ def test_reports_skip_what_git_ignores(render, tmp_path):
     assert "bundle.md" not in r.stdout
 
 
+def test_the_ignore_wrapper_keeps_its_signature_over_the_one_owner(render, tmp_path, monkeypatch):
+    """#421: `process_git.git_ignored` owns the question; `_git_ignored` stays for importers
+    downstream — paths in, paths out, and "git cannot tell" reads as nothing ignored."""
+    import importlib.util
+    out = _render(render, tmp_path / "r")
+    spec = importlib.util.spec_from_file_location("ci_ign", out / "scripts/process/check_issues.py")
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    src = (out / "scripts/process/check_issues.py").read_text()
+    assert "check-ignore" not in src and "git_ignored" in src  # asks the owner, no copy
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert gate._git_ignored(plain, [plain / "a.bundle.md"]) == set()  # no repository
+    subprocess.run(["git", "init", "-q", str(out)], check=True)
+    reviews = out / ".process-work/reviews"
+    paths = [reviews / "x.bundle.md", reviews / "x.md"]
+    assert gate._git_ignored(out, paths) == {reviews / "x.bundle.md"}
+    assert gate._git_ignored(out, []) == set()
+    monkeypatch.setattr(gate, "git_ignored", lambda root, rels: None)
+    assert gate._git_ignored(out, paths) == set()
+
+
 def test_publish_tool_present_when_on_absent_when_off(render, tmp_path):
     on = _render(render, tmp_path / "on")
     assert (on / "scripts/process/publish_review.sh").is_file()

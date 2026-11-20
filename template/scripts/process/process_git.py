@@ -171,6 +171,23 @@ def drop_local_env(*envs) -> None:
             env.pop(name, None)
 
 
+def git_ignored(root: Path, rels: list[str]) -> set[str] | None:
+    """The subset of `rels` (paths relative to `root`) git ignores — the one owner of that
+    question for the gates and the bundle (#421). None: git cannot tell (no git, no
+    repository, an error, 60 s passed); each caller decides what that means for it."""
+    if not rels:
+        return set()
+    try:
+        r = subprocess.run(["git", "-C", str(root), "check-ignore", "-z", "--stdin"],
+                           input="".join(f"{rel}\0" for rel in rels).encode(errors="surrogateescape"),
+                           capture_output=True, timeout=60, check=False, env=git_environment())
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode > 1:  # 0: some ignored, 1: none, 128: no repository or an error
+        return None
+    return {rel for rel in r.stdout.decode(errors="surrogateescape").split("\0") if rel}
+
+
 class NoForkPoint(ValueError):
     """`base` and `tip` share no commit here (shallow clone, unrelated history)."""
 
