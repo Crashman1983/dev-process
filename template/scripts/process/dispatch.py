@@ -3404,9 +3404,9 @@ def fork_problem(root: Path, tip: str) -> str | None:
     try:
         if _review.merge_base(root, tip):
             return None
-    except _review.GitReadError as exc:
+        refs = _review.forkless_refs(root, tip)
+    except _review.GitReadError as exc:  # ambiguous, or git that cannot run (#430)
         return str(exc)
-    refs = _review.forkless_refs(root, tip)
     if not refs:
         return None
     fix = "git fetch --unshallow" if _review.is_shallow(root) else "fetch the missing history"

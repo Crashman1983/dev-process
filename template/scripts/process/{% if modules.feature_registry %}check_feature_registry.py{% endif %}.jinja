@@ -50,7 +50,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 import registry_config  # noqa: E402
 from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
-from check_review import GitReadError, forkless_refs, is_shallow, merge_base, parse_issue_ref  # noqa: E402
+from check_review import GitReadError, GitUnavailable, forkless_refs, is_shallow, merge_base, parse_issue_ref  # noqa: E402
 
 PREFIX = re.compile(r"^[A-Z]+$")
 PLANNED_REF = re.compile(r"^planned:#\d+:\S.*$")
@@ -619,9 +619,12 @@ def _base(root: Path) -> tuple[registry_config.Registry | None, list[str]]:
     """The registry at the branch's fork point (`check_review.merge_base`), or None with a
     note saying why there is none — never an error, never a silent pass. The pre-push, the
     train and `finish` fork from the tip of the integration branch; PR CI forks through
-    its merge commit; on the integration branch itself there is no fork point."""
+    its merge commit; on the integration branch itself there is no fork point. git that
+    cannot run raises GitUnavailable: it is no "no base" (#430), `_stable` makes it hard."""
     try:
         fork = merge_base(root)
+    except GitUnavailable:
+        raise
     except GitReadError as exc:
         return None, [f"no fork point to compare with: it is ambiguous ({exc}) — {NOT_COMPARED}"]
     if fork is not None:
@@ -773,7 +776,12 @@ def _check_refs(run: Run, reg: registry_config.Registry) -> None:
 
 
 def _stable(run: Run, reg: registry_config.Registry) -> None:
-    base, notes = _base(run.root)
+    try:
+        base, notes = _base(run.root)
+    except GitUnavailable as exc:
+        # a branch's item ids go unchecked against its base: red, never a note (#430)
+        base, notes = None, []
+        run.hard.append(f"{exc} — {NOT_COMPARED}; fix git, then rerun")
     run.soft += notes
     if not _stable_ids(run, base):
         return
@@ -853,9 +861,12 @@ def _numbered(items: list, reserved: set[str] | frozenset[str] = frozenset()) ->
 
 def _assign_base(root: Path, reg: registry_config.Registry) -> dict[int, registry_config.Story]:
     """{id(story): the story at the base} for `--assign-ids` — matched as the gate matches
-    (I4.2); empty without a base registry, with a note when git cannot tell the base."""
+    (I4.2); empty without a base registry, with a note when git cannot tell the base.
+    git that cannot run raises GitUnavailable: `assign_ids` refuses then (#430)."""
     try:
         fork = merge_base(root)
+    except GitUnavailable:
+        raise
     except GitReadError as exc:
         print(f"assign-ids: note: the fork point cannot be told ({exc}) — the base is not read; "
               f"ids follow this tree only")
@@ -893,7 +904,13 @@ def assign_ids(root: Path, write: bool) -> int:
     changed = 0
     odd_found = False
     reg = registry_config.load_registry(root, cfg)
-    at_base = _assign_base(root, reg)
+    try:
+        at_base = _assign_base(root, reg)
+    except GitUnavailable as exc:
+        # without the base its retired ids are unknown, and one could be given again
+        print(f"assign-ids: FAILED: {exc} — the base is not read, so no id is assigned; "
+              f"fix git, then rerun")
+        return 1
     for story in reg.stories:
         rel = story.path.relative_to(root).as_posix()
         data = story.data

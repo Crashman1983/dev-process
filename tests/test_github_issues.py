@@ -1403,6 +1403,19 @@ def test_an_ambiguous_fork_point_refuses(render, tmp_path):
     assert r.returncode == 1 and "fork point cannot be read" in r.stdout, r.stdout
 
 
+def test_git_that_cannot_run_is_no_missing_repository(render, tmp_path):
+    """#430 (r4 N3): a stale worktree `.git` file said "not a git repository" too, and
+    the duty became a note. One probe (`process_git.repo_probe`) tells them apart."""
+    report = VALID_REPORT + "FINDING sev=major action=fix issue=- guard read twice\n"
+    out = _render(render, tmp_path)
+    _report(out, "2026-10-21-new.md", report)
+    r = _run(out)
+    assert "not in a git repository" in r.stdout, r.stdout  # Wächter: a plain tree is a note
+    (out / ".git").write_text(f"gitdir: {tmp_path}/gone/.git/worktrees/d\n")
+    r = _run(out)
+    assert r.returncode == 1 and "git cannot run" in r.stdout, r.stdout
+
+
 def test_no_branch_range_is_a_note_and_binds_nothing(render, tmp_path):
     """On the integration ref, or in a readable repo without one (a clone with only a
     feature branch), no finding is new here: a note, as plan-structure does."""

@@ -188,6 +188,65 @@ def git_ignored(root: Path, rels: list[str]) -> set[str] | None:
     return {rel for rel in r.stdout.decode(errors="surrogateescape").split("\0") if rel}
 
 
+class GitReadError(RuntimeError):
+    """A git read a gate cannot do without failed. `check_review` re-exports it: every
+    gate catches it from there."""
+
+
+class GitUnavailable(GitReadError, ValueError):
+    """git cannot run here at all (#430): no git on PATH, a timeout, a repository git
+    refuses (dubious ownership), a stale worktree `.git` file, a `GIT_DIR` that names
+    nothing. Never "no base": read as one, every gate went green with a note. A
+    ValueError too, as `fork_point` raised one before; a caller that tells ambiguity
+    from this catches it first."""
+
+
+def git_cannot_run(detail: str) -> GitUnavailable:
+    """The one wording of #430: `git cannot run (<detail>)`."""
+    return GitUnavailable(f"git cannot run ({detail})")
+
+
+def start_failure(command: str, exc: BaseException) -> GitUnavailable:
+    """GitUnavailable for `git <command>` that did not start (OSError) or timed out."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return git_cannot_run(f"git {command} timed out after {exc.timeout:g}s")
+    return git_cannot_run(f"git {command}: {type(exc).__name__}: {exc}")
+
+
+# git's answer when it searched upward from the directory and found no repository: the
+# one harmless failure (a rendered tree that is no clone). A path after "not a git
+# repository:" (a stale `.git` file, a missing GIT_DIR) is a broken repository.
+_SEARCHED_UP = ("not a git repository (or any of the parent directories)",
+                "not a git repository (or any parent up to mount point")
+_IN_REPO: set[str] = set()
+
+
+def repo_probe(root: Path) -> bool:
+    """Is `root` in a git repository git can read? The one probe of #430, asked by the
+    gate runner at its entry and by the base search (`check_review`) before it reads.
+
+    True: a repository — kept per root for the run. False: no repository, only when
+    `root/.git` does not exist and git says it searched the parent directories (today's
+    path: no range, a note). Anything else raises GitUnavailable, and is never kept: an
+    OSError or a timeout, dubious ownership, a stale worktree `.git` file, `GIT_DIR` on
+    a missing directory, an empty or broken `.git`."""
+    key = os.path.abspath(root)
+    if key in _IN_REPO:
+        return True
+    try:
+        r = subprocess.run(["git", "-C", key, "rev-parse", "--git-dir"], capture_output=True,
+                           timeout=60, env=git_environment({**os.environ, "LC_ALL": "C"}), check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise start_failure("rev-parse --git-dir", exc) from exc
+    if r.returncode == 0:
+        _IN_REPO.add(key)
+        return True
+    said = " ".join(r.stderr.decode(errors="replace").split())
+    if not os.path.lexists(os.path.join(key, ".git")) and any(s in said for s in _SEARCHED_UP):
+        return False
+    raise git_cannot_run(said or f"git rev-parse --git-dir exit {r.returncode}")
+
+
 class NoForkPoint(ValueError):
     """`base` and `tip` share no commit here (shallow clone, unrelated history)."""
 
@@ -198,12 +257,13 @@ def fork_point(root: Path, base: str, tip: str) -> str:
     Plain `git merge-base` silently picks one of several bases (a criss-cross
     merge); the pick decides the reviewed range and the template baseline, so
     exactly one is demanded. No base at all is named: a shallow clone or
-    unrelated history, never an empty answer (ValueError either way)."""
+    unrelated history, never an empty answer (ValueError either way). git that cannot
+    run is GitUnavailable (#430), no ambiguity: the base search must not skip it."""
     try:
         r = subprocess.run(['git', '-C', str(root), 'merge-base', '--all', base, tip],
                            capture_output=True, timeout=60, env=git_environment())
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ValueError(f'git merge-base {base} {tip} failed ({type(exc).__name__})') from exc
+        raise start_failure(f'merge-base {base} {tip}', exc) from exc
     bases = r.stdout.decode(errors='replace').split()
     if r.returncode == 1 and not bases and not r.stderr.strip():
         raise NoForkPoint(f'no common ancestor of {base} and {tip} (shallow clone or '

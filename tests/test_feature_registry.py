@@ -1191,6 +1191,61 @@ def test_a_criss_cross_is_a_note(render, tmp_path):
     assert "no fork point to compare with: it is ambiguous" in _gone_without_base(out)
 
 
+# #430: git that cannot run is no "no base"
+
+def _gate_env(out, env, *args):
+    return subprocess.run(
+        [sys.executable, str(out / "scripts/process/check_feature_registry.py"), ".", *args],
+        cwd=out, capture_output=True, text=True, env=env)
+
+
+@pytest.mark.parametrize("case", ["no-git-on-path", "stale-gitfile", "git-dir-missing"])
+def test_git_that_cannot_run_reds_the_registry_gate(render, tmp_path, case):
+    import os
+    out = _render(render, tmp_path)
+    _story(out, 1, 2, 3)
+    _fork(out)
+    _story(out, 1, 2)  # AC3 gone: only a base would see it
+    env = dict(os.environ)
+    if case == "no-git-on-path":
+        (tmp_path / "bin").mkdir()
+        env["PATH"] = str(tmp_path / "bin")
+    elif case == "stale-gitfile":
+        shutil.rmtree(out / ".git")
+        (out / ".git").write_text(f"gitdir: {tmp_path}/gone/.git/worktrees/out\n")
+    else:
+        env["GIT_DIR"] = str(tmp_path / "missing")
+    r = _gate_env(out, env)
+    assert r.returncode == 1 and "git cannot run" in r.stdout, r.stdout + r.stderr
+    w = _gate_env(out, env, "--assign-ids")  # no base read: retired ids could come back
+    assert w.returncode == 1 and "assign-ids: FAILED" in w.stdout and "git cannot run" in w.stdout, w.stdout
+
+
+def test_a_plain_tree_stays_a_note(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, 1, 2)
+    r = _gate(out)
+    assert r.returncode == 0 and "no fork point to compare with (on the integration branch" in r.stdout, r.stdout
+
+
+def test_a_timeout_in_the_base_search_reds_the_registry_gate(render, tmp_path):
+    out = _render(render, tmp_path)
+    _story(out, 1, 2, 3)
+    _fork(out)
+    _story(out, 1, 2)
+    for words in (["merge-base", "--all"], ["for-each-ref"]):
+        code = ("import runpy, subprocess, sys; real = subprocess.run\n"
+                "def run(args, *a, **kw):\n"
+                f"    if isinstance(args, list) and args[:1] == ['git'] and all(w in args for w in {words!r}):\n"
+                "        raise subprocess.TimeoutExpired(args, 60)\n"
+                "    return real(args, *a, **kw)\n"
+                "subprocess.run = run\n"
+                "sys.argv = ['check_feature_registry.py', '.']\n"
+                "runpy.run_path('scripts/process/check_feature_registry.py', run_name='__main__')\n")
+        r = subprocess.run([sys.executable, "-c", code], cwd=out, capture_output=True, text=True)
+        assert r.returncode == 1 and "git cannot run" in r.stdout, (words, r.stdout + r.stderr)
+
+
 # I4.4: refs inside the registry
 
 def test_a_ref_to_an_item_is_green_also_in_a_test_ref(render, tmp_path):

@@ -45,7 +45,7 @@ from check_review import plan_tier as _plan_tier  # noqa: E402
 from check_plan_structure import _Unreadable, _at_ref  # noqa: E402
 import registry_config  # noqa: E402  (one owner of where the registry lives and how it loads)
 from check_plan_structure import _git as _git_read  # noqa: E402
-from process_git import git_ignored  # noqa: E402  (one owner of "does git ignore it", #421)
+from process_git import GitUnavailable, git_ignored, repo_probe  # noqa: E402  (one owner of "does git ignore it", #421; the repo probe, #430)
 
 _PLAN_WAIVED = re.compile(_LEAD + r"issue-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 
@@ -449,11 +449,11 @@ def _finding_duty(root: Path, due: dict[str, list[dict]],
     a readable repository without one, no finding is new: a note."""
     if not due:
         return [], []
-    probe = _git_read(root, "rev-parse", "--git-dir")
-    if probe.returncode != 0:
-        if "not a git repository" in probe.stderr.lower():
+    try:  # the one probe (#430): no repository, or git that cannot read this one
+        if not repo_probe(root):
             return [], ["not in a git repository — no branch range, so `class=` and `at=` are not checked"]
-        return [f"git cannot read the repository ({probe.stderr.strip()}) — {_UNKNOWN_NEW}"], []
+    except GitUnavailable as exc:
+        return [f"{exc} — {_UNKNOWN_NEW}"], []
     head = _git_read(root, "rev-parse", "--verify", "-q", "HEAD^{commit}")
     if head.returncode != 0 or not head.stdout.strip():
         return [f"HEAD cannot be read (unborn or naming a missing commit) — {_UNKNOWN_NEW}; "

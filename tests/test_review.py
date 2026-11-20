@@ -1612,3 +1612,171 @@ def test_the_size_helpers_have_one_owner():
         assert f"def {name}(" not in bundle, name
     for name in ("_TEST_DIRS", "_TEST_NAME", "SIZE_IGNORED", "_CHANGELOG_FRAGMENTS"):
         assert f"\n{name} = re.compile" not in bundle and f"\n{name} = frozenset" not in bundle, name
+
+
+# --- #430: no green gate without git ---
+
+def _bare_bin(tmp_path):
+    """A PATH that holds no git: the interpreter is called by its absolute path."""
+    d = tmp_path / "bin-without-git"
+    d.mkdir(exist_ok=True)
+    return str(d)
+
+
+def _broken(tmp_path, case, monkeypatch):
+    """A repository where git cannot run, one way per `case`."""
+    import shutil
+    root = tmp_path / "p"
+    _fork_repo(root)
+    if case == "stale-gitfile":  # a worktree whose main checkout went away
+        shutil.rmtree(root / ".git")
+        (root / ".git").write_text(f"gitdir: {tmp_path}/gone/.git/worktrees/p\n", encoding="utf-8")
+    elif case == "empty-git-dir":
+        shutil.rmtree(root / ".git")
+        (root / ".git").mkdir()
+    elif case == "git-dir-missing":
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "missing"))
+    elif case == "no-git-on-path":
+        monkeypatch.setenv("PATH", _bare_bin(tmp_path))
+    return root
+
+
+_BROKEN = ["stale-gitfile", "empty-git-dir", "git-dir-missing", "no-git-on-path"]
+
+
+@pytest.mark.parametrize("case", _BROKEN)
+def test_the_probe_names_git_that_cannot_run(tmp_path, monkeypatch, case):
+    cr = _cr()
+    root = _broken(tmp_path, case, monkeypatch)
+    with pytest.raises(cr.GitUnavailable, match=r"^git cannot run \("):
+        cr.repo_probe(root)
+    assert issubclass(cr.GitUnavailable, cr.GitReadError)
+
+
+def test_the_probe_tells_a_repo_from_a_plain_directory(tmp_path, monkeypatch):
+    """Success is kept per root, a failure never: a plain directory asks again."""
+    cr = _cr()
+    root, plain = tmp_path / "p", tmp_path / "plain"
+    _fork_repo(root)
+    plain.mkdir()
+    assert cr.repo_probe(root) is True
+    assert cr.repo_probe(plain) is False
+    monkeypatch.setenv("PATH", _bare_bin(tmp_path))
+    assert cr.repo_probe(root) is True  # kept
+    with pytest.raises(cr.GitUnavailable):
+        cr.repo_probe(plain)  # not kept
+
+
+@pytest.mark.parametrize("case", _BROKEN)
+def test_the_base_search_fails_when_git_cannot_run(tmp_path, monkeypatch, case):
+    """#430: `_git_bytes` read every failure as "no such ref" — a gate without git
+    found no base and went green with a note."""
+    cr = _cr()
+    root = _broken(tmp_path, case, monkeypatch)
+    for call in (lambda: cr.merge_base(root), lambda: cr.forkless_refs(root),
+                 lambda: cr._integration_ref(root)):
+        with pytest.raises(cr.GitReadError, match="git cannot run"):
+            call()
+
+
+def test_a_plain_directory_keeps_the_base_search_answers(tmp_path):
+    cr = _cr()
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert cr.merge_base(plain) is None
+    assert cr.forkless_refs(plain) == []
+    assert cr._integration_ref(plain) is None
+
+
+def _timing_out(monkeypatch, *words):
+    """subprocess.run, but a git call naming all of `words` times out."""
+    real = subprocess.run
+
+    def run(args, *a, **kw):
+        if isinstance(args, list) and args[:1] == ["git"] and all(w in args for w in words):
+            raise subprocess.TimeoutExpired(args, 60)
+        return real(args, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
+def test_a_timed_out_fork_point_is_no_ambiguity(tmp_path, monkeypatch):
+    """r4 M3: `fork_point` made a timeout a ValueError, and `_integration_base` skips an
+    ambiguous fallback when another ref contains the tip — the base went missing."""
+    cr = _cr()
+    root = tmp_path / "p"
+    _fork, _first, head = _fork_repo(root)
+    _git(root, "update-ref", "refs/heads/master", head)  # a fallback containing the tip
+    _timing_out(monkeypatch, "merge-base", "--all")
+    with pytest.raises(cr.GitUnavailable, match="git cannot run"):
+        cr.merge_base(root)
+    with pytest.raises(cr.GitUnavailable):
+        cr.fork_point(root, "main", head)
+
+
+def _rendered_repo(render, tmp_path):
+    out = render(tmp_path / "p", {"project_name": "demo"})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@example.com")
+    _git(out, "config", "user.name", "Test")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    _commit_file(out, "a.py", "a = 1\n")
+    return out
+
+
+def test_the_review_gate_run_without_git_is_red(render, tmp_path):
+    import os
+    root = _rendered_repo(render, tmp_path)
+    assert "git cannot run" not in _run(root).stdout  # Wächter
+    r = _run(root, {**os.environ, "PATH": _bare_bin(tmp_path)})
+    assert r.returncode == 1 and "git cannot run" in r.stdout, r.stdout + r.stderr
+
+
+def test_a_clone_of_dubious_ownership_is_red(render, tmp_path):
+    """A clone owned by another user: git refuses every read (`safe.directory`)."""
+    import os
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        pytest.skip("needs root to hand the clone to another uid")
+    root = _rendered_repo(render, tmp_path)
+    os.chown(root, 4242, 4242)
+    os.chown(root / ".git", 4242, 4242)
+    empty = tmp_path / "gitconfig"
+    empty.write_text("", encoding="utf-8")
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+           and k not in ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS")}
+    env.update(GIT_CONFIG_GLOBAL=str(empty), GIT_CONFIG_NOSYSTEM="1")
+    seen = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-dir"], capture_output=True,
+                          text=True, env={**env, "LC_ALL": "C"})
+    if "dubious ownership" not in seen.stderr:
+        pytest.skip(f"git does not refuse here: {seen.stderr!r}")
+    r = _run(root, env)
+    assert r.returncode == 1 and "git cannot run" in r.stdout and "dubious ownership" in r.stdout, r.stdout
+
+
+def test_history_fails_closed_when_git_cannot_run(tmp_path, monkeypatch):
+    cr = _cr()
+    root = tmp_path / "p"
+    _fork, _first, head = _fork_repo(root)
+    assert cr._history(root, head).git_error is False  # Wächter
+    _timing_out(monkeypatch, "for-each-ref")
+    assert cr._history(root, head).git_error is True
+
+
+def test_merged_work_is_no_note_when_git_cannot_run(tmp_path, monkeypatch):
+    cr = _cr()
+    root = tmp_path / "p"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    rel = ".process-work/plans/2026-11-20-done.md"
+    head = _commit_file(root, rel, "# Plan\n\ntier: 2\n")
+    _git(root, "checkout", "-q", "-b", "next")
+    _commit_file(root, "n.py", "n = 1\n")
+    passes = [{"work": "done", "tier": "2", "head": head}]
+    assert cr.merged_work(root, rel, passes, {"done"}, 2) is True  # Wächter
+    _timing_out(monkeypatch, "for-each-ref")
+    assert cr.merged_work(root, rel, passes, {"done"}, 2) is False

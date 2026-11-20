@@ -350,7 +350,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     if ref is None:
         from check_review import forkless_refs, is_shallow  # noqa: PLC0415
 
-        forkless = forkless_refs(root)
+        try:
+            forkless = forkless_refs(root)
+        except GitReadError as exc:  # git that cannot run (#430)
+            return [f"cannot read the integration ref: {exc}"], soft
         if forkless:  # a ref exists but no fork point: unknown is no pass (#302)
             remedy = ("this clone is shallow: `git fetch --unshallow`" if is_shallow(root)
                       else f"fetch the history of {forkless[0]} the branch forked from")

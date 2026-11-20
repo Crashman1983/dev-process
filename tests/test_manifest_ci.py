@@ -89,6 +89,23 @@ def test_core_gate_runs_with_all_modules_off(render, tmp_path):
     assert "product-frame" in r.stdout  # third core gate (SP31)
 
 
+def test_runner_without_git_fails_once(render, tmp_path):
+    """#430: without git every gate found "no base" and the run went green. The runner
+    probes once at its entry and fails the run, not each gate."""
+    import os
+    out = render(tmp_path, {"project_name": "d", "modules": {"feature_registry": True}})
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"],
+                 ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                  "commit", "-qm", "base"]):
+        subprocess.run(["git", *args], cwd=out, check=True, capture_output=True)
+    (tmp_path / "bin").mkdir()
+    r = subprocess.run([sys.executable, str(out / "scripts/process/gate_runner.py")], cwd=out,
+                       capture_output=True, text=True, env={**os.environ, "PATH": str(tmp_path / "bin")})
+    both = r.stdout + r.stderr
+    assert r.returncode == 1 and both.count("git cannot run") == 1, both
+    assert "== running" not in both, both
+
+
 def test_workflow_rendered(render, tmp_path):
     out = render(tmp_path, {"project_name": "d"})
     assert (out / ".github/workflows/process-gates.yml").is_file()
