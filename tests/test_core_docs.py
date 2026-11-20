@@ -1319,3 +1319,70 @@ def test_every_start_example_names_the_track(render, tmp_path):
             if "[--track" in span:  # optional: the text right after says when it is required
                 assert "steering.tracks" in text[m.end():m.end() + 160], (rel, span)
     assert seen["synopsis"] >= 1 and seen["example"] >= 1, seen  # tower.md's synopsis, the steward's example
+
+
+# --- v2.100 H1: hardening behind an intact guard stays at Tier 2 (#434) ------------------
+
+_TIER_TABLE = (
+    "| **Tier 2** | Changes behavior that another component, tool, or persisted state **depends on**: "
+    "an interface/contract, a schema, a cross-component effect | Plan → execute → review before merge |",
+    "| **Tier 3** | Auth, persistence/migrations, security surface, or multi-repo contract | "
+    "Plan + upfront design + review + (where configured) second-opinion review |",
+)
+_TIER_QUESTIONS = (
+    "- Does it **read or write persistence** (a database, a file, a durable store)?",
+    "- Does **untrusted or user-controlled input leave the process** — a redirect, rendered markup, "
+    "a query, a subprocess, a file path?",
+    "- Does it touch **auth**, an **interface/contract** other code depends on, or **more than one surface**?",
+    "- Could it **lose or corrupt data**, or is it a **repeated change to the same owner** "
+    "(see mandatory rule 4)?",
+    "A yes to any of these lifts the change to **Tier 2+ regardless of diff size**",
+    "**Floor, not ceiling:** a label or convention may raise a tier; it never lowers the derived tier. "
+    "Below the derived tier only with a one-line written justification.",
+)
+
+
+def test_the_hardening_exception_is_one_paragraph_with_its_limits(render, tmp_path):
+    """#434: a consolidation behind intact guards sat two days at Tier 3 downstream. One
+    exception lets it be Tier 2 — security surface only, three conditions, the exclusions
+    (the only enforcement point, gate code) and a floor at Tier 2; nothing else moves."""
+    out = render(tmp_path, {"project_name": "demo"})
+    raw = (out / "docs/process/risk-tiers.md").read_text()
+    for kept in _TIER_TABLE + _TIER_QUESTIONS:  # table and the four questions unchanged
+        assert kept in raw, kept
+    paras = [p for p in raw.split("\n\n") if p.startswith("**Hardening behind an intact guard.**")]
+    assert len(paras) == 1, "exactly one paragraph"
+    assert (raw.index("A yes to any of these lifts") < raw.index(paras[0])
+            < raw.index("**Verification scales too.**"))
+    para = " ".join(paras[0].split())
+    for phrase in (
+        "only when Tier 3 follows from the security surface alone",
+        "also touches auth, persistence/migrations or a contract across repository boundaries stays Tier 3",
+        # (1) the consumer search, a guard per path
+        "runs the consumer search over the changed place", "for each path, the guard that stays in force",
+        "the only check for even one path, the change is Tier 3",
+        # (2) two tests
+        "a unit test of the hardened check alone that is red against the previous version",
+        "the surviving guard blocks the attack without the hardening",
+        # (3) at the owner
+        "lands at the boundary's owner, not as an added wrapper", "the decision of mandatory rule 4",
+        # the exclusions
+        "any change at a boundary's only enforcement point, a tightening included",
+        "what reaches the only content check (its enumeration, resolution or decoding)",
+        "a loosened or removed security control, one of two included and a parameter included",
+        "any change to gate code or its configuration (`scripts/process/`)",
+        "template updates that migrate enforcement",
+        # the floor
+        "never goes below Tier 2, not even with the one-line written justification",
+        "the only way below Tier 3", "never lowers a tier that a label or the owner set",
+    ):
+        assert phrase in para, phrase
+    # the two tier checks keep their wording and point to the paragraph
+    checklist = _flat(out / "docs/process/review-checklist.md")
+    assert ("When the changed code is the only place a boundary is enforced, the change is Tier 3. "
+            "The one exception for a hardening behind an intact guard: `risk-tiers.md`, "
+            "\"Hardening behind an intact guard\".") in checklist
+    refute = _flat(out / "docs/process/refute.md")
+    assert ("the changed code as its only enforcement is Tier 3. One exception for a hardening "
+            "behind an intact guard: docs/process/risk-tiers.md, \"Hardening behind an intact "
+            "guard\".") in refute
