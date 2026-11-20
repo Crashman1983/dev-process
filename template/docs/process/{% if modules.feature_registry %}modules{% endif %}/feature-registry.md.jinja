@@ -162,7 +162,8 @@ A story is found by its `id`; one whose id the base does not hold is looked up
 by its path, so a story renamed in the flat layout stays compared. In the
 capabilities layout the file name is the id: a renamed story there is a deleted
 one plus a new one. A new story is checked for the form only; deleting a whole
-story is allowed (history is the archive) — refs to it are caught below.
+story is allowed (history is the archive) — refs to it are caught below; a
+retired one stays as its tombstone (Retiring a story).
 
 Only `root`, `layout`, `id_pattern` and `stable_ids` of the base's configuration
 count. Where there is no base to compare with, the gate says why in a note and
@@ -186,6 +187,63 @@ branch say false, so a branch cannot lift the duty for itself. A base value that
 is no boolean counts as true, with a note. The form of `retired` and
 `--assign-ids` hold either way. Set on a branch, the switch takes effect once
 that branch is merged.
+
+## Retiring a story
+
+A story whose capability went into other stories, or was dropped, can stay as a
+**tombstone**: its file remains, holds no item, and the story field
+`retired_into` marks it. The key alone makes a story a tombstone
+(`registry_config.is_tombstone`, the one owner for the gate, filters and views):
+
+```json
+{
+  "id": "STORY-0003",
+  "title": "Export as CSV",
+  "story": "As a user, I export my widgets as CSV.",
+  "acceptance": [],
+  "retired": [{"id": "AC1"}, {"id": "AC2"}, {"id": "AC3"}],
+  "retired_into": ["STORY-0007"]
+}
+```
+
+`retired_into` lists the stories the content went into, `[]` for none. Each of
+these fails:
+
+- `acceptance` is missing or holds an item — every id moves to `retired`;
+- `retired` is missing or empty;
+- `retired_into` is no list of story ids, names an unknown story or the story
+  itself, or the chain over tombstones closes a cycle. A chain is allowed
+  (`STORY-0003` into `STORY-0005`, itself retired into `STORY-0007`), so a later
+  retirement need not rewrite older tombstones; it ends in a story that stands,
+  or in none;
+- a `retired` entry carries `split_into` — the successors are stories, named in
+  `retired_into`;
+- the story's `tests` (or `test_mapping`) is not empty: the tests went with the
+  behaviour.
+
+A tombstone owes no tests, no `status` and no issue; a `status` it keeps must
+still be valid, and its story text fields and `surfaces` follow the usual rules.
+It counts as no missing coverage. A ref `STORY-0003#AC2` in the registry is a
+note naming the stories in `retired_into`; with `retired_into: []` it fails like
+a ref to a retired id without `split_into`.
+
+With `stable_ids`, a tombstone of the base must stand today, found by its id
+whatever its path: **a retired story stays as its tombstone**. Dropping
+`retired_into` again revives the story under the Stable ids rules — a new item
+gets an id above every id the story held. A new story with a tombstone's id is a
+duplicate id.
+
+**Delete or retire?** Deleting a story is still allowed (history is the archive)
+and fits a story nobody refers to. Retire it instead when plans, tests, issues or
+other stories cite its id: a tombstone keeps the id known — the plan-structure
+gate and the product frame accept it — and keeps it from being given again. A
+deleted story's id is unknown from then on, and only refs inside the registry are
+caught.
+
+**Two branches, one cycle.** Two branches can each be green and together close a
+cycle — one retires `STORY-0003` into `STORY-0005`, the other `STORY-0005` into
+`STORY-0003`. The train checks its passengers on the combined tree, so the cycle
+fails there and the second passenger drops out of the batch.
 
 ## Test refs
 
@@ -315,18 +373,19 @@ one implicit surface and stay green.
 
 **Hard (CI fails):** an unusable or unknown configuration key; invalid JSON;
 missing/duplicate/misshaped story `id`; a missing text field; empty
-`acceptance`; an item without `id`, with a misshaped or duplicate id, or
+`acceptance` outside a tombstone; an item without `id`, with a misshaped or duplicate id, or
 without text; an item field outside its rules (surfaces, state, a target
-without an issue, tests, `owned_by`); a malformed `retired` list; with
-`stable_ids`, an id changed against the fork point and a registry ref that
-names no item, or a retired one without `split_into` (Stable ids); story tests that are empty, all
+without an issue, tests, `owned_by`); a malformed `retired` list; a tombstone
+outside its form (Retiring a story); with
+`stable_ids`, an id changed against the fork point, a tombstone of the base gone, and a registry ref that
+names no item, or a retired one without `split_into` or `retired_into` (Stable ids); story tests that are empty, all
 placeholders or name a path that does not exist; a retired field; a dangling
 `adr` link; a malformed issue ref; with a project configuration, its rules
 (layout, heads, prefixes, surfaces, status, test mapping, required issues).
 
 **Best-effort (note, never fails):** an empty inventory ("no entries yet");
 no base to compare item ids with, and why; a ref to a retired id with
-`split_into`;
+`split_into`, or to an item of a tombstone with a `retired_into` story;
 unknown story or item fields; a dead `::node` (unless `node_check` is `hard`);
 items without an existing test (unless `strict_item_tests`); item surfaces
 without declared project surfaces; the under-granularity advisory (an entry
