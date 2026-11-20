@@ -118,8 +118,9 @@ are committed. Host names come from `PROCESS_HOST` or the hostname.
 ## Dispatch and the model policy
 
 A phase is a session. `scripts/process/dispatch.py start --issue N --phase
-plan|execute|review [--tier T]` opens (or reuses) the branch's worktree and
-starts a session with the model `docs/process/model-policy.json` assigns
+plan|execute|review [--tier T] [--track <name>]` (`--track` is required on
+the first start once the mandate sets `steering.tracks`, "Work-in-progress
+limits" below) opens (or reuses) the branch's worktree and starts a session with the model `docs/process/model-policy.json` assigns
 to that tier and phase; the project's own start command is the policy's
 `command` template (`{model}`, `{effort}`, `{prompt}` are substituted inside the argv
 the template splits into; the prompt is one argv element, and it begins

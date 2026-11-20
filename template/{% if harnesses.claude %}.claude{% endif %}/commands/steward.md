@@ -105,8 +105,10 @@ tower run. Owner messages are a third wake. On each wake:
 4. Assign: the next Ready issue (DoR, `docs/process/definition-of-ready-and-done.md`)
    to a session of its own, one phase at a time, with the model the
    policy assigns (`docs/process/model-policy.json`, tier × phase):
-   `uv run scripts/process/dispatch.py start --issue N --phase plan --tier T`
-   (policy `runner: tmux` starts each worker as a window the owner can
+   `uv run scripts/process/dispatch.py start --issue N --phase plan --tier T
+   [--track <name>]` (`--track` is required on the first start once the
+   mandate sets `steering.tracks` — `docs/process/tower.md`, "Work-in-progress
+   limits"; policy `runner: tmux` starts each worker as a window the owner can
    open and `dispatch.py say` can type into; `detached` runs it headless —
    either way `dispatch.py log` shows what it shows; the policy's
    `command` runs on this machine, so a change to it is reviewed like CI

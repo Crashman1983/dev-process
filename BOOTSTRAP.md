@@ -185,7 +185,8 @@ the scripts; three steps switch it on:
 3. **Start the steward.** In a session on the main clone, run the `steward`
    command (Claude Code; with another harness, the same scripts work by hand). It reads the situation table (`python3 scripts/process/tower.py`),
    starts workers (`python3 scripts/process/dispatch.py start --issue N --phase
-   plan|execute|review`), relays questions, and merges finished branches as a
+   plan|execute|review [--track <name>]`; `--track` is required on the first
+   start once the mandate sets `steering.tracks`), relays questions, and merges finished branches as a
    train (`python3 scripts/process/train.py plan`, then `run`).
 
 Useful by hand: `dispatch.py list` shows every worker and its last line,
