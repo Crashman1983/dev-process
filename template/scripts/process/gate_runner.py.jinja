@@ -41,7 +41,12 @@ try:  # the event log's one writer; without it nothing is recorded, every verdic
 except Exception:  # noqa: BLE001
     gate_events = None
 from gate_invoke import child_argv, hook_wiring_findings, uv_launch_failure  # noqa: E402
-from process_git import path_matches, pushed_commit_problem  # noqa: E402
+from process_git import (  # noqa: E402
+    GitUnavailable,
+    path_matches,
+    pushed_commit_problem,
+    repo_probe,
+)
 
 # gate-name -> (module answer key, command relative to repo root).
 # A module key of None marks a *core* gate: it ships in core and always runs,
@@ -162,6 +167,8 @@ def _area_globs(root: Path, areas: list[str], memo: dict) -> tuple[list[str] | N
             from check_review import integration_ref  # noqa: PLC0415
 
             ref = integration_ref(root)
+        except GitUnavailable:
+            raise  # git that cannot run is no "no base" (#430): `main` probed it already
         except Exception:  # noqa: BLE001 — no readable base: the working tree alone
             ref = None
         try:
@@ -484,6 +491,18 @@ def main() -> int:
         for g in active:
             print(g)
         return 0
+    try:
+        # one probe for the run (#430): without it every gate found "no base" and passed
+        # with a note; a plain tree that is no clone goes on as before
+        repo_probe(root)
+    except GitUnavailable as exc:
+        print(f"gate-runner: {exc} — no gate can judge this checkout; fix git, then rerun",
+              file=sys.stderr)
+        if "--warn" in sys.argv:
+            print("gate warnings (not blocking): git")
+            return 0
+        print("FAILED gates: git")
+        return 1
     warn = "--warn" in sys.argv
     show_all = "--all-notes" in sys.argv
     failed = []

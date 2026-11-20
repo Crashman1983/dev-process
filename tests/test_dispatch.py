@@ -2687,6 +2687,17 @@ def test_dispatch_judges_the_branch_by_the_gates_fork_point(render, tmp_path):
     assert tip not in a, "a ref containing the tip is no fork point"
 
 
+def test_fork_problem_fails_closed_when_git_cannot_run(render, tmp_path):
+    """#430: a checkout git cannot read is no branch without a range — a plan review
+    must not be skipped on it."""
+    out = render(tmp_path, {"project_name": "d"})
+    mod = _load_dispatch(out)
+    assert mod.fork_problem(out, "HEAD") is None  # Wächter: a plain tree has no range
+    (out / ".git").write_text(f"gitdir: {tmp_path}/gone/.git/worktrees/d\n")
+    why = mod.fork_problem(out, "HEAD")
+    assert why and "git cannot run" in why, why
+
+
 def _with_class(out: Path) -> None:
     pol = out / "docs/process/model-policy.json"
     data = json.loads(pol.read_text())

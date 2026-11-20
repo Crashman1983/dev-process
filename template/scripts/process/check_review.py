@@ -66,7 +66,18 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from process_git import NoForkPoint, fork_point, git_environment, git_ignored  # noqa: E402
+# GitReadError/GitUnavailable are re-exported: every gate catches them from here;
+# process_git owns them so `fork_point` raises GitUnavailable without an import cycle (#430)
+from process_git import (  # noqa: E402
+    GitReadError,
+    GitUnavailable,
+    NoForkPoint,
+    fork_point,
+    git_environment,
+    git_ignored,
+    repo_probe,
+    start_failure,
+)
 from template_update import ANSWERS  # noqa: E402
 from template_verify import carried_base, update_paths, update_seen, verify  # noqa: E402
 
@@ -1246,14 +1257,24 @@ def review_passes(root: Path, texts, tip: str = "HEAD") -> list[dict]:
 
 def _git_bytes(root: Path, *args: str) -> bytes | None:
     try:
+        return _git_base(root, *args)
+    except GitUnavailable:
+        return None
+
+
+def _git_base(root: Path, *args: str) -> bytes | None:
+    """git's stdout, None on an exit other than 0 — the strict reader of the base search
+    (`_integration_base`, `forkless_refs`, `_integration_ref`, `integration_refs`): git
+    that cannot start or runs past 60 s raises GitUnavailable, never "no such ref" (#430)."""
+    try:
         result = subprocess.run(
             ["git", "-C", str(root), *args],
             capture_output=True,
             timeout=60,
             env=git_environment(),
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise start_failure(args[0], exc) from exc
     return result.stdout if result.returncode == 0 else None
 
 
@@ -1319,10 +1340,6 @@ def _commit_id(root: Path, rev: str) -> str:
     if not rev or rev.startswith("-"):
         return ""
     return (_git_pure(root, (rev,), "rev-parse", "--verify", "-q", f"{rev}^{{commit}}") or b"").decode().strip()
-
-
-class GitReadError(RuntimeError):
-    """A git read the standing-block arm cannot do without failed."""
 
 
 def _git_read(root: Path, *args: str, strict: bool) -> bytes | None:
@@ -1420,7 +1437,7 @@ INTEGRATION_TARGET_REFS = tuple(f"refs/heads/{name}" for name in INTEGRATION_NAM
 
 
 def _remote_defaults(root: Path) -> list[str]:
-    heads = (_git_bytes(root, "for-each-ref", "--format=%(symref)", "refs/remotes") or b"").decode().splitlines()
+    heads = (_git_base(root, "for-each-ref", "--format=%(symref)", "refs/remotes") or b"").decode().splitlines()
     return [ref.removeprefix("refs/remotes/") for ref in heads if ref.startswith("refs/remotes/")]
 
 
@@ -1547,30 +1564,37 @@ def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     contain tip it raises GitReadError (the gate, finish and the train name
     it). On a fallback it is skipped when another ref answers — a later
     unique fork, or a ref containing tip (on main, a criss-crossed upstream
-    must not red main) — and raises when nothing does."""
-    tip_sha = (_git_bytes(root, "rev-parse", "--verify", "-q", f"{tip}^{{commit}}") or b"").strip()
+    must not red main) — and raises when nothing does.
+
+    git that cannot run raises GitUnavailable (`repo_probe`, `_git_base`):
+    a gate without git found no base and went green (#430)."""
+    if not repo_probe(root):
+        return None
+    tip_sha = (_git_base(root, "rev-parse", "--verify", "-q", f"{tip}^{{commit}}") or b"").strip()
     if not tip_sha:
         return None
     tip_hex = tip_sha.decode()
-    listed = _git_bytes(root, "for-each-ref", "--format=%(refname:short)",
-                        "refs/remotes/*/main", "refs/remotes/*/master")
-    others = [r for r in (listed or b"").decode(errors="replace").split()
-              if r not in integration_refs(root)]
+    listed = _git_base(root, "for-each-ref", "--format=%(refname:short)",
+                       "refs/remotes/*/main", "refs/remotes/*/master")
+    refs = integration_refs(root)
+    others = [r for r in (listed or b"").decode(errors="replace").split() if r not in refs]
     remote_names = set(_remote_defaults(root)) | {f"origin/{n}" for n in INTEGRATION_NAMES}
-    remotes = [r for r in integration_refs(root) if r in remote_names]
-    local = [r for r in integration_refs(root) if r not in remote_names]
+    remotes = [r for r in refs if r in remote_names]
+    local = [r for r in refs if r not in remote_names]
     contained = False
     ambiguous: GitReadError | None = None
     for ref in [*remotes, *sorted(others), *local]:
-        if _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is None:
+        if _git_base(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is None:
             continue
-        if _git_bytes(root, "merge-base", "--is-ancestor", tip_hex, ref) is not None:
+        if _git_base(root, "merge-base", "--is-ancestor", tip_hex, ref) is not None:
             contained = True  # integrated here: bounds nothing, decides nothing
             continue
         try:
             return ref, fork_point(root, ref, tip_hex)
         except NoForkPoint:
             continue
+        except GitUnavailable:
+            raise  # no ambiguity: skipped as one, it hid the base (r4 M3)
         except ValueError as exc:
             error = GitReadError(f"integration base of {tip} on {ref}: {exc}")
             if ref in remotes:
@@ -1585,13 +1609,16 @@ def forkless_refs(root: Path, tip: str = "HEAD") -> list[str]:
     """The integration refs that resolve when no fork point was found — empty when none
     does or one contains tip (on the integration ref: no range, a note). Otherwise each
     of them shares no commit with tip here: a shallow clone, or the fork not in history.
-    The gates that bound a branch range ask here before they note "no range" (#297, #302)."""
-    listed = _git_bytes(root, "for-each-ref", "--format=%(refname:short)",
-                        "refs/remotes/*/main", "refs/remotes/*/master")
+    The gates that bound a branch range ask here before they note "no range" (#297, #302).
+    git that cannot run raises GitUnavailable (#430)."""
+    if not repo_probe(root):
+        return []
+    listed = _git_base(root, "for-each-ref", "--format=%(refname:short)",
+                       "refs/remotes/*/main", "refs/remotes/*/master")
     candidates = dict.fromkeys([*integration_refs(root), *(listed or b"").decode(errors="replace").split()])
     resolved = [ref for ref in candidates
-                if _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None]
-    if any(_git_bytes(root, "merge-base", "--is-ancestor", tip, ref) is not None for ref in resolved):
+                if _git_base(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is not None]
+    if any(_git_base(root, "merge-base", "--is-ancestor", tip, ref) is not None for ref in resolved):
         return []
     return resolved
 
@@ -2131,19 +2158,25 @@ def _integration_ref(root: Path, tip: str = "HEAD") -> str | None:
     merged but has not pushed yet; measured against the stale origin, those
     passengers would read as unreviewed. Anything else a local main carries
     (a commit made on main by mistake, a `master` pointed at unreviewed work)
-    is not integrated, and does not hide code (downstream refutation)."""
+    is not integrated, and does not hide code (downstream refutation).
+
+    git that cannot run raises GitUnavailable (#430)."""
+    if not repo_probe(root):
+        return None
+
     def usable(ref: str) -> bool:
-        out = _git_bytes(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+        out = _git_base(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
         return bool(out and out.strip()) and \
-            _git_bytes(root, "merge-base", "--is-ancestor", tip, ref) is None
+            _git_base(root, "merge-base", "--is-ancestor", tip, ref) is None
     remote_names = set(_remote_defaults(root)) | {f"origin/{n}" for n in INTEGRATION_NAMES}
-    remote = next((r for r in integration_refs(root) if r in remote_names and usable(r)), None)
-    for local in (r for r in integration_refs(root) if r not in remote_names and usable(r)):
+    refs = integration_refs(root)
+    remote = next((r for r in refs if r in remote_names and usable(r)), None)
+    for local in (r for r in refs if r not in remote_names and usable(r)):
         if remote is None:
             return local
-        if _git_bytes(root, "merge-base", "--is-ancestor", remote, local) is None:
+        if _git_base(root, "merge-base", "--is-ancestor", remote, local) is None:
             continue
-        extra = _git_bytes(root, "rev-list", "--first-parent", "--no-merges", local, f"^{remote}")
+        extra = _git_base(root, "rev-list", "--first-parent", "--no-merges", local, f"^{remote}")
         if extra is not None and not extra.strip():
             return local
     return remote
@@ -2438,7 +2471,10 @@ def _history(root: Path, head: str, tip: str = "HEAD",
     if not tip_id:
         return error
     head_base = base if GIT_SHA.fullmatch(base or "") else _commit_id(root, base) if base else ""
-    integ = _integration_ref(root, tip_id)
+    try:
+        integ = _integration_ref(root, tip_id)
+    except GitReadError:
+        return error  # git cannot run: no integration branch is no "the head alone" (#430)
     judged, fellow, carrier_own = [tip_id], [], set()
     staging = tip == "HEAD" and (_git_bytes(root, "symbolic-ref", "--short", "-q", "HEAD") or b"") \
         .decode(errors="replace").strip().startswith("train/")
@@ -2696,8 +2732,12 @@ def merged_work(root: Path, rel: str, passes: list[dict], ids: set[str], tier: i
     is in it. Only a note: its stale check still runs — later code no review
     has seen is unreviewed whatever plan it lands under (a refutation showed
     a skip let unreviewed follow-up work through); later code another review
-    saw is covered by that review (`reviewed` in `_history`)."""
-    integ = _integration_ref(root)
+    saw is covered by that review (`reviewed` in `_history`). git that cannot
+    run answers no (#430): the plan stays under the gate's full duty."""
+    try:
+        integ = _integration_ref(root)
+    except GitReadError:
+        return False
     if integ is None or _git_bytes(root, "cat-file", "-e", f"{integ}:{rel}") is None:
         return False
     heads = [r["head"] for r in passes if r["work"] in ids and int(r["tier"]) >= min(tier, 3) and r.get("head")]
@@ -3323,6 +3363,12 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
     phases = _Phases(REPORT_PHASES)
+    try:
+        repo_probe(root)  # a plain tree goes on: no range, the notes say so
+    except GitUnavailable as exc:
+        # no arm below can judge a checkout git cannot read: one finding, not a
+        # green run of notes (#430)
+        return [f"{exc} — the review gate cannot read this checkout"], []
 
     # the push-anchored arms below are the merge's condition, not every
     # push's — see integration_push()

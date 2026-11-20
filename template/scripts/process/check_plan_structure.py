@@ -542,7 +542,10 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
     if ref is None:
         # #302: an integration ref without a fork point (a shallow clone, the fork not
         # fetched) is no "no range" — which plans the branch adds is unknown: fail closed
-        forkless = forkless_refs(root)
+        try:
+            forkless = forkless_refs(root)
+        except GitReadError as exc:  # git that cannot run (#430)
+            return [f"cannot read the integration ref: {exc}"], soft
         if forkless:
             remedy = ("this clone is shallow: `git fetch --unshallow`" if is_shallow(root)
                       else f"fetch the history of {forkless[0]} the branch forked from")
