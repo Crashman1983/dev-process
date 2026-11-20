@@ -281,7 +281,7 @@ def old_review_reports(root: Path, days: int) -> list[str]:
     it (`check_review.plan_report_keys`, the plans' REVIEW lines,
     `spec_dir_issue`, or a plain `#N` / `issues/N` / whole-slug mention —
     issue numbers repository-insensitive here only); no open key reaches its
-    file name (`check_review.report_of`'s name rule); it is not that work's
+    file name (`check_review.report_matches_work`'s name rule); it is not that work's
     newest report (works grouped as `report_of` compares them); it is older
     than `days`; no `campaign:` header; and no plan, archived plan or
     journal shard names its file.
@@ -362,8 +362,8 @@ def old_review_reports(root: Path, days: int) -> list[str]:
         for rel in rels[:-1]:  # the newest stays: the next delta round reads it
             if rel.rsplit("/", 1)[-1] in named:
                 continue
-            if cr.report_of([(rel, "")], *by_name) is not None:
-                continue  # its file name reaches it for open work (report_of's name rule)
+            if cr.report_matches_work(rel, "", *by_name) is not None:
+                continue  # its file name reaches it for open work (the name rule alone)
             d = _report_date(root, rel)
             if d is not None and d < cutoff:
                 out.append(rel)

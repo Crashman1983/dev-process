@@ -1022,47 +1022,66 @@ def report_artifact(text: str) -> dict[str, str]:
     return {}
 
 
-def report_of(candidates: list[tuple[str, str]], slugs, issues,
-              siblings=()) -> tuple[str, str] | None:
-    """The previous round's report of THIS work item among (path, text)
-    candidates — never another one's; the one owner of that rule.
+def report_matches_work(rel: str, text: str, slugs, issues,
+                        siblings=()) -> str | None:
+    """Whether the report at `rel` with `text` is THIS work item's: `"issue"`
+    when one of its issues reaches it, `"slug"` when only a plan slug does,
+    None when it is another one's — the one owner of that rule.
 
     A report whose header names its `work:` belongs to that work alone: it is
     this item's when a value is one of this item's issues (the same
     repository: `other/repo#9` is not this repo's #9) or plan slugs, exactly.
     Without a `work:` header the file name decides: `<N>-…`, `issue-<N>` or a
     whole slug part; or the `review:` value equals a plan slug. Issues are
-    tried before slugs; the newest by name wins. Taking simply the newest
-    report put an unrelated item's findings into a delta bundle (observed
-    downstream), and so did a slug matched inside another word.
+    tried before slugs. Taking simply the newest report put an unrelated
+    item's findings into a delta bundle (observed downstream), and so did a
+    slug matched inside another word. An empty `text` leaves the file name
+    alone to decide.
 
     `siblings`: the slugs of other plans that share one of these issues (stacked
     phases of one issue). A report whose name or header is closer to one of
     them than to `slugs` is that phase's, whatever issue it names — the shared
-    number took phase b's report for phase c's round (#345)."""
+    number took phase b's report for phase c's round (#345).
+
+    The arguments are as `report_of` takes them; the predicate normalises them
+    itself, so a direct caller (`tidy.py`) needs no preparation."""
     slugs = [s for s in dict.fromkeys(slugs) if s]
     siblings = [s for s in dict.fromkeys(siblings) if s and s not in slugs]
     issues = list(issues)
     bare = {n for repo, n in issues if repo is None}
     numbers = {n for _repo, n in issues}
+    head = report_header(text)
+    if siblings and _names_sibling(rel, head, slugs, siblings, numbers):
+        return None  # another phase's report of the same issue
+    works = head.get("work", [])
+    if works:
+        if any(issue_key(w) in issues for w in works):
+            return "issue"
+        if any(w in slugs for w in works):
+            return "slug"
+        return None  # another work's report, whatever its file name says
+    s = DATE_PREFIX.sub("", Path(rel).stem)
+    if any(s == str(n) or s.startswith(f"{n}-") or _slug_in_name(f"issue-{n}", s) for n in bare):
+        return "issue"
+    if any(_slug_in_name(slug, s) for slug in slugs) or \
+            any(v in slugs for v in head.get("review", [])):
+        return "slug"
+    return None
+
+
+def report_of(candidates: list[tuple[str, str]], slugs, issues,
+              siblings=()) -> tuple[str, str] | None:
+    """The previous round's report of THIS work item among (path, text)
+    candidates — never another one's. `report_matches_work` decides which
+    are this item's; issues before slugs, the newest by name wins."""
+    slugs, issues, siblings = list(slugs), list(issues), list(siblings)  # iterables once
     by_issue: list[tuple[str, str]] = []
     by_slug: list[tuple[str, str]] = []
     for rel, text in sorted(candidates):
-        head = report_header(text)
-        if siblings and _names_sibling(rel, head, slugs, siblings, numbers):
-            continue  # another phase's report of the same issue
-        works = head.get("work", [])
-        if works:
-            if any(issue_key(w) in issues for w in works):
-                by_issue.append((rel, text))
-            elif any(w in slugs for w in works):
-                by_slug.append((rel, text))
-            continue  # another work's report, whatever its file name says
-        s = DATE_PREFIX.sub("", Path(rel).stem)
-        if any(s == str(n) or s.startswith(f"{n}-") or _slug_in_name(f"issue-{n}", s) for n in bare):
+        match = report_matches_work(rel, text, slugs, issues, siblings)
+        if match == "issue":
             by_issue.append((rel, text))
-        elif any(_slug_in_name(slug, s) for slug in slugs) or \
-                any(v in slugs for v in head.get("review", [])):
+        elif match == "slug":
             by_slug.append((rel, text))
     hits = by_issue or by_slug
     return hits[-1] if hits else None

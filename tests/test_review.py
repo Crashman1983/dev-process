@@ -1594,6 +1594,56 @@ def test_report_header_reads_phase_and_leaves_the_other_keys_alone():
     assert cr.report_of([("2026-07-05-x.md", text)], [], [(None, 9)]) == ("2026-07-05-x.md", text)
 
 
+# --- #439: die Zugehörigkeit eines Reports als öffentliches Prädikat ---
+
+def test_report_matches_work_reads_the_work_header_first():
+    """Ein `work:`-Kopf entscheidet allein: Issue vor Slug; ein Kopf, der eine andere
+    Arbeit nennt, gehört nicht hierher, auch wenn der Dateiname passt."""
+    cr = _cr()
+    assert cr.report_matches_work("2026-11-20-x.md", "work: widget\n\nbody\n", ["widget"], []) == "slug"
+    assert cr.report_matches_work("2026-11-20-x.md", "work: #9\n\nbody\n", ["widget"], [(None, 9)]) == "issue"
+    both = "work: widget\nwork: #9\n\nbody\n"
+    assert cr.report_matches_work("2026-11-20-x.md", both, ["widget"], [(None, 9)]) == "issue"
+    other = "work: gadget\n\nbody\n"
+    assert cr.report_matches_work("2026-11-20-widget.md", other, ["widget"], [(None, 9)]) is None
+    assert cr.report_matches_work("2026-11-20-9-widget.md", "work: #10\n\n", ["widget"], [(None, 9)]) is None
+
+
+def test_report_matches_work_without_header_goes_by_name_then_review_value():
+    """Ohne `work:`-Kopf entscheidet der Dateiname (`<N>-…`, `issue-<N>`, ein ganzer
+    Slug-Teil), sonst ein `review:`-Wert gleich einem Slug; Issue vor Slug."""
+    cr = _cr()
+    issues = [(None, 9)]
+    assert cr.report_matches_work("r/2026-11-20-9-fix.md", "", [], issues) == "issue"
+    assert cr.report_matches_work("r/2026-11-20-9.md", "", [], issues) == "issue"
+    assert cr.report_matches_work("r/2026-11-20-review-issue-9.md", "", [], issues) == "issue"
+    assert cr.report_matches_work("r/2026-11-20-widget-9-x.md", "", ["widget"], issues) == "slug"
+    assert cr.report_matches_work("r/2026-11-20-widget-round-2.md", "", ["widget"], []) == "slug"
+    assert cr.report_matches_work("r/2026-11-20-rapidwidget.md", "", ["widget"], []) is None
+    assert cr.report_matches_work("r/2026-11-20-99-x.md", "", ["widget"], issues) is None
+    assert cr.report_matches_work("r/2026-11-20-x.md", "review: widget\n\n", ["widget"], []) == "slug"
+    assert cr.report_matches_work("r/2026-11-20-x.md", "review: gadget\n\n", ["widget"], []) is None
+    # ein `review:`-Wert unter dem Kopfblock ist kein Kopf
+    assert cr.report_matches_work("r/2026-11-20-x.md", "# R\n\nreview: widget\n", ["widget"], []) is None
+
+
+def test_report_matches_work_skips_a_sibling_phase_and_a_foreign_repo():
+    """Ein Report, der einer Geschwister-Phase desselben Issues näher ist, gehört ihr,
+    welches Issue er auch nennt (#345); `other/repo#9` ist nicht dieses Repos #9."""
+    cr = _cr()
+    issues = [(None, 2257)]
+    slugs, siblings = ["2257-c-api"], ["2257-b-db"]
+    assert cr.report_matches_work("r/2026-11-20-2257-b-db-r1.md", "", slugs, issues, siblings) is None
+    assert cr.report_matches_work("r/2026-11-20-x.md", "work: #2257\nreview: 2257-b-db\n\n",
+                                  slugs, issues, siblings) is None
+    assert cr.report_matches_work("r/2026-11-20-2257-c-api-r1.md", "", slugs, issues, siblings) == "issue"
+    # nur die Nummer verbindet beide Phasen: kein Geschwister-Report
+    assert cr.report_matches_work("r/2026-11-20-2257-plan-r1.md", "", slugs, issues, siblings) == "issue"
+    assert cr.report_matches_work("r/2026-11-20-x.md", "work: other/repo#9\n\n", [], [(None, 9)]) is None
+    assert cr.report_matches_work("r/2026-11-20-x.md", "work: other/repo#9\n\n", [],
+                                  [("other/repo", 9)]) == "issue"
+
+
 # --- #251: a deleted active Tier 2+ plan does not take its work out of the gate ---
 
 def _main_with_active_plan(render, tmp_path, body="# Plan\n\ntier: 3\nissue: #77\n"):
