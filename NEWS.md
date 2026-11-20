@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.99.0 — A retired story keeps its id; no green gate without git; one rule for review passes
+
+A story whose content moved elsewhere can now stay as a tombstone: empty, pointing to where its content went. Old plans that name it keep working, and its number is never handed out again. If git cannot run on a machine, the checks now fail instead of quietly passing. The tool that records a review no longer writes approvals the check would reject later. A fresh branch no longer compares itself with an out-of-date copy of the main line, attest understands more of how plans and tests are actually written, and a minor old finding may stay a named leftover instead of becoming an issue.
+
 ## v2.98.0 — The train loses no hours to foreign causes
 
 A full disk on the machine that runs the merge train no longer makes the train blame and drop an innocent piece of work after hours of searching; it stops at once and says the disk is full. The train's planning step no longer slows down with every old branch lying around, and a commit that only mentions another issue now gets a clear message saying how to fix it.

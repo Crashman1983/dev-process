@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.99.0 — Eine stillgelegte Story behält ihre ID; kein grünes Gate ohne git; eine Regel für Freigaben
+
+Eine Story, deren Inhalt anderswo hin gewandert ist, kann jetzt als Grabstein liegen bleiben: leer, mit einem Verweis, wohin der Inhalt ging. Alte Pläne, die sie nennen, funktionieren weiter, und ihre Nummer wird nie wieder vergeben. Kann git auf einem Rechner nicht laufen, scheitern die Prüfungen jetzt, statt still durchzugehen. Das Werkzeug, das ein Review festhält, schreibt keine Freigaben mehr, die die Prüfung danach ablehnt. Ein frischer Branch vergleicht sich nicht mehr mit einer veralteten Kopie der Hauptlinie, attest versteht mehr davon, wie Pläne und Tests tatsächlich geschrieben werden, und ein kleiner Altbefund darf ein benannter Rest bleiben, statt ein Issue zu werden.
+
 ## v2.98.0 — Der Zug verliert keine Stunden mehr an fremde Gründe
 
 Eine volle Platte auf der Maschine, die den Merge-Zug fährt, führt nicht mehr dazu, dass der Zug nach stundenlanger Suche eine unschuldige Arbeit beschuldigt und absetzt; er hält sofort an und sagt, dass die Platte voll ist. Der Planungsschritt des Zugs wird nicht mehr mit jedem alten Branch langsamer, und ein Commit, der ein anderes Issue nur erwähnt, bekommt eine klare Meldung, wie es zu beheben ist.
