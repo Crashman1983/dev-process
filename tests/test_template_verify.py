@@ -612,9 +612,14 @@ def test_a_forged_primary_ref_at_the_tip_does_not_switch_the_base_off(tmp_path, 
     tip = commit(root)
     git(root, 'update-ref', 'refs/remotes/origin/main', tip)
     review = load('check_review')
+    # #429 (D1): off the merge push an origin/main at the tip is read as integrated —
+    # locally it cannot be told from a merged branch; the merge push keeps the local main
+    monkeypatch.delenv('PROCESS_PUSH_TARGETS', raising=False)
+    monkeypatch.delenv('PRE_COMMIT_REMOTE_BRANCH', raising=False)
+    assert review.merge_base(root) is None
+    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
     assert review.merge_base(root) == fork and review.integration_ref(root) == 'main'
     calls = recording(review, monkeypatch)
-    monkeypatch.setenv('PROCESS_PUSH_TARGETS', 'refs/heads/main')
     review.check(root)
     assert calls and calls[0][1] == 'main', calls  # the template arm ran
 

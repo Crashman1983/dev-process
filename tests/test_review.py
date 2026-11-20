@@ -1467,6 +1467,98 @@ def test_a_stale_local_main_behind_an_integrated_tip_reopens_nothing(tmp_path, m
     hard, soft = _merge_check(cr, root, monkeypatch)
     assert not any("fork point" in h for h in hard), hard
     assert not any("legacy full-round" in s for s in soft), soft
+    # #429 AC-3 (D1): on the merge push the lagging local main still decides, as before
+    # (the green above is `_integration_bounds`' doing, #431)
+    assert cr._integration_base(root, "HEAD") == ("main", fork)
+
+
+def test_a_stale_local_main_behind_an_integrated_tip_is_no_base_off_the_merge_push(tmp_path, monkeypatch):
+    """#429: the twin of the test above without PROCESS_PUSH_TARGETS — the tip is on
+    origin/main, and the local main that only lags behind it bounds nothing."""
+    cr, root = _cr(), tmp_path / "p"
+    _fork_repo(root)
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    monkeypatch.delenv("PROCESS_PUSH_TARGETS", raising=False)
+    monkeypatch.delenv("PRE_COMMIT_REMOTE_BRANCH", raising=False)
+    assert cr._integration_base(root, "HEAD") is None
+
+
+def _integrated_tip(root, monkeypatch, targets):
+    """Kenni #3042: a branch without a commit of its own, its tip ON origin/main, the
+    local main behind — (fork, head)."""
+    fork, _first, head = _fork_repo(root)
+    _git(root, "update-ref", "refs/remotes/origin/main", head)
+    monkeypatch.delenv("PRE_COMMIT_REMOTE_BRANCH", raising=False)
+    if targets:
+        monkeypatch.setenv("PROCESS_PUSH_TARGETS", targets)
+    else:
+        monkeypatch.delenv("PROCESS_PUSH_TARGETS", raising=False)
+    return fork, head
+
+
+@pytest.mark.parametrize("targets", [None, "refs/heads/feature", "refs/heads/main"])
+def test_a_tip_on_origin_main_takes_no_base_from_a_lagging_local_main(tmp_path, monkeypatch, targets):
+    """#429 AC-1/AC-3: every run but the merge push skips the lagging local main, in
+    both owners of the choice; the merge push keeps it word for word."""
+    cr, root = _cr(), tmp_path / "p"
+    fork, _head = _integrated_tip(root, monkeypatch, targets)
+    merge = targets == "refs/heads/main"
+    assert cr._integration_base(root, "HEAD") == (("main", fork) if merge else None)
+    assert cr.merge_base(root) == (fork if merge else None)
+    assert cr._integration_ref(root) == ("main" if merge else None)
+
+
+def test_a_non_primary_remote_behind_an_integrated_tip_is_skipped(tmp_path, monkeypatch):
+    cr, root = _cr(), tmp_path / "p"
+    fork, _head = _integrated_tip(root, monkeypatch, "refs/heads/feature")
+    _git(root, "update-ref", "refs/remotes/upstream/main", fork)
+    assert cr._integration_base(root, "HEAD") is None
+    monkeypatch.setenv("PROCESS_PUSH_TARGETS", "refs/heads/main")
+    assert cr._integration_base(root, "HEAD") == ("upstream/main", fork)
+
+
+def test_a_local_main_off_an_integrated_tip_still_decides(tmp_path, monkeypatch):
+    """Only a ref that merely lags is skipped: a local main with a commit of its own
+    (diverged from origin/main) still bounds the branch (Wächter)."""
+    cr, root = _cr(), tmp_path / "p"
+    fork, _head = _integrated_tip(root, monkeypatch, "refs/heads/feature")
+    _git(root, "checkout", "-q", "main")
+    _commit_file(root, "own.py", "own = 1\n")
+    _git(root, "checkout", "-q", "feature")
+    assert cr._integration_base(root, "HEAD") == ("main", fork)
+    assert cr._integration_ref(root) == "main"
+
+
+def test_a_forged_origin_main_at_the_tip_keeps_the_range_on_the_merge_push(tmp_path, monkeypatch):
+    """#429 AC-3: an origin/main forged onto the tip does not empty a merge push's range
+    — it starts at the local main, as before (Wächter)."""
+    cr, root = _cr(), tmp_path / "p"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@example.com")
+    _git(root, "config", "user.name", "Test")
+    fork = _commit_file(root, "README.md", "base\n")
+    _git(root, "checkout", "-q", "-b", "feature")
+    (root / "a.py").write_text("a = 1\n", encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "feat: a (#7)")
+    _git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
+    monkeypatch.setenv("PROCESS_PUSH_TARGETS", "refs/heads/main")
+    assert cr.merge_base(root) == fork
+    assert [c.number for c in cr.issue_claims_in_range(root)] == [7]
+
+
+def test_a_full_round_s_base_skips_no_lagging_ref(tmp_path, monkeypatch):
+    """#429 leaves the writer's question alone: an origin/main at the head does not make
+    a full round an audit with any base, on any run (refute 2, test_attest) — so
+    `_base_problem`'s memo needs no merge-push switch (Wächter)."""
+    cr, root = _cr(), tmp_path / "p"
+    _fork, first, head = _fork_repo(root)
+    _git(root, "update-ref", "refs/remotes/origin/main", head)
+    monkeypatch.delenv("PROCESS_PUSH_TARGETS", raising=False)
+    monkeypatch.delenv("PRE_COMMIT_REMOTE_BRANCH", raising=False)
+    assert cr._integration_base(root, head) is None  # the range: integrated
+    assert "is not the fork point" in cr.full_round_base_problem(root, first, head)
 
 
 @pytest.mark.parametrize("target,hard_side", [("refs/heads/main", True), ("refs/heads/7-x", False)])

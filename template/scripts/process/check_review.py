@@ -60,7 +60,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import NamedTuple
 from pathlib import Path
 
@@ -1113,7 +1113,8 @@ def _unmerged_history(root_s: str, tip_sha: str, merged: tuple[str, ...]) -> fro
 
 @functools.lru_cache(maxsize=1024)
 def _base_problem(root_s: str, base: str, head: str, merged: tuple[str, ...]) -> str | None:
-    """`full_round_base_problem`, once per (base, head) and integration state."""
+    """`full_round_base_problem`, once per (base, head) and integration state. No
+    merge-push switch in the key: that answer skips no lagging ref (#429)."""
     return full_round_base_problem(Path(root_s), base, head)
 
 
@@ -1529,6 +1530,55 @@ def integration_push(env: dict[str, str] | None = None, root: Path | None = None
                    f"the proof is due on the merge push")
 
 
+def _merge_push(root: Path) -> bool:
+    """Is this run the merge push (`integration_push` on the process environment)?"""
+    return integration_push(dict(os.environ), root)[0]
+
+
+def _holds_tip(root: Path, tip: str) -> Callable[[str], bool | None]:
+    """ref → does it contain `tip`? None when it resolves to no commit. Each ref is
+    asked once per base search; git that cannot run raises GitUnavailable."""
+    known: dict[str, bool | None] = {}
+
+    def holds(ref: str) -> bool | None:
+        if ref not in known:
+            if _git_base(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is None:
+                known[ref] = None
+            else:
+                known[ref] = _git_base(root, "merge-base", "--is-ancestor", tip, ref) is not None
+        return known[ref]
+    return holds
+
+
+def _lagging(root: Path, holding: Callable[[], list[str]]) -> Callable[..., bool]:
+    """The one rule of #429, for both owners of the base (`_integration_base`,
+    `_integration_ref`): does a ref only lag behind an integrated tip?
+
+    `holding()` names the remote integration refs that contain the tip. A local ref
+    lags when it is an ancestor of one of them with its own branch name (`main`
+    behind `origin/main`), a remote ref (`remote=True`, a non-primary remote) when it
+    is an ancestor of any of them. Such a ref bounds nothing: the tip is integrated,
+    and the stale ref would reopen main's history as the branch's range (Kenni #3042).
+    A ref ahead of the remote or diverged from it still decides — it may carry what
+    is not integrated (`forged-master`, `ff-main`).
+
+    Not on the merge push (D1): there the lagging local ref decides word for word as
+    before — pre_push always names its own target, so a merge push cannot pass as a
+    branch push, and a branch without a commit of its own has nothing to merge."""
+    merge: list[bool] = []
+
+    def lags(ref: str, *, remote: bool) -> bool:
+        ahead = [c for c in holding() if c != ref and (remote or c.split("/", 1)[-1] == ref)]
+        if not ahead:
+            return False
+        if not merge:
+            merge.append(_merge_push(root))
+        if merge[0]:
+            return False
+        return any(_git_base(root, "merge-base", "--is-ancestor", ref, c) is not None for c in ahead)
+    return lags
+
+
 def merge_base(root: Path, tip: str = "HEAD", *, strict: bool = False) -> str | None:
     """A proper integration ancestor of tip, resolved offline: the fork point's SHA.
 
@@ -1552,7 +1602,7 @@ def integration_ref(root: Path, tip: str = "HEAD") -> str | None:
     return found[0] if found else None
 
 
-def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
+def _integration_base(root: Path, tip: str, *, lagging: bool = True) -> tuple[str, str] | None:
     """(integration ref, fork point SHA) of tip — `process_git.fork_point`
     owns the fork. Every candidate is scanned in order (primary remotes,
     other remotes, local names); a ref that already contains tip is skipped,
@@ -1566,6 +1616,10 @@ def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     unique fork, or a ref containing tip (on main, a criss-crossed upstream
     must not red main) — and raises when nothing does.
 
+    A local ref or another remote that merely lags behind a remote ref
+    containing tip is skipped too (`_lagging`, #429), except on the merge push
+    and without `lagging` (`full_round_base_problem`).
+
     git that cannot run raises GitUnavailable (`repo_probe`, `_git_base`):
     a gate without git found no base and went green (#430)."""
     if not repo_probe(root):
@@ -1577,18 +1631,23 @@ def _integration_base(root: Path, tip: str) -> tuple[str, str] | None:
     listed = _git_base(root, "for-each-ref", "--format=%(refname:short)",
                        "refs/remotes/*/main", "refs/remotes/*/master")
     refs = integration_refs(root)
-    others = [r for r in (listed or b"").decode(errors="replace").split() if r not in refs]
+    others = sorted(r for r in (listed or b"").decode(errors="replace").split() if r not in refs)
     remote_names = set(_remote_defaults(root)) | {f"origin/{n}" for n in INTEGRATION_NAMES}
     remotes = [r for r in refs if r in remote_names]
     local = [r for r in refs if r not in remote_names]
+    holds = _holds_tip(root, tip_hex)
+    lags = _lagging(root, lambda: [r for r in [*remotes, *others] if holds(r)])
     contained = False
     ambiguous: GitReadError | None = None
-    for ref in [*remotes, *sorted(others), *local]:
-        if _git_base(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}") is None:
+    for ref in [*remotes, *others, *local]:
+        held = holds(ref)
+        if held is None:
             continue
-        if _git_base(root, "merge-base", "--is-ancestor", tip_hex, ref) is not None:
+        if held:
             contained = True  # integrated here: bounds nothing, decides nothing
             continue
+        if lagging and ref not in remotes and lags(ref, remote=ref in others):
+            continue  # only behind the integrated tip: it decides nothing either (#429)
         try:
             return ref, fork_point(root, ref, tip_hex)
         except NoForkPoint:
@@ -1639,9 +1698,15 @@ def full_round_base_problem(root: Path, base: str, head: str) -> str | None:
     the reason. A head no integration ref forks and one contains is an audit
     of a merged range: no fork bounds it, and any base stands (a forged ref
     at the head does not count while another ref still forks it). The gate
-    judges existing records through `invalid_full_rounds`."""
+    judges existing records through `invalid_full_rounds`.
+
+    The lagging rule of #429 does not apply here: it bounds a run's range, but a
+    full round's base is the writer's question, and an `origin/main` forged onto
+    the head must not turn the branch into an audit with any base (refute 2,
+    test_attest). On the gate side nothing changes: a head an integration ref
+    contains is outside the pushed range (`_integration_bounds`)."""
     try:
-        found = _integration_base(root, head)
+        found = _integration_base(root, head, lagging=False)
     except GitReadError as exc:
         return (f"a full round's base must be the one fork point of the head: {exc}")
     if found is None and any(
@@ -2160,18 +2225,23 @@ def _integration_ref(root: Path, tip: str = "HEAD") -> str | None:
     (a commit made on main by mistake, a `master` pointed at unreviewed work)
     is not integrated, and does not hide code (downstream refutation).
 
+    A local main that merely lags behind a remote ref containing HEAD is no
+    base either (`_lagging`, #429), except on the merge push.
+
     git that cannot run raises GitUnavailable (#430)."""
     if not repo_probe(root):
         return None
+    holds = _holds_tip(root, tip)
 
     def usable(ref: str) -> bool:
-        out = _git_base(root, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
-        return bool(out and out.strip()) and \
-            _git_base(root, "merge-base", "--is-ancestor", tip, ref) is None
+        return holds(ref) is False
     remote_names = set(_remote_defaults(root)) | {f"origin/{n}" for n in INTEGRATION_NAMES}
     refs = integration_refs(root)
+    lags = _lagging(root, lambda: [r for r in refs if r in remote_names and holds(r)])
     remote = next((r for r in refs if r in remote_names and usable(r)), None)
     for local in (r for r in refs if r not in remote_names and usable(r)):
+        if lags(local, remote=False):
+            continue
         if remote is None:
             return local
         if _git_base(root, "merge-base", "--is-ancestor", remote, local) is None:
