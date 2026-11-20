@@ -40,8 +40,9 @@ the threat question below is asked at Tier 3 only).
 touches (auth, persistence, a contract, a security surface — `risk-tiers.md`)
 and the guard that enforces it independently of this diff, with its place
 (`file:line`). When the changed code is the only place a boundary is
-enforced, the change is Tier 3. The one exception for a hardening behind an
-intact guard: `risk-tiers.md`, "Hardening behind an intact guard".
+enforced, the change is Tier 3, without exception. A hardening elsewhere,
+behind an intact guard, may be Tier 2: `risk-tiers.md`, "Hardening behind an
+intact guard".
 
 - Recompute the tier from the diff, not from the plan's claim. A tier that
   does not hold stops the review: the work is re-tiered and reviewed at the

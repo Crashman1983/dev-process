@@ -1363,7 +1363,7 @@ def test_the_hardening_exception_is_one_paragraph_with_its_limits(render, tmp_pa
         "the only check for even one path, the change is Tier 3",
         # (2) two tests
         "a unit test of the hardened check alone that is red against the previous version",
-        "the surviving guard blocks the attack without the hardening",
+        "the surviving guard blocks the attack without the hardening, on each path the consumer search names",
         # (3) at the owner
         "lands at the boundary's owner, not as an added wrapper", "the decision of mandatory rule 4",
         # the exclusions
@@ -1379,13 +1379,13 @@ def test_the_hardening_exception_is_one_paragraph_with_its_limits(render, tmp_pa
         assert phrase in para, phrase
     # the two tier checks keep their wording and point to the paragraph
     checklist = _flat(out / "docs/process/review-checklist.md")
-    assert ("When the changed code is the only place a boundary is enforced, the change is Tier 3. "
-            "The one exception for a hardening behind an intact guard: `risk-tiers.md`, "
-            "\"Hardening behind an intact guard\".") in checklist
+    assert ("When the changed code is the only place a boundary is enforced, the change is Tier 3, "
+            "without exception. A hardening elsewhere, behind an intact guard, may be Tier 2: "
+            "`risk-tiers.md`, \"Hardening behind an intact guard\".") in checklist
     refute = _flat(out / "docs/process/refute.md")
-    assert ("the changed code as its only enforcement is Tier 3. One exception for a hardening "
-            "behind an intact guard: docs/process/risk-tiers.md, \"Hardening behind an intact "
-            "guard\".") in refute
+    assert ("the changed code as its only enforcement is Tier 3. That holds without exception; "
+            "a hardening elsewhere, behind an intact guard, may be Tier 2: docs/process/risk-tiers.md, "
+            "\"Hardening behind an intact guard\".") in refute
 
 
 # --- v2.100 H2: four review rules — contract, terminal state, ideas, cause (#436) ---------
