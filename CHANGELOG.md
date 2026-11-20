@@ -10,6 +10,53 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.99.0 — A retired story keeps its id; no green gate without git; one rule for review passes · 2026-11-20
+
+**Why.**
+- Kenni could not dissolve duplicate stories. An empty story was refused, and a deleted one broke every plan that named it and freed its id for reuse (#428).
+- On a fresh branch whose tip equals `origin/main`, a lagging local `main` became the base, so changes already on main read as new (#429).
+- With `git` missing or timing out, the base search read "no fork point" and the base-scoped gates passed with a note (#430).
+- `attest.py` wrote Tier-2 passes the review gate then rejected, and the append-only journal had to be edited by hand (#418).
+- attest read registry shorthand as plan criteria and missed loop-generated test titles (#423). A pre-existing refute finding always had to become an issue (#421). The steward's start example lacked `--track` (#420).
+
+**What changes.**
+- [required] **No gate is green when git cannot run.** One probe (`process_git.repo_probe`, `git rev-parse --git-dir` under `LC_ALL=C`) runs at the gate runner's entry and before every base search. A directory without `.git` that git searched upward stays today's "no range" note. Anything else fails hard with `git cannot run (…)`: no git on `PATH`, a timeout, dubious ownership, a stale worktree `.git` file, a `GIT_DIR` that names nothing. The base search reads strictly. The registry gate, `--assign-ids`, `check_issues`, `dispatch`, the plan and UI gates and the review gate's history fail closed. `GitReadError` now lives in `process_git`; `check_review` re-exports it.
+- [required] **A story can retire as a tombstone.** A story with the field `retired_into` (the stories its content moved to, or `[]`) and `acceptance: []`, with every id it ever had under `retired`, is green. It counts as no missing coverage and its id stays known to the plan gate. It needs no tests, no status and no issue. Hard:
+  - an item left in `acceptance`, or no `acceptance` key;
+  - an empty `retired`, or `split_into` on a retired entry;
+  - tests on the tombstone;
+  - a `retired_into` naming an unknown story or itself, or closing a cycle. Chains are allowed.
+
+  With `stable_ids`, a tombstone of the base that disappears is hard (paired by id). A ref to a tombstone's item is a note naming its successors, and hard when there are none.
+- [required] **attest refuses a pass the gate would reject.** `check_review.independence_problems` is the one owner of the pass arithmetic: Tier 2+ needs `non-implementing` and `bundle`, Tier 3 `cross-model` or `single-family`. `attest.py` checks it before writing anything.
+- [recommended] **A lagging local main no longer decides the base.** When a remote ref contains the tip, a local ref of the same name (or another remote) that is only behind it is skipped. A tip on the integration branch then has no base, as it should. A merge push keeps today's rule word for word. The merge push judging its range from the server's `main` is #431.
+- [recommended] **attest reads registry shorthand and loop titles.**
+  - `, #AC5` and `/AC73` after a qualified `SID#ACn` are registry refs.
+  - A bare `AC<n>` that the registry resolves to an item of a story the plan names makes attest refuse with "qualify `AC<n>` as `<SID>#AC<n>` (line N)" instead of demanding a report line. A plan's own declared `AC<n>` stays its criterion.
+  - Template-literal test titles with `${…}` match like `.each` titles, and ``path::`Title` `` names a test.
+- [optional] **A pre-existing finding below the threshold stays a residual.** `refute.md` owns the rule. A pre-existing finding becomes an issue when it breaks an AC or DoD of merged work, is a correctness or security defect on main, or the owner decides so. Otherwise it is named as `residual <label>: <reason>` in the REFUTE line's summary (with github-issues: `FINDING … action=accept`).
+- [recommended] **`process_git.git_ignored`** is the public owner of "does git ignore it" (`None`: git cannot tell). `check_issues._git_ignored` stays as a wrapper with its old signature.
+- [optional] **The steward's start example shows `[--track <name>]`**, required on a first start once `steering.tracks` is set. A docs test pins every start example.
+
+**Effect.**
+- A project can merge and dissolve stories without breaking plans or freeing ids.
+- A broken git can no longer turn the gates green.
+- attest writes only what the gate accepts, and its refusals say what to qualify.
+
+**Changed sections.**
+- `refute.md` (What happens with the findings)
+- `tower.md` (Dispatch and the model policy)
+- `verification-independence.md` (The review bundle — the portable interface to any reviewer)
+- `modules/feature-registry.md` (Stable ids; Hard vs. best-effort (no false-green); new: Retiring a story)
+- `.claude/commands/steward.md` (Loop)
+
+**Update.**
+- Pure update. One new story field, `retired_into`; no new configuration key.
+- A clone with dubious ownership, a stale worktree `.git` file or a dangling `GIT_DIR` now fails the gates instead of passing them: fix the clone (`git config --global --add safe.directory <path>`).
+- A script that imports `check_issues._git_ignored` keeps working; switch it to `process_git.git_ignored`.
+
+Details: [Plan](docs/analysis/2026-11-20-v2.99.md) #418 #420 #421 #423 #428 #429 #430; follow-up #431
+
 ## v2.98.0 — The train loses no hours to foreign causes · 2026-11-16
 
 **Why.**

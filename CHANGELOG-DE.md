@@ -9,6 +9,53 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.99.0 — Eine stillgelegte Story behält ihre ID; kein grünes Gate ohne git; eine Regel für Freigaben · 2026-11-20
+
+**Warum.**
+- Kenni konnte doppelte Stories nicht auflösen. Eine leere Story wurde abgelehnt, und eine gelöschte brach jeden Plan, der sie nannte, und gab ihre ID zur Wiederverwendung frei (#428).
+- Auf einem frischen Branch, dessen Spitze `origin/main` gleicht, wurde ein hinterherhinkendes lokales `main` zur Basis, und Änderungen, die längst auf main waren, galten als neu (#429).
+- Fehlte `git` oder lief es in eine Zeitüberschreitung, las die Basis-Suche „kein Abzweigpunkt“, und die basisbezogenen Gates gingen mit einem Hinweis durch (#430).
+- `attest.py` schrieb Tier-2-Freigaben, die das Review-Gate danach ablehnte. Das Journal, an das nur angehängt wird, musste dann von Hand repariert werden (#418).
+- attest las Registry-Kurzverweise als Plan-Kriterien und fand Testtitel aus Schleifen nicht (#423). Ein Altbefund aus dem Refute musste immer ein Issue werden (#421). Dem Start-Beispiel des Stewards fehlte `--track` (#420).
+
+**Was sich ändert.**
+- [required] **Kein Gate ist grün, wenn git nicht laufen kann.** Eine Probe (`process_git.repo_probe`, `git rev-parse --git-dir` unter `LC_ALL=C`) läuft am Eingang des Gate-Runners und vor jeder Basis-Suche. Ein Verzeichnis ohne `.git`, in dem git nach oben gesucht hat, bleibt beim heutigen Hinweis „kein Bereich“. Alles andere scheitert hart mit `git cannot run (…)`: kein git im `PATH`, eine Zeitüberschreitung, „dubious ownership“, eine veraltete `.git`-Datei eines Worktrees, ein `GIT_DIR`, das nichts nennt. Die Basis-Suche liest streng. Registry-Gate, `--assign-ids`, `check_issues`, `dispatch`, Plan- und UI-Gate und die Historie des Review-Gates gehen fail-closed. `GitReadError` liegt jetzt in `process_git`; `check_review` exportiert ihn weiter.
+- [required] **Eine Story kann als Grabstein stillgelegt werden.** Eine Story mit dem Feld `retired_into` (die Stories, in die ihr Inhalt wanderte, oder `[]`) und `acceptance: []`, mit jeder je vergebenen ID unter `retired`, ist grün. Sie zählt nicht als fehlende Abdeckung, und ihre ID bleibt dem Plan-Gate bekannt. Sie braucht keine Tests, keinen Status und kein Issue. Hart:
+  - ein Item, das in `acceptance` übrig ist, oder ein fehlender `acceptance`-Schlüssel;
+  - ein leeres `retired` oder `split_into` an einem retired Eintrag;
+  - Tests am Grabstein;
+  - ein `retired_into`, das eine unbekannte Story oder sich selbst nennt oder einen Zyklus schließt. Ketten sind erlaubt.
+
+  Mit `stable_ids` ist ein Grabstein der Basis, der verschwindet, hart (gepaart nach ID). Ein Verweis auf ein Item eines Grabsteins ist ein Hinweis, der die Nachfolger nennt; ohne Nachfolger ist er hart.
+- [required] **attest verweigert eine Freigabe, die das Gate ablehnen würde.** `check_review.independence_problems` ist der eine Eigentümer der Freigabe-Arithmetik: Tier 2+ braucht `non-implementing` und `bundle`, Tier 3 `cross-model` oder `single-family`. `attest.py` prüft sie, bevor es etwas schreibt.
+- [recommended] **Ein hinterherhinkendes lokales main entscheidet die Basis nicht mehr.** Enthält ein Remote-Ref die Spitze, wird ein lokaler Ref desselben Namens (oder ein anderes Remote), der nur dahinter liegt, übersprungen. Eine Spitze auf dem Integrationszweig hat dann, wie es sein soll, keine Basis. Ein Merge-Push behält die heutige Regel Wort für Wort. Dass der Merge-Push seinen Bereich vom `main` des Servers nimmt, ist #431.
+- [recommended] **attest liest Registry-Kurzverweise und Schleifen-Titel.**
+  - `, #AC5` und `/AC73` nach einem qualifizierten `SID#ACn` sind Registry-Verweise.
+  - Ein loses `AC<n>`, das die Registry einem Item einer im Plan genannten Story zuordnet, lässt attest verweigern: „qualify `AC<n>` as `<SID>#AC<n>` (line N)“ statt einer verlangten Report-Zeile. Ein vom Plan selbst deklariertes `AC<n>` bleibt sein Kriterium.
+  - Testtitel aus Template-Literalen mit `${…}` passen wie `.each`-Titel, und ``path::`Titel` `` nennt einen Test.
+- [optional] **Ein Altbefund unter der Schwelle bleibt ein Rest.** `refute.md` ist der Eigentümer der Regel. Ein Altbefund wird ein Issue, wenn er ein AC oder DoD gemergter Arbeit bricht, ein Korrektheits- oder Sicherheitsfehler auf main ist oder der Owner es entscheidet. Sonst wird er in der Zusammenfassung der REFUTE-Zeile als `residual <label>: <grund>` benannt (mit github-issues: `FINDING … action=accept`).
+- [recommended] **`process_git.git_ignored`** ist der öffentliche Eigentümer von „ignoriert git es?“ (`None`: git kann es nicht sagen). `check_issues._git_ignored` bleibt als Hülle mit der alten Signatur.
+- [optional] **Das Start-Beispiel des Stewards zeigt `[--track <name>]`**, Pflicht beim ersten Start, sobald `steering.tracks` gesetzt ist. Ein Doku-Test pinnt jedes Start-Beispiel.
+
+**Wirkung.**
+- Ein Projekt kann Stories zusammenlegen und auflösen, ohne Pläne zu brechen oder IDs freizugeben.
+- Ein kaputtes git macht die Gates nicht mehr grün.
+- attest schreibt nur, was das Gate annimmt, und seine Verweigerungen sagen, was zu qualifizieren ist.
+
+**Geänderte Abschnitte.**
+- `refute.md` (What happens with the findings)
+- `tower.md` (Dispatch and the model policy)
+- `verification-independence.md` (The review bundle — the portable interface to any reviewer)
+- `modules/feature-registry.md` (Stable ids; Hard vs. best-effort (no false-green); neu: Retiring a story)
+- `.claude/commands/steward.md` (Loop)
+
+**Update.**
+- Reines Update. Ein neues Story-Feld, `retired_into`; kein neuer Konfigurationsschlüssel.
+- Ein Klon mit „dubious ownership“, einer veralteten `.git`-Datei eines Worktrees oder einem ins Leere zeigenden `GIT_DIR` lässt die Gates jetzt scheitern statt durchgehen: den Klon reparieren (`git config --global --add safe.directory <pfad>`).
+- Ein Skript, das `check_issues._git_ignored` importiert, läuft weiter; auf `process_git.git_ignored` umstellen.
+
+Details: [Plan](docs/analysis/2026-11-20-v2.99.md) #418 #420 #421 #423 #428 #429 #430; Folge-Issue #431
+
 ## v2.98.0 — Der Zug verliert keine Stunden mehr an fremde Gründe · 2026-11-16
 
 **Warum.**
