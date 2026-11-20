@@ -264,7 +264,9 @@ A follow-up from a finding, or a bug discovered while working on something
 else, is **normal work and gets the normal form** — filed through the
 templates (`finding.md` / `bug.md`), with a user story
 where one applies and gradeable EARS acceptance criteria. A prose dump titled
-"fix stuff from review" is not a tracked follow-up.
+"fix stuff from review" is not a tracked follow-up. Follow-ups are grouped
+by cause, one issue per cause — `refute.md` ("What happens with the
+findings") owns that rule.
 
 Both templates carry an **Origin** section: the report or issue that surfaced
 the item (`Discovered during: #N`). When an origin issue exists, **comment on

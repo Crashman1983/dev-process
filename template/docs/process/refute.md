@@ -196,6 +196,12 @@ the report. A review report with the GitHub-issues module records the same
 residual as `FINDING … action=accept`; `action=follow-up` stays a finding
 that needs its issue.
 
+Follow-up issues are grouped by cause: one issue per cause, which it names
+once, listing every finding that cause explains — not one issue per finding.
+Several findings with one cause point at one missing owner (mandatory rule
+4); the `PATTERN` line already names it. Bundling the follow-ups of one work
+into a single issue is a separate proposal (#354).
+
 A second owner proven by a differential test blocks at every tier, unless the
 plan carries a `DECISION` naming why the rule has two owners — a deliberate
 copy across a boundary whose divergences are named and tested, a technical
