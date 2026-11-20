@@ -1290,3 +1290,32 @@ def test_refute_owns_when_a_pre_existing_finding_becomes_an_issue(render, tmp_pa
         sys.path.pop(0)
     rule = mod.BLOCK_RULE.split("never runs through the change is pre-existing", 1)[1][:200]
     assert "refute.md" in rule and "an issue, not a block" not in mod.BLOCK_RULE
+
+
+_START = re.compile(r"`([^`]*dispatch\.py start --issue[^`]*)`")
+
+
+def test_every_start_example_names_the_track(render, tmp_path):
+    """#420: with `steering.tracks` set, a first start without `--track` is refused, and the
+    steward's one runnable example had none. Every `dispatch.py start --issue` in the template's
+    commands and docs names it — a synopsis (`--phase a|b`) lists `[--track <name>]`, an example
+    names `--track`, and an optional one says when it is required. Wrapped lines are joined."""
+    out = render(tmp_path, {"project_name": "demo",
+                            "harnesses": {"claude": True, "copilot": True, "agents_md": True}})
+    docs = [p for p in out.rglob("*.md")
+            if p.relative_to(out).parts[0] in ("docs", ".claude", ".github") or p.name == "AGENTS.md"]
+    seen = {"synopsis": 0, "example": 0}
+    for path in docs:
+        text = " ".join(path.read_text().split())
+        for m in _START.finditer(text):
+            span, rel = m.group(1), path.relative_to(out).as_posix()
+            phase = span.split("--phase", 1)[1].split()[0] if "--phase" in span else ""
+            if "|" in phase:
+                seen["synopsis"] += 1
+                assert "[--track <name>]" in span, (rel, span)
+            else:
+                seen["example"] += 1
+                assert "--track" in span, (rel, span)
+            if "[--track" in span:  # optional: the text right after says when it is required
+                assert "steering.tracks" in text[m.end():m.end() + 160], (rel, span)
+    assert seen["synopsis"] >= 1 and seen["example"] >= 1, seen  # tower.md's synopsis, the steward's example
