@@ -2865,3 +2865,212 @@ def test_a_registry_item_ref_is_no_criterion_of_the_plan(ev_mod):
     for ref in ("US12#AC3", "nav-us-003#AC3", "STORY-0001#AC2,AC3", "STORY-0001#AC2, AC3"):
         assert req(f"issue: #7\nSiehe {ref}.\n- AC-1: When x, y shall z.\n", "") == {"1"}, ref
     assert req("issue: #7\nSee docs/x.md#AC4.\n", "") == {"4"}  # Wächter: a file anchor
+
+
+# --- #423: registry shorthand, loop titles, backticked titles (Kenni #2917, #2918) ---
+
+def test_423_shorthand_after_a_qualified_item_is_a_registry_ref(ev_mod):
+    """Kenni #2918: `` `NAV-US-001#AC4`, `#AC5` `` and `NAV-US-001#AC41/AC73` made AC5 and AC73
+    criteria of the work. A free-standing `#AC4` may be a Markdown anchor: it stays."""
+    mod, _out = ev_mod
+    req = mod.required_criteria
+    own = "\n- AC-1: When x, y shall z.\n"
+    for prose in ("Der Fokus bleibt (`NAV-US-001#AC4`, `#AC5`).",
+                  "Siehe NAV-US-001#AC4, #AC5.",
+                  "Die Leiste (NAV-US-001#AC41/AC73) bleibt.",
+                  "Siehe `NAV-US-001#AC41`/AC73 und NAV-US-001#AC2, AC3."):
+        assert req(f"issue: #7\n{prose}{own}", "") == {"1"}, prose
+    # a free-standing `#AC4` is read as before
+    assert req(f"issue: #7\nSiehe `#AC4`.{own}", "") == {"1", "4"}
+    # a slash after a file anchor is no continuation of a story ref
+    assert req(f"issue: #7\nSee docs/x.md#AC4/AC5.{own}", "") == {"1", "4", "5"}
+
+
+KENNI_2917 = """issue: #2917
+
+## Kontext
+
+Die Serifen-Titel gehören zu DOC-US-003#AC159; der Editor ist
+nicht durch AC160 allein beschrieben, und die Leiste bleibt AC41/AC73.
+
+- AC-1: When a document opens, the title shall use the serif face.
+"""
+
+
+def test_423_a_bare_item_id_of_a_named_story_asks_to_be_qualified(ev_mod):
+    """Kenni #2917: "nicht durch AC160 allein beschrieben" and "AC41/AC73" demanded report lines
+    for criteria the issue does not have. Read against the registry, such an id is an item of
+    a story the plan names: attest asks to qualify it, naming the line, and no longer asks for a
+    report line."""
+    mod, _out = ev_mod
+    items = {"DOC-US-003": {"AC41", "AC159", "AC160"}, "NAV-US-001": {"AC73"}}
+    got = mod.unqualified_items(KENNI_2917, "", items)
+    assert [(u.key, u.line, u.where, u.stories) for u in got] == [
+        ("160", 6, "plan", ("DOC-US-003",)), ("41", 6, "plan", ("DOC-US-003",))]
+    # AC73 belongs to a story the plan does not name: it stays a criterion, as before
+    assert mod.required_criteria(KENNI_2917, "", items) == {"1", "73"}
+    # without a registry, or without an item of a named story: unchanged
+    assert mod.unqualified_items(KENNI_2917, "", None) == []
+    assert mod.required_criteria(KENNI_2917, "") == {"1", "41", "73", "160"}
+    assert mod.unqualified_items(KENNI_2917, "", {"DOC-US-003": {"AC159"}}) == []
+    # a plan that declares the id itself binds the mention to its own criterion (r3 M4)
+    own = KENNI_2917 + "- AC-160: When the editor closes, it shall save.\n"
+    assert mod.unqualified_items(own, "", items) == [u for u in got if u.key == "41"]
+    assert "160" in mod.required_criteria(own, "", items)
+    # a declaration line `- AC19: …` is never resolved away (r2 B1)
+    decl = "issue: #7\nSiehe NAV-US-003#AC18.\n\n- AC19: When x, y shall z.\n"
+    assert mod.unqualified_items(decl, "", {"NAV-US-003": {"AC19"}}) == []
+    assert mod.required_criteria(decl, "", {"NAV-US-003": {"AC19"}}) == {"19"}
+    # the spec: its declaration counts, its bare mention asks too, with the spec's line
+    assert mod.unqualified_items("issue: #7\n", "- AC19: When x, y shall z.\nSee NAV-US-003#AC19.\n",
+                                 {"NAV-US-003": {"AC19"}}) == []
+    spec = [(u.key, u.line, u.where) for u in mod.unqualified_items(
+        "issue: #7\nSee NAV-US-003#AC18.\n- AC-1: When x, y shall z.\n", "# Spec\n\nAC19 too.\n",
+        {"NAV-US-003": {"AC18", "AC19"}})]
+    assert spec == [("19", 3, "spec")]
+
+
+def test_423_the_refusal_names_the_files_own_line(ev_mod):
+    """The criteria are read from `readable(plan)` — fences and HTML comments dropped; the
+    refusal names the line in the file."""
+    mod, _out = ev_mod
+    text = "issue: #7\n```\nAC19 quoted\n```\n<!--\nhidden\n-->\nSiehe NAV-US-003#AC18.\nAC19 hier.\n"
+    got = mod.unqualified_items(mod.readable(text), "", {"NAV-US-003": {"AC19"}})
+    assert [u.key for u in got] == ["19"] and mod._source_line(text, got[0].line) == 9
+
+
+def test_423_a_story_resolves_its_items_and_its_retired_ids(ev_mod):
+    mod, _out = ev_mod
+    from types import SimpleNamespace
+    stories = [SimpleNamespace(data={"id": "DOC-US-003", "acceptance": [{"id": "AC159", "text": "a"}],
+                                     "retired": [{"id": "AC160"}]}),
+               SimpleNamespace(data=None), SimpleNamespace(data={"acceptance": []})]
+    assert mod.registry_items(stories) == {"DOC-US-003": {"AC159", "AC160"}}
+
+
+def test_423_the_registry_guard_twin_refuses_a_bare_item_with_its_line(ev_mod):
+    """Twin of the guard in `test_a_registry_item_ref_is_no_criterion_of_the_plan`: there, without a
+    registry, a bare AC19 beside `NAV-US-003#AC19` stays required (fail closed). With a registry
+    holding NAV-US-003's AC19 it is a mention to qualify — still fail closed, now with its line."""
+    mod, _out = ev_mod
+    plan = "issue: #7\n\nSiehe NAV-US-003#AC19.\n\n- AC-1: When x, y shall z.\n- AC-2: When a, b shall c.\n"
+    bare = plan + "AC19 matters here.\n"
+    items = {"NAV-US-003": {"AC19"}}
+    assert mod.required_criteria(bare, "") == {"1", "2", "19"}
+    assert [(u.key, u.line) for u in mod.unqualified_items(bare, "", items)] == [("19", 7)]
+    assert mod.required_criteria(bare, "", items) == {"1", "2"}
+    # an own AC-19 beside it: no refusal, the criterion stays
+    own = bare + "- AC-19: When p, q shall r.\n"
+    assert mod.unqualified_items(own, "", items) == []
+    assert mod.required_criteria(own, "", items) == {"1", "2", "19"}
+    ev = mod.Evidence(**{**OK_CODE, "plan_unqualified": (("19", "p.md", 7, ("NAV-US-003",)),)})
+    assert mod.decide(ev) == ["p.md: qualify `AC19` as `NAV-US-003#AC19` (line 7) — the feature "
+                              "registry holds AC19 in NAV-US-003, so a bare `AC19` is no criterion "
+                              "of the work; if it is the work's own, declare it (`- AC-19: …`)"]
+
+
+KENNI_THEMES = """import { test, expect } from "@playwright/test";
+
+const THEMES = ["light", "dark"] as const;
+
+for (const theme of THEMES) test(`Titel (${theme})`, async ({ page }) => {
+  await expect(page.locator("h1")).toBeVisible();
+});
+"""
+
+
+@pytest.mark.parametrize("text,name,expected", [
+    (KENNI_THEMES, "Titel (dark)", None),
+    (KENNI_THEMES, "Titel ()", "declares no test"),
+    (KENNI_THEMES, "Titel (dark) extra", "declares no test"),
+    (KENNI_THEMES.replace("test(`", "test.skip(`"), "Titel (dark)", "skip"),
+    # only `${…}` is a placeholder outside `.each`: `%d`/`%s` stay literal
+    ("test(`count %d of ${n}`, () => {})\n", "count %d of 2", None),
+    ("test(`count %d of ${n}`, () => {})\n", "count 1 of 2", "declares no test"),
+    ("test(`row %s`, () => {})\n", "row a", "declares no test"),
+    # a quoted string's `${…}` is literal text, not a placeholder
+    ('test("Titel (${theme})", () => {})\n', "Titel (dark)", "declares no test"),
+    ('test("Titel (${theme})", () => {})\n', "Titel (${theme})", None),
+], ids=["loop", "empty piece", "substring", "skipped loop", "%d literal", "%d no placeholder",
+        "%s no placeholder", "quoted ${}", "quoted ${} literal"])
+def test_423_a_template_literal_title_matches_like_an_each_title(ev_mod, text, name, expected):
+    """Kenni #2917: `for (const theme of THEMES) test(`Titel (${theme})`, …)` was "declares no test"."""
+    mod, _out = ev_mod
+    got = mod._other_status(text, "e2e/theme.spec.ts", name, mod.DEFAULTS)
+    assert (got is None) if expected is None else (got and expected in got), got
+
+
+def test_423_a_backticked_title_names_a_test(ev_mod):
+    """Kenni #2917: ``AC-2: path::`Titel` `` was "names no `<path>::<test>`"; a title's own
+    parentheses are its own, and an `unproven` inside it is no verdict."""
+    mod, _out = ev_mod
+    assert mod.claimed_tests("e2e/theme.spec.ts::`Titel`") == [("e2e/theme.spec.ts", "Titel")]
+    assert mod.claimed_tests("e2e/theme.spec.ts::`Titel (dark)` (beide Themes)") == [
+        ("e2e/theme.spec.ts", "Titel (dark)")]
+    assert mod.claimed_tests("e2e/a.spec.ts::`x, y`, e2e/b.spec.ts::`z`") == [
+        ("e2e/a.spec.ts", "x, y"), ("e2e/b.spec.ts", "z")]
+    assert mod.claimed_tests("`tests/a.py::test_x`") == [("tests/a.py", "test_x")]
+    key = ("e2e/a.spec.ts", "marks unproven rows")
+    ev = mod.Evidence(**{**OK_CODE, "claims": {"1": ["e2e/a.spec.ts::`marks unproven rows`"]},
+                         "test_status": {key: None}})
+    assert mod.decide(ev) == []
+
+
+def test_423_the_two_item_patterns_have_their_own_names(ev_mod):
+    """`_ITEM` named both the registry item id and a report's test reference."""
+    mod, _out = ev_mod
+    src = Path(mod.__file__).read_text(encoding="utf-8")
+    assert src.count("\n_ITEM = ") == 1 and isinstance(mod._ITEM, type(mod._ITEM_ANY))
+
+
+def _work_repo(render, path, *, registry: bool, plan: str):
+    out = render(path, {"project_name": "d", "modules": {"feature_registry": registry}})
+    _git(out, "init", "-q", "-b", "main")
+    _git(out, "config", "user.email", "t@t")
+    _git(out, "config", "user.name", "t")
+    _git(out, "config", "commit.gpgsign", "false")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "base")
+    _git(out, "checkout", "-q", "-b", "7-widget")
+    reg = out / "docs/process/feature-registry"
+    reg.mkdir(parents=True, exist_ok=True)
+    (reg / "NAV-US-003.json").write_text(json.dumps(
+        {"id": "NAV-US-003", "title": "t", "story": "s",
+         "acceptance": [{"id": "AC18", "text": "a"}, {"id": "AC19", "text": "b"}],
+         "tests": ["tests/test_widget.py::test_widget"]}) + "\n")
+    (out / ".process-work/plans").mkdir(parents=True, exist_ok=True)
+    (out / ".process-work/plans/2026-10-14-widget.md").write_text(plan)
+    (out / "widget.py").write_text("def widget():\n    return 42\n")
+    (out / "tests").mkdir(exist_ok=True)
+    (out / "tests/test_widget.py").write_text(TEST)
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "feat: widget")
+    return out
+
+
+def test_423_attest_refuses_a_bare_item_of_a_named_story_end_to_end(render, tmp_path):
+    """The twin through attest.py: the registry at E holds NAV-US-003's AC19; the plan names
+    the story and writes a bare AC19 — attest asks to qualify it (line 13 of the plan), not
+    for a report line. Without the module the old refusal stands."""
+    plan = PLAN + "\nSiehe NAV-US-003#AC18.\n\nAC19 bleibt.\n"
+    on = _work_repo(render, tmp_path / "on", registry=True, plan=plan)
+    off = _work_repo(render, tmp_path / "off", registry=False, plan=plan)
+    r_on, r_off = _attest(on, "--with", _report(on)), _attest(off, "--with", _report(off))
+    assert r_on.returncode == 1, r_on.stderr
+    assert "qualify `AC19` as `NAV-US-003#AC19` (line 13)" in r_on.stderr, r_on.stderr
+    assert "AC-19 has no line" not in r_on.stderr
+    assert r_off.returncode == 1 and "AC-19 has no line in the report" in r_off.stderr, r_off.stderr
+    assert "qualify" not in r_off.stderr
+    # qualified, the pass goes through
+    (on / ".process-work/plans/2026-10-14-widget.md").write_text(plan.replace("AC19 bleibt", "NAV-US-003#AC19 bleibt"))
+    _git(on, "commit", "-qam", "docs: qualify")
+    assert _attest(on, "--with", _report(on)).returncode == 0
+
+
+def test_423_a_loop_title_proves_its_criterion_end_to_end(repo):
+    """Kenni #2917 through attest.py: the loop's title, named with backticks, proves AC-1."""
+    (repo / "tests/theme.spec.ts").write_text(KENNI_THEMES)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "test: themes")
+    r = _attest(repo, "--with", _report(repo, "- AC-1: tests/theme.spec.ts::`Titel (dark)`\n"))
+    assert r.returncode == 0, r.stderr

@@ -72,6 +72,7 @@ from check_review import (  # noqa: E402  (sibling import; the guard above keeps
     GitReadError,
     _plan_work_ids,
     _unfenced,
+    fenced_lines,
     integration_refs,
     is_gate_path,
     merge_base,
@@ -184,6 +185,9 @@ class Evidence:
     plan_acs: frozenset = frozenset()
     plan_struck: frozenset = frozenset()  # struck with a reason: the report confirms each
     plan_foreign: frozenset = frozenset()  # named only beside another issue: not required (#287)
+    # a bare `AC<n>` the registry resolves to an item of a named story (#423): (id, file,
+    # line, stories) — refused until qualified, never demanded as a report line
+    plan_unqualified: tuple = ()
     plan_session: str | None = None  # None: no source names it
     plan_session_source: str = "none"  # report | plan-line | none
     has_reports: bool = False
@@ -1181,13 +1185,14 @@ def foreign_criteria(plan: str, spec: str) -> frozenset[str]:
     return _criteria(plan, spec)[2]
 
 
-def required_criteria(plan: str, spec: str) -> frozenset[str]:
+def required_criteria(plan: str, spec: str, items: dict[str, set[str]] | None = None) -> frozenset[str]:
     """The criteria a code-review pass traces: every id the plan or its spec names,
     less those a `DoD-deviation: open` keeps open and those struck with a reason.
     A plan strikes only its own criteria: one the spec still names stays required
     unless the spec strikes it (#234 plan review: a plan line must not quietly drop
-    a spec criterion)."""
-    return _criteria(plan, spec)[0]
+    a spec criterion). With the registry's `items`, a bare item id of a named story is
+    no criterion but a mention to qualify (`unqualified_items`, #423)."""
+    return _criteria(plan, spec, items)[0]
 
 
 def struck_criteria(plan: str, spec: str) -> frozenset[str]:
@@ -1228,17 +1233,75 @@ _BARE_MENTION = re.compile(r"\b" + _AC + r"(?!\w)")
 # criterion of the work. The story id is read loosely — the registry's `id_pattern` is the
 # project's, and a plan is read without it: a token with a digit or a hyphen (`US12`,
 # `nav-us-003`), never after `/` or `.` — a URL anchor (`spec#AC4`, `x.md#AC4`) is no
-# story. A list `STORY-1#AC2,AC3` is one ref
-_ITEM = r"AC[1-9]\d*(?![\w-])"
-_REGISTRY_REF = re.compile(r"(?<![\w/.-])(?=[A-Za-z][\w-]*[\d-][\w-]*#)[A-Za-z][\w-]*#" + _ITEM
-                           + r"(?:[ \t]*,[ \t]*" + _ITEM + r")*")
+# story. A list `STORY-1#AC2,AC3` is one ref, and so is the shorthand that continues it
+# right after a qualified item (#423, Kenni #2918): `` `NAV-US-001#AC4`, `#AC5` ``,
+# `NAV-US-001#AC41/AC73`. A free-standing `#AC4` may be a Markdown anchor: it stays
+_REGISTRY_ITEM = r"AC[1-9]\d*(?![\w-])"
+_REGISTRY_REF = re.compile(r"(?<![\w/.-])(?=[A-Za-z][\w-]*[\d-][\w-]*#)[A-Za-z][\w-]*#" + _REGISTRY_ITEM
+                           + r"(?:`?(?:[ \t]*,[ \t]*`?#?|/`?)" + _REGISTRY_ITEM + r")*")
+# a bare item id in prose (`AC160`, `AC41/AC73`): no hyphen, no `#` in front — the form a
+# registry item has and a plan's own criterion (`AC-160`) does not (#423)
+_LOOSE_ITEM = re.compile(r"(?<![\w#-])AC(?P<id>[1-9]\d*)(?![\w-])(?!\.\d)")
 
 
 def _registry_refs_blanked(text: str) -> str:
     return _REGISTRY_REF.sub(lambda m: " " * len(m.group(0)), text)
 
 
-def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+class Unqualified(NamedTuple):
+    """A bare `AC<n>` the feature registry resolves to an item of a story the work names
+    (#423): `where` is "plan" or "spec", `line` its line in the text read, `stories` the
+    named stories holding `AC<n>` (as an item or a retired id)."""
+    key: str
+    line: int
+    where: str
+    stories: tuple[str, ...]
+
+
+def registry_items(stories: list) -> dict[str, set[str]]:
+    """{story id: its item ids and retired ids} of the registry's parsed stories
+    (`registry_config.Story`); a story without a string `id` is left out."""
+    from registry_config import item_ids  # noqa: PLC0415
+
+    out: dict[str, set[str]] = {}
+    for story in stories:
+        data = story.data
+        if isinstance(data, dict) and isinstance(data.get("id"), str):
+            active, retired = item_ids(data)
+            out.setdefault(data["id"], set()).update(active | retired)
+    return out
+
+
+def _registry_at(root: Path, rev: str | None) -> dict[str, set[str]] | None:
+    """The feature registry's items at `rev` (E: what the evidence reads), or None — the
+    module is off, or there is no registry there (`load_registry_at` says why; that is
+    the registry gate's to report, here it only means: nothing to resolve against)."""
+    import registry_config  # noqa: PLC0415
+
+    if not rev or not registry_config.module_active(root):
+        return None
+    reg, _notes = registry_config.load_registry_at(root, rev)
+    return None if reg is None else registry_items(reg.stories)
+
+
+def _unqualified(text: str, where: str, declared: set[str],
+                 items: dict[str, set[str]], named: list[str]) -> list[Unqualified]:
+    out: list[Unqualified] = []
+    for m in _LOOSE_ITEM.finditer(text):
+        key = m.group("id")
+        if key in declared:
+            continue
+        holders = tuple(s for s in named if f"AC{key}" in items[s])
+        if holders:
+            out.append(Unqualified(key, text.count("\n", 0, m.start()) + 1, where, holders))
+    return out
+
+
+def _criteria(plan: str, spec: str, items: dict[str, set[str]] | None = None
+              ) -> tuple[frozenset[str], frozenset[str], frozenset[str], list[Unqualified]]:
+    # the stories the work names, read before any blanking: a qualified ref names its story
+    named_stories = sorted(s for s in items or {} if re.search(
+        r"(?<![\w-])" + re.escape(s) + r"(?![\w-])", plan + "\n" + spec)) if items else []
     plan, spec = _EXAMPLE_SPAN.sub(" ", plan), _EXAMPLE_SPAN.sub(" ", spec)
     # a registry item ref is neither required nor reported as foreign: blanked first
     plan, spec = _registry_refs_blanked(plan), _registry_refs_blanked(spec)
@@ -1252,7 +1315,39 @@ def _criteria(plan: str, spec: str) -> tuple[frozenset[str], frozenset[str], fro
     foreign = cited - named  # a bare mention or the spec keeps an id the work's own
     open_ = held_open(plan)
     gone = (struck(spec) | (struck(plan) - in_spec)) - open_
-    return frozenset(named - open_ - gone), frozenset(gone & named), frozenset(foreign)
+    # #423: a bare `AC<n>` the registry resolves to an item of a named story is ambiguous —
+    # refused with its line (fail closed), not demanded as a report line. A declaration line
+    # (`AC_LINE`) is never resolved away, and an id the work declares itself binds every
+    # mention to its own criterion (#287; plan review r2 B1, r3 M4)
+    unqualified: list[Unqualified] = []
+    if named_stories:
+        declared = {ac_key(m) for m in AC_LINE.finditer(plan)} | {ac_key(m) for m in AC_LINE.finditer(spec)}
+        unqualified = (_unqualified(plan, "plan", declared, items, named_stories)
+                       + _unqualified(spec, "spec", declared, items, named_stories))
+    ambiguous = {u.key for u in unqualified}
+    return (frozenset(named - open_ - gone - ambiguous), frozenset(gone & named), frozenset(foreign),
+            unqualified)
+
+
+def _source_line(text: str, line: int) -> int:
+    """The line of `text` that line `line` of `readable(text)` is: the reader drops fences
+    and HTML comments, the refusal names the file's own line. Matched in order, line by line;
+    a line an inline comment changed keeps the reader's number."""
+    src = fenced_lines(text)[0]
+    at = 0
+    for n, shown in enumerate(readable(text).split("\n"), start=1):
+        k = next((k for k in range(at, len(src)) if src[k][1] == shown), None)
+        if n == line:
+            return line if k is None else src[k][0]
+        if k is not None:
+            at = k + 1
+    return line
+
+
+def unqualified_items(plan: str, spec: str, items: dict[str, set[str]] | None) -> list[Unqualified]:
+    """The bare `AC<n>` mentions of plan and spec that `items` (`registry_items`) resolves
+    to an item of a story the work names — each to be qualified as `<story>#AC<n>`."""
+    return _criteria(plan, spec, items)[3]
 
 
 def held_open(plan: str) -> set[str]:
@@ -1509,17 +1604,31 @@ _EACH_TITLE = re.compile(r"(?:[)`][ \t]*|^[ \t]*)\(\s*" + _LITERAL)
 _EACH_OPEN = re.compile(r"[)`]\(\s*$")
 
 
-def _titles(lines: list[str], code: list[int]) -> dict[int, list[str]]:
-    """Code line -> the titles it declares (`_TITLE`). A split call declares at the line of
-    its keyword, so `it.skip(` reads as skipped."""
-    out: dict[int, list[str]] = {}
+def _titles(lines: list[str], code: list[int]) -> dict[int, list[tuple[str, str]]]:
+    """Code line -> the titles it declares (`_TITLE`), each as (quote, title). A split call
+    declares at the line of its keyword, so `it.skip(` reads as skipped."""
+    out: dict[int, list[tuple[str, str]]] = {}
     for k, i in enumerate(code):
-        found = [m.group("title") for m in _TITLE.finditer(lines[i])]
+        found = [(m.group("q"), m.group("title")) for m in _TITLE.finditer(lines[i])]
         if _OPEN_CALL.search(lines[i]) and k + 1 < len(code) and (m := _LEADING.match(lines[code[k + 1]])):
-            found.append(m.group("title"))
+            found.append((m.group("q"), m.group("title")))
         if found:
             out[i] = found
     return out
+
+
+_TEMPLATE_PART = re.compile(r"\$\{[^}]*\}")
+
+
+def _title_matches(quote: str, title: str, name: str) -> bool:
+    """The title literal yields `name` whole: a quoted string as it stands; a template
+    literal (`` `Titel (${theme})` ``, a test declared in a loop — #423) with each `${…}`
+    covering a non-empty piece, like an `.each` title. Only `${…}` is a placeholder here:
+    `%d`/`%s` stand for nothing outside `.each`."""
+    if quote != "`" or not _TEMPLATE_PART.search(title):
+        return title == name
+    parts = _TEMPLATE_PART.split(title)
+    return re.fullmatch(".+".join(re.escape(p) for p in parts), name) is not None
 
 
 def _each_titles(lines: list[str], code: list[int], decls: list[int]) -> dict[int, list[str]]:
@@ -1565,16 +1674,18 @@ def _each_title_matches(template: str, name: str) -> bool:
     return re.fullmatch(pattern + re.escape(template[at:]), name) is not None
 
 
-def _declares_test(lines: list[str], i: int, name: str, titles: dict[int, list[str]],
+def _declares_test(lines: list[str], i: int, name: str, titles: dict[int, list[tuple[str, str]]],
                    each: dict[int, list[str]]) -> bool:
     """Line `i` declares the test `name` the way its runner collects tests: a title literal
-    directly after `it`/`test`/`specify`/`should` (`titles`: `_titles`), an
+    directly after `it`/`test`/`specify`/`should` (`titles`: `_titles`; a template
+    literal's `${…}` as in `_title_matches`), an
     `it.each`/`test.each` whose title template yields the name (`each`: `_each_titles`),
     `func test…`/`func Test…` (XCTest, Go), `fun`/`fn`/`def test…`, a Kotlin-style
     ``fun `name`(`` named `test…`, or any of these functions an `@Test`/`#[test]` attribute
     marks (on the line or right above)."""
     ln = lines[i]
-    if name in titles.get(i, ()) or any(_each_title_matches(t, name) for t in each.get(i, ())):
+    if any(_title_matches(q, t, name) for q, t in titles.get(i, ())) or any(
+            _each_title_matches(t, name) for t in each.get(i, ())):
         return True
     above = [lines[j] for j in range(i - 1, -1, -1) if lines[j].strip()][:3]
     marked = any(_TEST_ATTR.match(a) for a in (ln, *above))
@@ -1746,7 +1857,7 @@ def _layout_end(text: str, start: int) -> int | None:
 def _decl_col(ln: str, name: str) -> int:
     """Where on its line the test `name` is declared: its title's keyword, else the line's
     first test keyword."""
-    hit = next((m for m in _TITLE.finditer(ln) if m.group("title") == name), None)
+    hit = next((m for m in _TITLE.finditer(ln) if _title_matches(m.group("q"), m.group("title"), name)), None)
     hit = hit or _EACH.search(ln) or _DECLARING.search(ln) or _OPEN_CALL.search(ln)
     return hit.start() if hit else 0
 
@@ -1803,8 +1914,12 @@ def _other_status(text: str, file: str, name: str, rules: dict) -> str | None:
 
 
 # a named test anywhere in a line — what is left is the line's own words (`unproven`)
-_ITEM_ANY = re.compile(r"`[^`]*::[^`]*`|[\w./-]*::[\w:\[\].-]+")
-_ITEM = re.compile(r"^`?(?P<file>[\w./-]+\.\w+)?::(?P<name>[^`]+?)`?(?:[ \t]+\(.*\))?$")
+# (`path::test`, `` `path::test` ``, `` path::`a title` `` — #423)
+_ITEM_ANY = re.compile(r"[\w./-]*::`[^`]*`|`[^`]*::[^`]*`|[\w./-]*::[\w:\[\].-]+")
+# a title in backticks of its own (`` path::`Titel (dark)` ``) runs to its closing backtick:
+# its parentheses are the title's, not a trailing remark
+_ITEM = re.compile(r"^`?(?P<file>[\w./-]+\.\w+)?::(?:`(?P<quoted>[^`]+)`|(?P<name>[^`]+?)`?)"
+                   r"(?:[ \t]+\(.*\))?$")
 # a separator starts a new reference only where one follows (`<path.ext>::` or `::`): a
 # test title may hold commas and semicolons of its own (downstream #2607)
 _SPLIT = re.compile(r"[ \t]*[,;][ \t]*(?=`?(?:[\w./-]+\.\w+)?::)|[ \t]+(?:und|and)[ \t]+(?=`?[\w./-]*::)")
@@ -1823,7 +1938,8 @@ def attest_name(file: str, name: str) -> str:
 
 def claimed_tests(body: str) -> list[tuple[str, str]]:
     """(file, test) pairs an AC line names: `a.py::test_x`, `a.py::Cls::test_x`,
-    `a.spec.ts::shows the banner`; an item `::test_y` takes the file before it.
+    `a.spec.ts::shows the banner`, ``a.spec.ts::`Titel (dark)` ``; an item `::test_y`
+    takes the file before it.
     A parametrized id (`test_x[case]`) names its function (`attest_name`)."""
     out: list[tuple[str, str]] = []
     last = ""
@@ -1837,7 +1953,7 @@ def claimed_tests(body: str) -> list[tuple[str, str]]:
         if not file:
             continue
         last = file
-        name = attest_name(file, m.group("name").strip())
+        name = attest_name(file, (m.group("quoted") or m.group("name")).strip())
         out.append((file, name))
     return out
 
@@ -1887,8 +2003,12 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
     own = readable(plan_text) + ("\n" + readable(appended) if appended else "")
     plan_ids = _plan_work_ids(plan_stem(rel), _unfenced(plan_text), include_dedated=True) if rel else set()
     plan_read = readable(plan_text)
-    spec = (_show(root, head, rel.rsplit("/", 1)[0] + "/spec.md") or "") \
-        if record_kind(rel) == "spec-plan" else ""
+    spec_rel = rel.rsplit("/", 1)[0] + "/spec.md"
+    spec = (_show(root, head, spec_rel) or "") if record_kind(rel) == "spec-plan" else ""
+    # the criteria; on a code pass a bare item id is read against the registry at E (#423)
+    items = None if plan_review or not rel else _registry_at(
+        root, snapshot.E if snapshot is not None else head)
+    crit = _criteria(plan_read, readable(spec), items)
     # the review reports among the round's records, chosen lexically on the snapshot's paths
     # (a plan riding `--with` is no report; no resolve, the sweep of design §9), their text
     # the checked bytes — E's blobs — so the evidence and the commit read one snapshot (R4)
@@ -1941,9 +2061,10 @@ def gather(root: Path, *, work: str, ids: set[str], tier: int, verdict: str, ind
         class_test_open=_class_tests_open(root, head, rounds, mine, plan_ids, policy) if rounds else (),
         records=tuple(required_records.table(policy)),
         plan_state=state, plan_rel=rel, plan_gate_code=plan_names_gate_code(plan_read),
-        plan_acs=required_criteria(plan_read, readable(spec)),
-        plan_struck=struck_criteria(plan_read, readable(spec)),
-        plan_foreign=foreign_criteria(plan_read, readable(spec)),
+        plan_acs=crit[0], plan_struck=crit[1], plan_foreign=crit[2],
+        plan_unqualified=tuple(
+            (u.key, rel if u.where == "plan" else spec_rel,
+             _source_line(plan_text if u.where == "plan" else spec, u.line), u.stories) for u in crit[3]),
         plan_session=session, plan_session_source=source,
         has_reports=bool(reports), claims=claims, test_status=status,
         plan_text=plan_text, plan_ids=frozenset(plan_ids), skip_ids=frozenset(skip_ids),
@@ -2102,7 +2223,12 @@ def _decide_code(ev: Evidence) -> list[str]:
         if any(_NAMES_A_TEST.search(b) for b in bodies):
             out.append(f"AC-{n} is struck, yet its report line names a test — strike it "
                        f"(`AC-{n}: struck`) or prove it (unstrike it in the plan)")
-    if not ev.plan_acs and not ev.plan_struck:
+    for n, where, line, stories in ev.plan_unqualified:
+        qualified = " or ".join(f"`{s}#AC{n}`" for s in stories)
+        out.append(f"{where}: qualify `AC{n}` as {qualified} (line {line}) — the feature registry "
+                   f"holds AC{n} in {', '.join(stories)}, so a bare `AC{n}` is no criterion of the "
+                   f"work; if it is the work's own, declare it (`- AC-{n}: …`)")
+    if not ev.plan_acs and not ev.plan_struck and not ev.plan_unqualified:
         out.append(f"{ev.plan_rel} names no acceptance criterion (`AC-<id>`) — nothing to trace a "
                    f"test to; name them in the plan, or commit {_skip('ac-trace', ev)}")
     for n in sorted(ev.plan_acs):
