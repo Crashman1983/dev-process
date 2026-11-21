@@ -669,6 +669,220 @@ def test_target_without_issue_is_hard(render, tmp_path):
     assert r.returncode == 1 and "CLI-US-001#AC1: state 'target' needs an 'issue'" in r.stdout, r.stdout
 
 
+# --- #441: issues and implementations per surface, capability groups ---
+
+@pytest.mark.parametrize(("issue", "finding"), [
+    ({"ios": "#123", "android": "example/app#456"}, ""),
+    ("#123", ""),
+    ({"ios": "#123"}, "surface 'android' with state 'target' needs an 'issue' map entry"),
+    ({"ios": "#123", "android": "#456", "macos": "#789"}, "issue key 'macos' is outside"),
+    ({"ios": "#123", "android": "#456", "web": "#789"}, "issue key 'web' needs state 'target'"),
+    ({"ios": "#123", "android": [456]}, "issue.android: malformed issue ref"),
+])
+def test_item_issue_map(render, tmp_path, issue, finding):
+    out = _render(render, tmp_path)
+    _local(out, {"surfaces": ["web", "ios", "android"]})
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.",
+                             "state": {"ios": "target", "android": "target"}, "issue": issue}])
+    r = _gate(out)
+    assert r.returncode == bool(finding) and finding in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize(("state", "issue", "finding"), [
+    ("target", {"ios": "#123"}, ""),
+    ("proven", {}, ""),
+    ("target", {}, "surface 'ios' with state 'target' needs an 'issue' map entry"),
+    ("proven", {"ios": "#123"}, "issue key 'ios' needs state 'target'"),
+])
+def test_issue_map_on_a_single_named_surface(render, tmp_path, state, issue, finding):
+    out = _render(render, tmp_path)
+    _local(out, {"surfaces": ["web", "ios"]})
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.", "surfaces": ["ios"],
+                             "state": state, "issue": issue}])
+    r = _gate(out)
+    assert r.returncode == bool(finding) and finding in r.stdout, r.stdout + r.stderr
+
+
+def test_issue_map_needs_named_surfaces(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.", "state": "target", "issue": {}}])
+    r = _gate(out)
+    assert r.returncode == 1 and "an implicit surface takes a single issue ref" in r.stdout, r.stdout
+
+
+WEB_IMPL = "src/preferences.ts::savePreferences"
+IOS_IMPL = "src/Preferences.swift::save"
+
+
+@pytest.mark.parametrize(("impl", "finding"), [
+    ({"web": WEB_IMPL, "ios": IOS_IMPL}, ""),
+    ({"web": WEB_IMPL}, "surface 'ios' with state 'target' needs an 'impl' ref"),
+    ({"ios": IOS_IMPL}, "surface 'web' with state 'proven' needs an 'impl' ref"),
+    ({"web": WEB_IMPL, "ios": "src/gone.swift::save"}, "implementation file does not exist"),
+    ({"web": "src/preferences.ts::onlyCalled", "ios": IOS_IMPL}, "symbol 'onlyCalled' not declared"),
+    ({"web": "src/preferences.ts::onlyCommented", "ios": IOS_IMPL}, "symbol 'onlyCommented' not declared"),
+    ({"web": "tests/test_widget.py::test_widget", "ios": IOS_IMPL}, "implementation ref names a test file"),
+    ({"web": "src/PreferencesTests.swift::save", "ios": IOS_IMPL}, "implementation ref names a test file"),
+    ({"web": "src/preferences.ts", "ios": IOS_IMPL}, "must be 'path::symbol'"),
+    ({"web": WEB_IMPL, "ios": "src/Preferences.swift::PreferencesStore::save"}, "with one symbol"),
+    ({"web": "../preferences.ts::savePreferences", "ios": IOS_IMPL}, "must be inside the repository"),
+    ({"web": WEB_IMPL, "ios": IOS_IMPL, "backend": WEB_IMPL}, "impl key 'backend' is neither"),
+])
+def test_item_implementation_refs(render, tmp_path, impl, finding):
+    out = _render(render, tmp_path)
+    _local(out, {"surfaces": ["web", "ios", "android"], "shared_proof_layers": ["backend"],
+                 "implementation_refs": {"built_but_unproven_issues": ["example/app#123"]}})
+    (out / "src").mkdir()
+    (out / "src/preferences.ts").write_text(
+        "export const savePreferences = () => onlyCalled();\n/* function onlyCommented() {} */\n",
+        encoding="utf-8",
+    )
+    swift_source = "final class PreferencesStore {\n  public func save() {}\n}\n"
+    for name in ("Preferences.swift", "PreferencesTests.swift"):
+        (out / "src" / name).write_text(swift_source, encoding="utf-8")
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.",
+                             "state": {"ios": "target", "android": "target"},
+                             "issue": {"ios": "https://github.com/Example/App/issues/123", "android": "#456"},
+                             "impl": impl}])
+    r = _gate(out)
+    assert r.returncode == bool(finding) and finding in r.stdout, r.stdout + r.stderr
+
+
+def test_target_without_implementation_can_be_unbuilt(render, tmp_path):
+    out = _render(render, tmp_path)
+    _local(out, {"surfaces": ["web"], "implementation_refs": {"built_but_unproven_issues": ["#123"]}})
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.", "state": "target", "issue": "#456"}])
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize(("filename", "code", "symbol", "finding"), [
+    ("preferences.js", "class Preferences { save() {} }", "save", ""),
+    ("preferences.ts", "class Preferences { private async save(): Promise<void> {} }", "save", ""),
+    ("preferences.ts", "class Preferences { private async save() { onlyCalled(); } }", "onlyCalled",
+     "symbol 'onlyCalled' not declared"),
+    ("preferences.ts", "class Preferences { save() { if (ready) {} } }", "if",
+     "symbol 'if' not declared"),
+    ("preferences.ts", "export declare function save(): void;", "save", "symbol 'save' not declared"),
+    ("preferences.d.ts", "declare function save(): void;", "save", "must name a Python, Swift"),
+    ("preferences.d.mts", "declare function save(): void;", "save", "must name a Python, Swift"),
+    ("preferences.pyi", "def save(): ...", "save", "must name a Python, Swift"),
+    ("preferences.swiftinterface", "public func save()", "save", "must name a Python, Swift"),
+    ("preferences.json", '{"example": "function save() {}"}', "save", "must name a Python, Swift"),
+    ("preferences.md", "```ts\nfunction save() {}\n```", "save", "must name a Python, Swift"),
+    ("preferences.txt", "function save() {}", "save", "must name a Python, Swift"),
+    ("preferences.stories.tsx", "export function save() {}", "save", "names a test file"),
+])
+def test_implementation_symbol_source_forms(render, tmp_path, filename, code, symbol, finding):
+    out = _render(render, tmp_path)
+    _local(out, {"surfaces": ["web"], "implementation_refs": {}})
+    (out / filename).write_text(code, encoding="utf-8")
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.",
+                             "impl": {"web": f"{filename}::{symbol}"}}])
+    r = _gate(out)
+    assert r.returncode == bool(finding) and finding in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize(("refs", "finding"), [
+    (["service.py::ReminderService.reopen", "api.py::reopen_reminder"], ""),
+    (["service.py::ReminderService.reopen", "api.py::missing"], "symbol 'missing' not declared"),
+    (["service.py::ReminderService.close", "api.py::reopen_reminder"], "symbol 'ReminderService.close' not declared"),
+    (["service.py::ReminderService::reopen"], "with one symbol"),
+    ([], "must contain at least one implementation ref"),
+])
+def test_implementation_refs_resolve_python_class_members_in_a_list(render, tmp_path, refs, finding):
+    out = _render(render, tmp_path)
+    _local(out, {"surfaces": ["web"], "implementation_refs": {}})
+    (out / "service.py").write_text(
+        "class ReminderService:\n    async def reopen(self): pass\n"
+        "class OtherService:\n    async def close(self): pass\n",
+        encoding="utf-8",
+    )
+    (out / "api.py").write_text("def reopen_reminder(): pass\n", encoding="utf-8")
+    _entry(out, acceptance=[{"id": "AC1", "text": "A reminder can be reopened.", "impl": {"web": refs}}])
+    r = _gate(out)
+    assert r.returncode == bool(finding) and finding in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize(("target", "finding"), [
+    ("outside.py", "implementation path must be inside the repository"),
+    ("repo/tests/test_widget.py", "implementation ref names a test file"),
+])
+def test_implementation_ref_checks_the_resolved_path(render, tmp_path, target, finding):
+    out = _render(render, tmp_path / "repo")
+    _local(out, {"surfaces": ["web"], "implementation_refs": {}})
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.",
+                             "impl": {"web": "preferences.py::test_widget"}}])
+    (tmp_path / "outside.py").write_text("def test_widget(): pass\n", encoding="utf-8")
+    try:
+        (out / "preferences.py").symlink_to(tmp_path / target)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+    r = _gate(out)
+    assert r.returncode == 1 and finding in r.stdout, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize(("local", "finding"), [
+    ({"implementation_refs": {"built_but_unproven_issues": ["unknown"]}, "surfaces": ["web"]},
+     "malformed issue ref 'unknown'"),
+    ({"implementation_refs": {}}, "`implementation_refs` needs declared `surfaces`"),
+    ({"capability_groups": True}, "`capability_groups` needs the capabilities layout"),
+])
+def test_registry_extension_config_is_validated(render, tmp_path, local, finding):
+    out = _render(render, tmp_path)
+    _local(out, local)
+    r = _gate(out)
+    assert r.returncode == 1 and finding in r.stdout, r.stdout + r.stderr
+
+
+def test_owned_layer_can_implement_shared_behaviour(render, tmp_path):
+    out = _render(render, tmp_path)
+    _local(out, {"surfaces": ["web", "ios"], "shared_proof_layers": ["backend"], "implementation_refs": {}})
+    (out / "preferences.py").write_text("def save_preferences(): pass\n", encoding="utf-8")
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.", "owned_by": "backend",
+                             "impl": {"backend": "preferences.py::save_preferences"}}])
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_bare_built_issue_matches_configured_repo(render, tmp_path):
+    out = _render(render, tmp_path, modules={"feature_registry": True, "github_issues": True},
+                  github_repo="example/app")
+    _local(out, {"surfaces": ["web"], "implementation_refs": {"built_but_unproven_issues": ["#123"]}})
+    _entry(out, acceptance=[{"id": "AC1", "text": "Preferences persist.", "state": "target",
+                             "issue": "example/app#123"}])
+    r = _gate(out)
+    assert r.returncode == 1 and "surface 'web' with state 'target' needs an 'impl' ref" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize(("group", "finding"), [
+    ("preferences", ""),
+    ("sharing", "group 'sharing' is not declared"),
+    ([], "'group' must be a non-empty string"),
+])
+def test_story_group_is_local_to_capability(render, tmp_path, group, finding):
+    out = _render(render, tmp_path)
+    _local(out, {"layout": "capabilities", "capability_groups": True})
+    for name, groups in [("settings", ["preferences", "notifications"]), ("files", ["sharing"])]:
+        folder = out / REG / name
+        folder.mkdir()
+        (folder / "_capability.json").write_text(
+            json.dumps({"schema_version": 1, "capability": name, "groups": groups}), encoding="utf-8",
+        )
+    _entry(out, name="settings/STORY-0002.json", group=group)
+    r = _gate(out)
+    assert r.returncode == bool(finding) and finding in r.stdout, r.stdout + r.stderr
+
+
+def test_impl_and_groups_are_opt_in(render, tmp_path):
+    out = _render(render, tmp_path)
+    _entry(out, group="preferences", acceptance=[{"id": "AC1", "text": "Preferences persist.",
+                                                  "impl": {"web": "broken"}}])
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "unknown item field(s) ['impl']" in r.stdout and "unknown field(s) ['group']" in r.stdout
+
+
 def test_tests_list_on_two_surfaces_is_hard(render, tmp_path):
     out = _green_kenni(render, tmp_path)
     _item(out, "clients/CLI-US-001.json", surfaces=["web", "ios"], tests=[WEB_TEST])

@@ -51,14 +51,46 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 import registry_config  # noqa: E402
 from check_decisions import ADR_DIR, adr_exists as _adr_exists  # noqa: E402
 from check_review import GitReadError, GitUnavailable, forkless_refs, is_shallow, merge_base, parse_issue_ref  # noqa: E402
+from check_review import _is_test_path  # noqa: E402
 
 PREFIX = re.compile(r"^[A-Z]+$")
 PLANNED_REF = re.compile(r"^planned:#\d+:\S.*$")
 # an acceptance item (#404): addressable as `<story id>#<item id>`, proven or a target
 ITEM_ID = registry_config.ITEM_ID
 RETIRED_ENTRY_FIELDS = {"id", "split_into"}  # an entry of a story's `retired` list (v2.93 I4.1)
-ITEM_FIELDS = {"id", "text", "surfaces", "state", "tests", "owned_by", "design", "issue"}
+# Downstream registry checks also read this vocabulary.
+ITEM_FIELDS = {"id", "text", "surfaces", "state", "tests", "owned_by", "design", "issue", "impl"}
 STATES = ("proven", "target")
+ISSUE_REPO = {{ github_repo | default("") | tojson }}
+SCRIPT_SUFFIXES = frozenset({".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"})
+IMPL_SUFFIXES = SCRIPT_SUFFIXES | {".py", ".swift"}
+DECLARATION_SUFFIXES = (".d.ts", ".d.mts", ".d.cts")
+SYMBOL = r"(?:[^\W\d]|\$)[\w$]*"
+PYTHON_DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+# Match declarations at a line or statement boundary, including compact class bodies.
+SOURCE_BOUNDARY = r"(?:^|(?<=[;{}]))[ \t]*"
+SOURCE_COMMENTS_AND_STRINGS = re.compile(
+    r'//[^\r\n]*|/\*[\s\S]*?\*/|"""[\s\S]*?"""|'
+    r'"(?:\\.|[^"\\\r\n])*"|\'(?:\\.|[^\'\\\r\n])*\'|`(?:\\[\s\S]|[^`\\])*`'
+)
+SWIFT_DECLARATION = re.compile(
+    SOURCE_BOUNDARY
+    + r"(?:(?:@\w+(?:\([^()\r\n]*\))?|\w+(?:\(set\))?)[ \t]+)*"
+    + rf"(?:func|class|struct|actor|enum|let|var)[ \t]+({SYMBOL})\b",
+    re.MULTILINE,
+)
+SCRIPT_DECLARATION = re.compile(
+    SOURCE_BOUNDARY + r"(?:(?:export|default|async|abstract)[ \t]+)*"
+    + rf"(?:function|class|const|let|var)[ \t]*\*?[ \t]+({SYMBOL})",
+    re.MULTILINE,
+)
+SCRIPT_METHOD = re.compile(
+    SOURCE_BOUNDARY + r"(?:(?:public|protected|private|static|async|override|get|set)[ \t]+)*"
+    + rf"\*?({SYMBOL})(?:[ \t]*<[^<>\r\n]+>)?[ \t]*"
+    + r"\((?:[^()]|\([^()]*\))*\)[ \t]*(?::[ \t]*[\w$][^;=(){}\r\n]*)?[ \t]*\{",
+    re.MULTILINE,
+)
+CONTROL_STATEMENTS = {"if", "for", "while", "switch", "catch", "with"}
 
 # Advisory only: an entry with many mapped tests but very few acceptance
 # criteria likely under-describes its tested behaviour. Warns, never blocks.
@@ -77,6 +109,8 @@ class Run:
     stats: list[dict] = field(default_factory=list)
     names: dict = field(default_factory=dict)   # .py file -> its def/class names (None: unparsable)
     texts: dict = field(default_factory=dict)   # other file -> its text (None: unreadable)
+    declarations: dict = field(default_factory=dict)  # source file -> implementation symbols
+    built_issues: set[tuple[str | None, int]] = field(default_factory=set)
     untested: dict = field(default_factory=dict)  # capability or inventory -> items without a test
     owned: dict = field(default_factory=dict)  # capability or inventory -> [items, items owned_by]
     anchors: object = None  # the design gate's AnchorIndex, read on the first `design` (B3)
@@ -92,6 +126,8 @@ def _known_fields(cfg: dict) -> set[str]:
         known.add("surfaces")
     if cfg["story_status"]:
         known.add("status")
+    if cfg["capability_groups"]:
+        known.add("group")
     return known
 
 
@@ -100,17 +136,23 @@ def _retired_fields(cfg: dict) -> set[str]:
     return set(cfg["retired_fields"]) - ({"status"} if cfg["story_status"] else set())
 
 
+def _python_tree(path: Path) -> ast.Module | None:
+    try:
+        return ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
+        return None
+
+
+def _python_definitions(tree: ast.Module) -> set[str]:
+    return {node.name for node in ast.walk(tree) if isinstance(node, PYTHON_DEFINITIONS)}
+
+
 def _python_names(run: Run, path: Path) -> set[str] | None:
     """Every def/class name of a Python file, read by AST without importing it; None
     when it cannot be parsed. A flat set: `a::B::c` checks each segment by itself."""
     if path not in run.names:
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, SyntaxError, ValueError):
-            run.names[path] = None
-        else:
-            run.names[path] = {node.name for node in ast.walk(tree)
-                               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+        tree = _python_tree(path)
+        run.names[path] = _python_definitions(tree) if tree is not None else None
     return run.names[path]
 
 
@@ -278,8 +320,8 @@ def _check_story_tests(run: Run, data: dict, rel: str, stats: dict) -> None:
         stats["n_tests"] += sum(_test_ref(run, rel, f"test_mapping.{key}", t) for t in refs)
 
 
-def _check_state(run: Run, item: dict, label: str, surfaces: list[str]) -> None:
-    """`state`: proven/target, or a map over the item's surfaces; a target needs an issue."""
+def _check_state(run: Run, item: dict, label: str, surfaces: list[str]) -> dict[str | None, object]:
+    """Resolve the states; a missing state is proven, including in a partial state map."""
     state = item.get("state", "proven")
     if isinstance(state, dict):
         outside = sorted(set(state) - set(surfaces))
@@ -292,13 +334,142 @@ def _check_state(run: Run, item: dict, label: str, surfaces: list[str]) -> None:
     if any(v not in STATES for v in values):
         run.hard.append(f"{label}: state must be 'proven' or 'target', or a map from surface to one "
                         f"of them, got {state!r}")
+    return {surface: state.get(surface, "proven") if isinstance(state, dict) else state
+            for surface in (surfaces or [None])}
+
+
+def _issue_key(ref: object) -> tuple[str | None, int] | None:
+    parsed = parse_issue_ref(ref.strip()) if isinstance(ref, str) else None
+    if parsed is None:
+        return None
+    repo, number = parsed
+    return ((repo or ISSUE_REPO).lower() or None, number)
+
+
+def _check_item_issues(run: Run, item: dict, label: str,
+                       states: dict[str | None, object]) -> dict[str | None, object]:
+    targets = {surface for surface, state in states.items() if state == "target"}
     issue = item.get("issue")
-    valid_issue = isinstance(issue, str) and parse_issue_ref(issue.strip()) is not None
+    issue_hint = "(want '#N', 'owner/repo#N', or a github issue URL)"
+    if isinstance(issue, dict):
+        if None in states:
+            run.hard.append(f"{label}: an 'issue' map needs named surfaces; "
+                            "an implicit surface takes a single issue ref")
+            return {}
+        for surface, ref in issue.items():
+            if surface not in states:
+                run.hard.append(f"{label}: issue key {surface!r} is outside the item's surfaces")
+            elif surface not in targets:
+                run.hard.append(f"{label}: issue key {surface!r} needs state 'target'")
+            if _issue_key(ref) is None:
+                run.hard.append(f"{label}: issue.{surface}: malformed issue ref {ref!r} {issue_hint}")
+        for surface in sorted(targets - issue.keys(), key=str):
+            run.hard.append(f"{label}: surface {surface!r} with state 'target' needs an 'issue' map entry")
+        return issue
+
+    valid_issue = _issue_key(issue) is not None
     if "issue" in item and not valid_issue:
-        run.hard.append(f"{label}: malformed issue ref {issue!r} "
-                        f"(want '#N', 'owner/repo#N', or a github issue URL)")
-    elif "target" in values and not valid_issue:
+        run.hard.append(f"{label}: malformed issue ref {issue!r} {issue_hint}")
+    elif targets and not valid_issue:
         run.hard.append(f"{label}: state 'target' needs an 'issue' — the issue that makes it proven")
+    return dict.fromkeys(targets, issue)
+
+
+def _python_members(body: list[ast.stmt], prefix: str = "") -> set[str]:
+    """Qualified definitions in class bodies, checked against their actual owner."""
+    names = set()
+    for node in body:
+        if prefix and isinstance(node, PYTHON_DEFINITIONS):
+            names.add(prefix + node.name)
+        if isinstance(node, ast.ClassDef):
+            names.update(_python_members(node.body, prefix + node.name + "."))
+    return names
+
+
+def _implementation_names(run: Run, path: Path) -> set[str]:
+    if path not in run.declarations:
+        names = set()
+        if path.suffix == ".py":
+            tree = _python_tree(path)
+            if tree is not None:
+                names.update(_python_definitions(tree))
+                names.update(_python_members(tree.body))
+        else:
+            source = _file_text(run, path)
+            if source is not None:
+                code = SOURCE_COMMENTS_AND_STRINGS.sub(
+                    lambda match: "\n" * match.group().count("\n") or " ", source
+                )
+                if path.suffix == ".swift":
+                    names.update(SWIFT_DECLARATION.findall(code))
+                else:
+                    names.update(SCRIPT_DECLARATION.findall(code))
+                    names.update(set(SCRIPT_METHOD.findall(code)) - CONTROL_STATEMENTS)
+        run.declarations[path] = names
+    return run.declarations[path]
+
+
+def _impl_ref(run: Run, label: str, ref: object) -> bool:
+    base, _, node = ref.partition("::") if isinstance(ref, str) else ("", "", "")
+    path = Path(base)
+    symbol_pattern = rf"{SYMBOL}(?:\.{SYMBOL})*" if path.suffix == ".py" else SYMBOL
+    if not base.strip() or not re.fullmatch(symbol_pattern, node):
+        run.hard.append(f"{label}: an implementation ref must be 'path::symbol' with one "
+                        f"symbol (Python class members may use dots), got {ref!r}")
+        return False
+    try:
+        root = run.root.resolve()
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError
+        relative = (root / path).resolve().relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        run.hard.append(f"{label}: implementation path must be inside the repository: {base!r}")
+        return False
+    path = root / relative
+    if not path.is_file():
+        run.hard.append(f"{label}: implementation file does not exist: {base!r}")
+        return False
+    if (_is_test_path(relative.as_posix()) or "e2e" in relative.parts[:-1]
+            or path.name.endswith(("Tests.swift", "Test.swift")) or path.stem.endswith(".stories")
+            or (path.suffix == ".swift" and any(part.endswith("Tests") for part in relative.parts[:-1]))):
+        run.hard.append(f"{label}: implementation ref names a test file: {base!r}")
+        return False
+    if path.suffix not in IMPL_SUFFIXES or path.name.endswith(DECLARATION_SUFFIXES):
+        run.hard.append(f"{label}: implementation ref must name a Python, Swift, JavaScript, "
+                        f"or TypeScript source file: {base!r}")
+        return False
+    if node not in _implementation_names(run, path):
+        run.hard.append(f"{label}: implementation symbol {node!r} not declared in {base}")
+        return False
+    return True
+
+
+def _check_impl(run: Run, item: dict, label: str, states: dict[str | None, object],
+                issues: dict[str | None, object], owned_by: object) -> None:
+    mapping = item.get("impl", {})
+    if not isinstance(mapping, dict):
+        run.hard.append(f"{label}: 'impl' must be a map from surface or owned_by layer to a code ref")
+        return
+    layers = run.cfg["shared_proof_layers"]
+    valid_shared = False
+    shared = owned_by if owned_by in layers else None
+    for surface, ref in mapping.items():
+        if (surface in layers or surface not in states) and surface != shared:
+            run.hard.append(f"{label}: impl key {surface!r} is neither an applicable surface "
+                            f"nor the item's owned_by layer")
+            continue
+        refs = ref if isinstance(ref, list) else [ref]
+        if not refs:
+            run.hard.append(f"{label}: impl.{surface} must contain at least one implementation ref")
+            continue
+        valid = all([_impl_ref(run, f"{label}: impl.{surface}", candidate) for candidate in refs])
+        valid_shared |= valid and surface == shared
+    if valid_shared:
+        return
+    for surface, state in states.items():
+        built_target = state == "target" and _issue_key(issues.get(surface)) in run.built_issues
+        if surface not in mapping and (state == "proven" or built_target):
+            run.hard.append(f"{label}: surface {surface!r} with state {state!r} needs an 'impl' ref")
 
 
 def _check_item_tests(run: Run, item: dict, label: str, surfaces: list[str], owned_by: object) -> bool:
@@ -345,7 +516,9 @@ def _anchor_index(run: Run) -> object | None:
 
 
 def _check_item(run: Run, item: dict, label: str, story_surfaces: list[str], group: str) -> None:
-    unknown = sorted(set(item) - ITEM_FIELDS)
+    implementation_refs = run.cfg["implementation_refs"] is not None
+    known = ITEM_FIELDS if implementation_refs else ITEM_FIELDS - {"impl"}
+    unknown = sorted(set(item) - known)
     if unknown:
         run.soft.append(f"{label}: unknown item field(s) {unknown} — not validated")
     surfaces, found = registry_config.item_surfaces(run.cfg, item, story_surfaces)
@@ -357,7 +530,10 @@ def _check_item(run: Run, item: dict, label: str, story_surfaces: list[str], gro
     counts = run.owned.setdefault(group, [0, 0])
     counts[0] += 1
     counts[1] += "owned_by" in item
-    _check_state(run, item, label, surfaces)
+    states = _check_state(run, item, label, surfaces)
+    issues = _check_item_issues(run, item, label, states)
+    if implementation_refs:
+        _check_impl(run, item, label, states, issues, owned_by)
     if "design" in item:
         index = _anchor_index(run)
         if index is not None:
@@ -543,6 +719,15 @@ def _check_entry(run: Run, story: registry_config.Story, group: str) -> None:
     if unknown:
         run.soft.append(f"{rel}: unknown field(s) {unknown} — not validated")
 
+    if cfg["capability_groups"] and "group" in data:
+        groups = (story.capability.head or {}).get("groups", [])
+        selection = data["group"]
+        if not isinstance(selection, str) or not selection.strip():
+            run.hard.append(f"{rel}: 'group' must be a non-empty string")
+        elif isinstance(groups, list) and selection not in groups:
+            run.hard.append(f"{rel}: group {selection!r} is not declared in the capability's "
+                            f"{registry_config.HEAD} groups: {groups}")
+
     _check_id(run, story, data, rel, stats)
     for name in cfg["story_text_fields"]:
         value = data.get(name)
@@ -586,6 +771,10 @@ def _check_capabilities(run: Run, reg: registry_config.Registry) -> None:
             if needs_prefix and not (isinstance(prefix, str) and PREFIX.match(prefix)):
                 run.hard.append(f"{head_rel}: 'prefix' must be upper-case letters A-Z, got {prefix!r} "
                                 "— id_pattern uses {prefix}")  # no f-string: the file is Jinja
+            if cfg["capability_groups"]:
+                groups = head.get("groups", [])
+                if not isinstance(groups, list) or any(not isinstance(g, str) or not g.strip() for g in groups):
+                    run.hard.append(f"{head_rel}: 'groups' must be a list of non-empty strings")
         if not cap.stories:
             (run.hard if cfg["require_registry"] else run.soft).append(
                 f"{crel}: a capability without stories")
@@ -800,8 +989,18 @@ def check(root: Path) -> tuple[list[str], list[str]]:
     problems = registry_config.problems(cfg)
     if problems:
         return problems, []
-    reg = registry_config.load_registry(root, cfg)
     run = Run(root, cfg)
+    if cfg["implementation_refs"] is not None:
+        for ref in cfg["implementation_refs"].get("built_but_unproven_issues", []):
+            key = _issue_key(ref)
+            if key is None:
+                run.hard.append("feature-registry config: malformed issue ref "
+                                f"{ref!r} in `implementation_refs.built_but_unproven_issues`")
+            else:
+                run.built_issues.add(key)
+    if run.hard:
+        return run.hard, []
+    reg = registry_config.load_registry(root, cfg)
     if not reg.present:
         if cfg["require_registry"]:
             return [f"{cfg['root']} does not exist"], []

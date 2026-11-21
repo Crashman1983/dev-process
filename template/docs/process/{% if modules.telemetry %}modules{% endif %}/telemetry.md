@@ -138,6 +138,11 @@ work (a second branch of the issue).
 `rounds`, `models`, `execution`, `findings` and `train-phases` print per work
 item or per run, and `outcomes` needs the network.
 
+In `rounds`, each parsed journal `REVIEW` line contributes one verdict. Distinct
+reviewed scopes are counted by recorded work ID (including `-plan` for the
+plan phase), base and head. Verdicts from older lines without the base and
+head are tallied as unknown scope. Agent sessions require session records.
+
 **Gate triage** (`.process-work/gate-triage.jsonl`, one JSON object per line,
 tracked): `{"gate": "<name>", "commit": "<sha>", "category":
 "confirmed-defect|accepted-risk|infra-or-flake|unknown", "class": "<failure

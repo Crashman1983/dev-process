@@ -33,7 +33,8 @@ so only a bound plan is judged against a contract. A project may make the
 line a duty (docs/process/design-contract-declaration.local.json): from its day on,
 every active Tier 2+ plan states `design-contract: <surface> | n/a — <reason>`
 and a declared contract carries a non-empty `## Design Contract Trace`; naming
-the path alone no longer suffices there. Judging the design itself is never
+the path alone no longer suffices there. A trace's `### Surface: <surface>`
+sections restrict their citations to the named, bound contract. Judging the design itself is never
 machine work — that is what the sealed boards and the reviewer are for.
 Python stdlib only."""
 from __future__ import annotations
@@ -71,6 +72,8 @@ _GO = re.compile(r"^\s*[*_#\s]*(?:decision|entscheidung)[*_]*\s*:\s*[*_]*\s*(GO|
                  re.IGNORECASE | re.MULTILINE)
 _HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.MULTILINE)
 _FENCE = re.compile(r"^(`{3,}|~{3,}).*?^\1[ \t]*$", re.MULTILINE | re.DOTALL)
+TRACE_HEADING = "## Design Contract Trace"
+_TRACE_SURFACE = re.compile(r"^ {0,3}###[ \t]+Surface[ \t]*:[ \t]*(.*)$", re.IGNORECASE)
 
 
 def _unfenced(text: str) -> str:
@@ -148,6 +151,101 @@ def bound_to(text: str, surface: str, contract_rel: str) -> bool:
     if contract_rel in text:
         return True
     return any(declared_surface(v) == surface.lower() for v in declarations(text))
+
+
+def _trace_sections(text: str) -> tuple[str, dict[str | None, list[str]]]:
+    """Return readable text and split original lines into surface sections and unscoped text."""
+    lines = text.splitlines()
+    sections: dict[str | None, list[str]] = {None: []}
+    # Comments can intervene in a heading, so plans with comments use the full reader.
+    if "<!--" not in text and not any(_TRACE_SURFACE.match(line) for line in lines):
+        return text, {None: lines}
+
+    from check_plan_structure import _heading_level, _tables  # noqa: PLC0415
+    from check_ui import _readable as readable_plan  # noqa: PLC0415
+
+    in_trace = False
+    surface = None
+    # Only visible headings change scope. Keep the original text for ID matching,
+    # including in legacy plans where a citation could be inside a quoted example.
+    readable = readable_plan(text).split("\n")
+    table_rows = {row - 1 for table in _tables(readable) for row, _ in table}
+    levels = [_heading_level(readable, index, table_rows) for index in range(len(readable))]
+    for index, line in enumerate(lines):
+        heading = readable[index].rstrip()
+        level = levels[index]
+        if level in (1, 2):
+            in_trace = level == 2 and heading.lstrip() == TRACE_HEADING
+            surface = None
+        elif in_trace and level == 3:
+            match = _TRACE_SURFACE.match(heading)
+            surface = re.sub(r"[ \t]+#+$", "", match.group(1)).strip().strip("`") if match else None
+            if match:
+                sections.setdefault(surface, [])
+                readable[index] = ""  # A scope heading supplies neither a declaration nor a path.
+                continue
+        elif (in_trace and index + 1 < len(levels) and levels[index + 1] in (1, 2)
+              and re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", readable[index + 1])):
+            # A setext heading's title line starts the new (unscoped) section.
+            surface = None
+        sections.setdefault(surface, []).append(line)
+    return "\n".join(readable), sections
+
+
+@dataclass
+class PlanCitations:
+    by_surface: dict[str, dict[str, set[str]]]
+    problems: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+def plan_citations(plans: dict[str, str], entries: list[dict]) -> PlanCitations:
+    """The contract IDs attributed to each surface, shared by the gate and bundle."""
+    registry = {e["surface"].strip(): e for e in entries}
+    patterns = {s: id_pattern(e["id_prefixes"]) for s, e in registry.items()}
+    result = PlanCitations({s: {} for s in registry})
+    for rel, text in plans.items():
+        bound = [s for s, e in registry.items() if bound_to(text, s, e["contract"].strip())]
+        visible, sections = _trace_sections(text)
+        unscoped = sections.pop(None)
+        if sections and any(_NA.match(value) for value in declarations(visible)):
+            result.problems.append(f"{rel}: mixes `design-contract: n/a` with named surface sections "
+                                   "— declare the contracts the plan uses")
+        for name, lines in sections.items():
+            matches = [s for s in registry if s.lower() == name.lower()]
+            if not matches:
+                known = ", ".join(registry) or "(no contract registered yet)"
+                result.problems.append(f"{rel}: {TRACE_HEADING[3:]} names unknown surface "
+                                       f"`{name}` — registered surfaces: {known}")
+            elif len(matches) > 1:
+                candidates = ", ".join(f"`{s}` (`{registry[s]['contract'].strip()}`)" for s in matches)
+                result.problems.append(f"{rel}: {TRACE_HEADING[3:]} names ambiguous surface `{name}` "
+                                       f"— matching registry entries: {candidates}. Use distinct surface names.")
+            elif not bound_to(visible, matches[0], registry[matches[0]]["contract"].strip()):
+                result.problems.append(f"{rel}: {TRACE_HEADING[3:]} names unbound surface `{name}` "
+                                       f"— declare `design-contract: {matches[0]}` or name its contract path")
+            else:
+                # Recognize all registered families here. An ID from a different
+                # surface's family is still a citation against the named contract.
+                chunk = "\n".join(lines)
+                found = {ident for pattern in patterns.values() for ident in pattern.findall(chunk)}
+                if found:
+                    result.by_surface[matches[0]].setdefault(rel, set()).update(found)
+                continue
+            unscoped.extend(lines)
+        chunk = "\n".join(unscoped)
+        for surface in bound:
+            found = patterns[surface].findall(chunk)
+            if found:
+                result.by_surface[surface].setdefault(rel, set()).update(found)
+        if not bound:
+            found = sorted({ident for pattern in patterns.values() for ident in pattern.findall(chunk)})
+            if found:
+                surfaces = "|".join(registry)
+                result.notes.append(f"{rel}: cites {', '.join(found[:6])} but names no design contract — "
+                                    f"bind it (`design-contract: {surfaces}` or the contract path) so the "
+                                    "IDs are checked against the norm they mean")
+    return result
 
 
 def canonical(ident: str, ids: re.Pattern[str]) -> str:
@@ -251,15 +349,11 @@ def load(root: Path, path: Path) -> tuple[dict | None, list[str]]:
     return (None, hard) if hard else (data, [])
 
 
-def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str]
+def _check_one(root: Path, path: Path, data: dict, citations: dict[str, set[str]], in_flight: set[str]
                ) -> tuple[list[str], list[str]]:
     hard: list[str] = []
     soft: list[str] = []
     rel = path.relative_to(root)
-    data, errs = load(root, path)
-    if data is None:
-        return errs, []
-    # before this function adds its own `_review_hashes`: only what the file carries
     unknown = sorted(set(data) - set(_known_entry_keys()))
     if unknown:
         soft.append(f"{rel}: unknown key(s) {', '.join(repr(k) for k in unknown)} — no gate reads "
@@ -305,15 +399,8 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
         if len(forms) > 1:
             hard.append(f"{rel}: ID {forms[0]} is defined by {len(forms)} headings in the "
                         "contract — one owner per ID")
-    cited: dict[str, set[str]] = {}
     contract_rel = data["contract"].strip()
-    for prel, ptext in plans.items():
-        found = set(ids.findall(ptext))
-        if not found:
-            continue
-        if not bound_to(ptext, surface, contract_rel):
-            continue  # judged against the contract it names; unbound plans: see check()
-        cited[prel] = found
+    for prel, found in citations.items():
         for i in sorted(found, key=lambda x: canonical(x, ids)):
             if canonical(i, ids) not in defined:
                 hard.append(f"{prel}: cites {surface} design-contract ID {i}, which "
@@ -321,6 +408,7 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                             "build on IDs the contract carries (amend the contract first)")
 
     # --- status: accepted needs a decision record and an independent GO --------
+    review_hashes: set[str] | None = None
     if status == "draft":
         soft.append(f"{rel}: {surface} contract is a draft — not yet the norm for implementation")
     elif status == "legacy":
@@ -345,7 +433,7 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
                 elif verdict.upper() != "GO":
                     hard.append(f"{rel}: review {val} records {verdict!r} — the contract "
                                 "cannot be 'accepted' on a review that did not clear it")
-                data["_review_hashes"] = {m.group(1) for m in _SEAL_LINE.finditer(rtext)}
+                review_hashes = {m.group(1) for m in _SEAL_LINE.finditer(rtext)}
 
     # --- the reference: sealed boards -----------------------------------------
     ref = data.get("reference", "").strip() if isinstance(data.get("reference"), str) else ""
@@ -359,14 +447,13 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
             soft += [f"{rel}: reference rendered from an older dependency — {d} "
                      "(re-seal or start a new round)" for d in drift]
             spath = rdir / _seal.SEAL
-            if not sealed_hard and spath.is_file() and "_review_hashes" in data:
+            if not sealed_hard and spath.is_file() and review_hashes is not None:
                 current = (spath.read_text(encoding="utf-8").split() or [""])[0]
-                hashes = data["_review_hashes"]
-                if hashes and current not in hashes:
+                if review_hashes and current not in review_hashes:
                     hard.append(f"{rel}: review {data['review'].strip()} names seal(s) "
-                                f"{', '.join(sorted(h[:12] + '…' for h in hashes))} but the reference "
+                                f"{', '.join(sorted(h[:12] + '…' for h in review_hashes))} but the reference "
                                 f"carries {current[:12]}… — the GO applies to different boards")
-                elif not hashes:
+                elif not review_hashes:
                     soft.append(f"{rel}: review does not name the seal it verified — "
                                 "quote manifest.sha256 in the review")
     elif status == "accepted":
@@ -393,7 +480,7 @@ def _check_one(root: Path, path: Path, plans: dict[str, str], in_flight: set[str
     globs = [_glob_re(g.strip()) for g in data.get("paths", [])]
     if globs and in_flight:
         touched = sorted(p for p in in_flight if any(g.match(p) for g in globs))
-        if touched and not cited:
+        if touched and not citations:
             soft.append(f"{rel}: this push touches {len(touched)} file(s) under the {surface} "
                         f"surface (e.g. {touched[0]}) while no active plan cites a "
                         f"{'/'.join(data['id_prefixes'])}* contract ID — DoR R5: name the IDs "
@@ -1496,7 +1583,6 @@ def shared_review_findings(rounds: list[Round]) -> tuple[list[str], list[str]]:
 # DECLARATION: {"from": "YYYY-MM-DD", "spec_above": N}. Read at the fork point,
 # like the review evidence rules: a branch cannot lift the duty for itself.
 DECLARATION = "docs/process/design-contract-declaration.local.json"
-TRACE_HEADING = "## Design Contract Trace"
 # `n/a`, then a reason: a dash or colon alone is none
 _NA = re.compile(r"^n/?a\b[\s—–:-]*(.*)$", re.IGNORECASE)
 _SPEC_NUMBER = re.compile(r"^(\d+)-")
@@ -1591,22 +1677,33 @@ def _trace_body(text: str) -> str | None:
 
 def declaration_problems(text: str, contracts: set[str]) -> list[str]:
     """Why a plan does not state its contract as the duty asks — [] when it does."""
-    plain = _unfenced(text)
+    plain = _readable(text)
     named = ", ".join(sorted(contracts)) or "(no contract registered yet)"
     found = declarations(plain)
     if not found:
         return [f"no `design-contract:` line — declare one of {named} or `n/a — <reason>`"]
-    na = _NA.match(found[0])
-    if na is not None:
-        return [] if re.search(r"\w", na.group(1)) else ["`design-contract: n/a` without a reason — "
-                                                          "name why no visual surface is touched"]
-    surface = declared_surface(found[0])
-    if surface not in {c.lower() for c in contracts}:
-        return [f"unknown design contract `{surface}` — expected one of {named} or `n/a — <reason>`"]
-    if not _trace_body(plain):
-        return [f"declares `{surface}` but its `{TRACE_HEADING}` is missing or empty — name the "
-                f"contract sections, screen IDs and briefs the work follows, and every deviation"]
-    return []
+    problems: list[str] = []
+    known = {c.lower() for c in contracts}
+    surfaces: list[str] = []
+    has_na = False
+    for value in found:
+        na = _NA.match(value)
+        if na is not None:
+            has_na = True
+            if not re.search(r"\w", na.group(1)):
+                problems.append("`design-contract: n/a` without a reason — name why no visual surface is touched")
+            continue
+        surface = declared_surface(value)
+        if surface in known:
+            surfaces.append(surface)
+        else:
+            problems.append(f"unknown design contract `{surface}` — expected one of {named} or `n/a — <reason>`")
+    if surfaces and has_na:
+        problems.append("mixes `design-contract: n/a` with a surface declaration — state which applies")
+    if surfaces and not _trace_body(plain):
+        problems.append(f"declares `{surfaces[0]}` but its `{TRACE_HEADING}` is missing or empty — name the "
+                        f"contract sections, screen IDs and briefs the work follows, and every deviation")
+    return problems
 
 
 def declaration_check(root: Path, plans: dict[str, str], contracts: set[str]
@@ -1704,42 +1801,31 @@ def round_name_findings(rounds: list[Round]) -> tuple[list[str], list[str]]:
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
-    files = _registry_files(root)
     plans = active_plan_texts(root)
-    contracts = set()
-    for path in files:
-        data, _errs = load(root, path)
-        if data is not None:
-            contracts.add(data["surface"].strip())
+    loaded = [(path, *load(root, path)) for path in _registry_files(root)]
+    entries = [data for _path, data, _problems in loaded if data is not None]
+    contracts = {data["surface"].strip() for data in entries}
     decl_hard, decl_soft = declaration_check(root, plans, contracts)
-    if not files:
-        return decl_hard, ["no design contracts yet (dir empty or absent)", *decl_soft]
+    citations = plan_citations(plans, entries)
+    hard = decl_hard + citations.problems
+    soft = list(decl_soft)
+    if not loaded:
+        return hard, ["no design contracts yet (dir empty or absent)", *soft]
     in_flight = _paths_in_flight(root)
-    hard: list[str] = list(decl_hard)
-    soft: list[str] = list(decl_soft)
-    entries = []
-    for path in files:
-        h, s = _check_one(root, path, plans, in_flight)
+    rounds = []
+    for path, data, problems in loaded:
+        if data is None:
+            hard.extend(problems)
+            continue
+        surface = data["surface"].strip()
+        h, s = _check_one(root, path, data, citations.by_surface[surface], in_flight)
         hard += h
         soft += s
-        data, _errs = load(root, path)
-        if data is not None:
-            entries.append((path.relative_to(root).as_posix(), data))
-    h, s = _rounds_check(root, entries)
+        rounds.append((path.relative_to(root).as_posix(), data))
+    h, s = _rounds_check(root, rounds)
     hard += h
     soft += s
-    entries = [data for _rel, data in entries]
-    # a plan that cites IDs of some family but names no contract at all is
-    # judged against nothing — say so once, not once per surface
-    for prel, ptext in plans.items():
-        if any(bound_to(ptext, e["surface"].strip(), e["contract"].strip()) for e in entries):
-            continue
-        found = sorted({i for e in entries for i in id_pattern(e["id_prefixes"]).findall(ptext)})
-        if found:
-            surfaces = "|".join(e["surface"].strip() for e in entries)
-            soft.append(f"{prel}: cites {', '.join(found[:6])} but names no design contract — "
-                        f"bind it (`design-contract: {surfaces}` or the contract path) so the "
-                        "IDs are checked against the norm they mean")
+    soft += citations.notes
     return hard, soft
 
 
@@ -1798,16 +1884,15 @@ def bundle_lines(root: Path, plans: dict[str, str] | None = None) -> list[str]:
     out: list[str] = []
     plans = active_plan_texts(root) if plans is None else plans
     by_entry, ctx = _entry_rounds(root)
+    entries = [(path, load(root, path)[0]) for path in _registry_files(root)]
+    citations = plan_citations(plans, [data for _path, data in entries if data is not None])
     shown: set[str] = set()
-    for path in _registry_files(root):
-        data, _errs = load(root, path)
+    for path, data in entries:
         if data is None:
             out.append(f"- {path.relative_to(root)}: unreadable registry entry (gate reports it)")
             continue
-        ids = id_pattern(data["id_prefixes"])
-        surface, contract_rel = data["surface"].strip(), data["contract"].strip()
-        cited = sorted({i for t in plans.values() if bound_to(t, surface, contract_rel)
-                        for i in ids.findall(t)})
+        surface = data["surface"].strip()
+        cited = sorted({ident for plan_ids in citations.by_surface[surface].values() for ident in plan_ids})
         ref = data.get("reference", "")
         line = (f"- **{data['surface'].strip()}**: `{data['contract'].strip()}` "
                 f"({data['status'].strip()}"
@@ -1820,7 +1905,7 @@ def bundle_lines(root: Path, plans: dict[str, str] | None = None) -> list[str]:
             shown.add(rnd.key)
             out += ["", f"  Coverage of `{rnd.key}`, computed — the gate judges a GO by it "
                         f"({_covered_count(cov)}):", "", *(f"  {row}" for row in coverage_table(cov)), ""]
-    return out
+    return out + [f"- **Design contract trace:** {problem}" for problem in citations.problems]
 
 
 def main() -> int:

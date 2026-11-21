@@ -1178,7 +1178,12 @@ def test_a_plan_cites_the_facts_it_builds_on_and_peer_statements_stay_assumption
     assert '(`workflow.md`, Plan, "Facts the plan builds on")' in checklist
     bare = render(tmp_path / "bare", {"project_name": "demo", "harnesses": {"claude": False, "copilot": True}})
     for out_ in (out, bare):
-        assert "**Facts the plan builds on carry their source.**" in _flat(out_ / "docs/process/workflow.md")
+        workflow = _flat(out_ / "docs/process/workflow.md")
+        assert "**Facts the plan builds on carry their source.**" in workflow
+        assert "check it at an actual consumer while planning" in workflow
+        assert "put a locally reversible check first in Execute" in workflow
+        assert "bounded, throwaway [spike](#spike) if feasibility or the contract is still open" in workflow
+        assert "The executor writes and runs the new red/green test." in workflow
 
 
 def test_an_open_approach_is_a_spike_first_in_plan_and_brainstorm(render, tmp_path):

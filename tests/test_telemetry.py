@@ -453,9 +453,33 @@ def test_rounds_counts_rounds_to_pass_and_blockers_by_origin(render, tmp_path):
     other = next(ln for ln in text.splitlines() if ln.split()[:1] == ["widget"])
     assert other.split()[1:5] == ["3", "1", "0", "0"], other
     assert "all blockers: 4 (draft 1, fix 2, unmarked 1)" in text
+    assert "review verdicts: 4 · distinct reviewed scopes: 0 · verdicts with unknown scope: 4" in text
     assert "confidence: low" in text
     doc = (out / "docs/process/modules/telemetry.md").read_text()
     assert "| `rounds` |" in doc and "origin=draft" in doc
+
+
+def test_rounds_counts_review_verdicts_and_distinct_artifact_scopes(render, tmp_path):
+    out = _render(render, tmp_path)
+    base, head, other = "a" * 40, "b" * 40, "c" * 40
+
+    def verdict(work, rnd, base, head, model="claude", result="block"):
+        review = _review(work, rnd, result).replace("model=m ", f"model={model} ")
+        return f"{review.rstrip()} base={base} head={head}\n"
+
+    _journal(out, verdict("9-plan", 9, base, head)
+             + verdict("9-plan", 10, base, head, model="gpt", result="pass")
+             + verdict("9-plan", 10, base, other)
+             + verdict("9-plan", 10, other, head)
+             + verdict("9", 10, base, head)
+             + verdict("10-plan", 10, base, head)
+             + _review("9-plan", 11, "block")
+             + _review("9-plan", 12, "block"))
+
+    report = _rounds(out)
+    assert "review verdicts: 8 · distinct reviewed scopes: 5 · verdicts with unknown scope: 2" in report
+    row = next(line for line in report.splitlines() if line.split()[:1] == ["9-plan"])
+    assert row.split()[1:4] == ["2", "10", "4"]
 
 
 PLAN_ROUND_REPORT = ("review: widget-plan\nwork: #9\nphase: plan\npublish-waived: test\n\n## Findings\n"
