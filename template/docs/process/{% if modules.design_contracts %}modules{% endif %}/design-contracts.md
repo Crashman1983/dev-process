@@ -251,6 +251,7 @@ an unregistered surface, `n/a` without a reason or mixed with a surface
 declaration, a missing or empty trace. The declaration check reads each
 visible `design-contract:` line. Plans with named surface sections also
 fail if they declare `n/a`.
+In prose, sentence punctuation may follow a registered surface name.
 
 - **Which plans:** a plan under `.process-work/plans/` whose first commit is
   on or after `from` (the author day — a backdated file name proves nothing;
