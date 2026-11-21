@@ -10,6 +10,28 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.101.0 — Shared behaviour across surfaces · 2026-11-21
+
+**Why.** Kenni tracks shared behaviour with different delivery and proof status on Web, iPhone and Mac. In v2.100 a plan citing separate contracts could fail because they used the same ID prefix.
+
+**What changes.**
+- [required] A shared plan can scope its design citations under `### Surface: <surface>` within the Design Contract Trace. The gate and review bundle use the same scope.
+- [recommended] Check a decision-critical technical assumption at an existing consumer during planning. The first execution task can supply a new test.
+- [optional] Record a target issue per surface. Projects can enable implementation references and story groups in the feature registry.
+- [optional] The rounds report counts verdicts, distinct reviewed scopes and verdicts with unknown scope.
+
+**Effect.** A team can review one user goal across surfaces and see where implementation or proof is still due.
+
+**Changed sections.**
+- `workflow.md` (Workflow, Plan)
+- `modules/design-contracts.md` (Module: design-contracts, Binding a plan to its contract, Declaring the contract)
+- `modules/feature-registry.md` (Module: feature-registry — the feature inventory, One entry per file, Acceptance items, Writing rule and split rule, Configuration, Hard vs. best-effort (no false-green))
+- `modules/telemetry.md` (Module: telemetry, The KPI cockpit)
+
+**Update.** Pure update. Existing plans and scalar issue references keep working. Projects opting into implementation references should first inventory the required code references.
+
+Details: [v2.101 specification](docs/analysis/2026-11-21-v2.101-issues.md) · [#441](https://github.com/Crashman1983/dev-process/issues/441)
+
 ## v2.100.0 — Hardening behind an intact guard; four review rules; one rule for report membership · 2026-11-20
 
 **Why.**

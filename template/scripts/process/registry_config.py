@@ -108,12 +108,13 @@ _ENUMS = {
     "node_check": ("note", "hard"),
 }
 _STRINGS = ("root", "id_pattern")
-_BOOLS = ("require_registry", "planned_refs", "strict_item_tests", "stable_ids")
+_BOOLS = ("require_registry", "planned_refs", "strict_item_tests", "stable_ids", "capability_groups")
 _STRING_LISTS = ("story_text_fields", "surfaces", "shared_proof_layers", "test_ref_roots",
                  "retired_fields", "extra_fields")
 _ISSUES_KEYS = ("field", "required", "required_for")
 _STATUS_KEYS = ("values", "deferred", "deferred_allows_empty_tests")
-KEYS = (*_ENUMS, *_STRINGS, *_BOOLS, *_STRING_LISTS, "issues", "story_status")
+_IMPL_KEYS = ("built_but_unproven_issues",)
+KEYS = (*_ENUMS, *_STRINGS, *_BOOLS, *_STRING_LISTS, "issues", "story_status", "implementation_refs")
 
 
 def _unknown(data: dict, known: tuple[str, ...], where: str) -> list[str]:
@@ -170,6 +171,19 @@ def problems(cfg: dict) -> list[str]:
     if cfg.get("story_surfaces") in ("optional", "required") and not cfg.get("surfaces"):
         out.append(f"{where}: `story_surfaces` {cfg['story_surfaces']!r} needs `surfaces`, "
                    f"the project's declared surfaces")
+    if cfg.get("capability_groups") is True and cfg.get("layout") != "capabilities":
+        out.append(f"{where}: `capability_groups` needs the capabilities layout")
+    impl = cfg.get("implementation_refs")
+    if impl is not None:
+        if not isinstance(impl, dict):
+            out.append(f"{where}: `implementation_refs` must be null or an object")
+        else:
+            out += _unknown(impl, _IMPL_KEYS, "implementation_refs.")
+            if not _string_list(impl.get("built_but_unproven_issues", [])):
+                out.append(f"{where}: `implementation_refs.built_but_unproven_issues` must be "
+                           f"a list of non-empty strings")
+            if not cfg.get("surfaces"):
+                out.append(f"{where}: `implementation_refs` needs declared `surfaces`")
     status = cfg.get("story_status")
     values: list = []
     if status is not None:

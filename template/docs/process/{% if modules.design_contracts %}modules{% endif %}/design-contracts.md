@@ -207,17 +207,50 @@ is not identity: `C8` and `C08` are the same element. Keep labels that are
 *not* contract IDs (finding numbers, brief items) out of the registered
 families, or register only the families the contract really owns.
 
+For a plan that uses more than one contract, name each contract and put its
+citations under a `### Surface: <surface>` heading inside the trace:
+
+```markdown
+design-contract: web
+design-contract: ios
+
+## Design Contract Trace
+
+### Surface: web
+
+`E1` for the docked composer.
+
+### Surface: ios
+
+`E7` for the composer overlay.
+```
+
+Each surface section runs until the next level-one, level-two, or level-three
+heading. The gate and the review bundle read its IDs against
+the named contract. Surface names are case-insensitive. The plan must bind
+each named section to a registered surface through a visible declaration or
+contract path. An unknown, ambiguous, or unbound surface fails the gate,
+as does an ID from a registered family that the named contract lacks.
+Cite the same ID in both sections when both surfaces use it.
+IDs outside named surface sections are still checked against every bound
+contract that registers their family. Existing plans without surface
+sections follow that rule throughout.
+
 ## Declaring the contract
 
 Optional, per project. A project that wants every visual change to name its
 norm writes `docs/process/design-contract-declaration.local.json`:
 `{"from": "YYYY-MM-DD", "spec_above": N}`. From then on every active Tier 2+
-plan states `design-contract: <surface> | n/a — <reason>`, and a declared
+plan states `design-contract: <surface> | n/a — <reason>`. Use one
+`design-contract:` line per surface when declaring several contracts. A declared
 contract carries a non-empty `## Design Contract Trace` (the contract
 sections, screen IDs and briefs the work follows, and every deviation).
 Naming the contract's path still binds the plan to its contract, but no
 longer satisfies the declaration. Red: no line,
-an unregistered surface, `n/a` without a reason, a missing or empty trace.
+an unregistered surface, `n/a` without a reason or mixed with a surface
+declaration, a missing or empty trace. The declaration check reads each
+visible `design-contract:` line. Plans with named surface sections also
+fail if they declare `n/a`.
 
 - **Which plans:** a plan under `.process-work/plans/` whose first commit is
   on or after `from` (the author day — a backdated file name proves nothing;
@@ -229,8 +262,8 @@ an unregistered surface, `n/a` without a reason, a missing or empty trace.
 - **Read at the fork point**, like the review evidence rules: a branch
   cannot lift the duty for itself. The file lives beside the registry
   folder, not in it — it is no surface.
-- Without the file nothing changes. Whether the trace matches the contract
-  is the review's call, never the gate's.
+- Without the file, declarations are optional. The reviewer judges whether the
+  implementation follows the trace and its contracts.
 
 ## UI check — considered, not judged
 

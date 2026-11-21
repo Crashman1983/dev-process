@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.101.0 — Ein Nutzerziel für Web und native Apps
+
+Ein Team kann gemeinsames Verhalten auf mehreren Geräten in einer Story beschreiben. Pro Gerät lässt sich festhalten, welches Issue noch offen ist. Ein gemeinsamer Plan kann die Designregeln jeder Plattform gezielt zitieren. Im Review-Bericht wird sichtbar, wenn mehrere Urteile denselben Änderungsstand betreffen.
+
 ## v2.100.0 — Härtung hinter einem intakten Schutz; vier Review-Regeln; eine Regel für die Zugehörigkeit von Reports
 
 Eine Härtung, die eine Sicherheitsgrenze nicht wieder öffnen kann, weil ein anderer Schutz in Kraft bleibt, darf jetzt mit Tier 2 statt dem schwersten Tier 3 geprüft werden. Dafür braucht sie eine Suche über jeden Pfad, zwei Tests und keine Änderung an der einzigen Prüfung der Grenze. Reviews nennen jetzt zuerst, wofür die Änderung da ist, melden ihre Prozessideen, ohne sie anzuwenden, verfolgen jedes neue Feld bis dorthin, wo es landet, und legen ein Folge-Issue pro Ursache an. Eine Prüfung, die Kenni kopieren musste, ist jetzt Teil des Templates, sodass Kennis nächstes Update dieser Datei kein Review braucht.

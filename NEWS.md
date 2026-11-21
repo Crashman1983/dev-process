@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.101.0 — One user goal across Web and native apps
+
+A team can keep one story for a behaviour that people expect on several devices. The story can point to a different open issue on each device. A shared plan can cite each platform’s design rules separately. Review reporting also shows how often people judged the same change.
+
 ## v2.100.0 — Hardening behind an intact guard; four review rules; one rule for report membership
 
 Hardening that cannot reopen a security boundary, because another guard stays in force, may now be reviewed at Tier 2 instead of the heaviest Tier 3. It needs a search of every path, two tests and no change at the boundary's only check. Reviews now open with what the change is for, report their process ideas without applying them, trace each new field to where it ends up, and file one follow-up issue per cause. A check Kenni had to copy is now part of the template, so Kenni's next update of that file needs no review.

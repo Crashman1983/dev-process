@@ -9,6 +9,7 @@ import pytest
 
 REG = "docs/process/design-contracts"
 CONTRACT = "docs/design/web-contract.md"
+IOS_CONTRACT = "docs/design/ios-contract.md"
 ROUND = "docs/design/concepts/web-round-1"
 REVIEW = "docs/design/concepts/web-round-1-independent-review.md"
 ADR = "docs/process/adr/adr-0009-web-visual-language.md"
@@ -424,10 +425,7 @@ def test_unbound_plan_is_a_note_and_binding_decides_the_norm(render, tmp_path):
     # judged against the web contract. A plan names the contract it means.
     out = _render(render, tmp_path)
     _entry(out)
-    ios = _write(out, "docs/design/ios-contract.md", "# iOS\n\n### C01 Composer\n\n### E1 docked\n\n### E7 overlay\n")
-    _write(out, f"{REG}/ios.json", json.dumps({"surface": "ios", "contract": "docs/design/ios-contract.md",
-                                              "status": "draft", "pin": f"sha256:{_sha(ios)}",
-                                              "id_prefixes": ["C", "E"]}))
+    _ios_contract(out)
     plans = out / ".process-work/plans"
     plans.mkdir(parents=True, exist_ok=True)
     p = plans / "2026-09-15-composer.md"
@@ -442,6 +440,179 @@ def test_unbound_plan_is_a_note_and_binding_decides_the_norm(render, tmp_path):
     r = _gate(out)
     assert r.returncode == 1 and "cites web design-contract ID E7" in r.stdout
     assert "ios design-contract" not in r.stdout
+
+
+def _ios_contract(out: Path) -> None:
+    ios = _write(out, IOS_CONTRACT, "# iOS\n\n### C01 Composer\n\n### E7 overlay\n")
+    _write(out, f"{REG}/ios.json", json.dumps({"surface": "ios", "contract": IOS_CONTRACT,
+                                              "status": "draft", "pin": f"sha256:{_sha(ios)}",
+                                              "id_prefixes": ["C", "E"]}))
+
+
+def _trace_bundle(out: Path) -> str:
+    _commit(out)
+    r = subprocess.run([sys.executable, str(out / "scripts/process/make_review_bundle.py"),
+                        "--base", "main", "--skip-preflight"], cwd=out, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r.stdout
+
+
+def _surface_line(bundle: str, surface: str) -> str:
+    return next(line for line in bundle.splitlines() if line.startswith(f"- **{surface}**:"))
+
+
+def test_surface_sections_assign_overlapping_ids_to_the_gate_and_bundle(render, tmp_path):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _ios_contract(out)
+    _plan(out, "design-contract: web\ndesign-contract: ios\n\n## Design Contract Trace\n\n"
+               "### Surface: web\n\n#### Interactions\n\nC01 and E1.\n\n"
+               "### Surface: `iOS`\n\nC01 and E7.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    bundle = _trace_bundle(out)
+    assert _surface_line(bundle, "web").endswith("plan cites C01, E1")
+    assert _surface_line(bundle, "ios").endswith("plan cites C01, E7")
+
+
+@pytest.mark.parametrize("ident", ["E7", "E99"])
+def test_wrong_id_in_the_web_section_is_red_even_with_two_contracts(render, tmp_path, ident):
+    out = _repo(render, tmp_path)
+    _ios_contract(out)
+    _plan(out, "design-contract: web\ndesign-contract: ios\n\n## Design Contract Trace\n\n"
+               f"### Surface: web\n\n{ident}.\n")
+    r = _gate(out)
+    assert r.returncode == 1, r.stdout
+    assert len(_hard(r)) == 1 and f"cites web design-contract ID {ident}" in _hard(r)[0], r.stdout
+    bundle = _trace_bundle(out)
+    assert _surface_line(bundle, "web").endswith(f"plan cites {ident}")
+    assert _surface_line(bundle, "ios").endswith("no ID cited by an active plan")
+
+
+def test_scoped_id_from_a_different_family_is_still_checked(render, tmp_path):
+    out = _repo(render, tmp_path)
+    _ios_contract(out)
+    _plan(out, "design-contract: web\n\n## Design Contract Trace\n\n"
+               f"### Surface: ios\n\nFollowing `{IOS_CONTRACT}`. AX3.\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "cites ios design-contract ID AX3" in "\n".join(_hard(r)), r.stdout
+    bundle = _trace_bundle(out)
+    assert _surface_line(bundle, "ios").endswith("plan cites AX3")
+    assert _surface_line(bundle, "web").endswith("no ID cited by an active plan")
+
+
+@pytest.mark.parametrize("surface,problem", [("tv", "unknown"), ("ios", "unbound")])
+def test_unknown_or_unbound_surface_section_errors_in_gate_and_bundle(render, tmp_path, surface, problem):
+    out = _repo(render, tmp_path)
+    _ios_contract(out)
+    _plan(out, f"design-contract: web\n\n## Design Contract Trace\n\n### Surface: {surface}\n\nE99.\n")
+    r = _gate(out)
+    diagnostic = f"Design Contract Trace names {problem} surface `{surface}`"
+    assert r.returncode == 1 and diagnostic in "\n".join(_hard(r)), r.stdout
+    assert "cites web design-contract ID E99" in "\n".join(_hard(r)), r.stdout
+    assert diagnostic in _trace_bundle(out)
+
+
+@pytest.mark.parametrize("body", [
+    "E7.\n\n### Surface: ios\n\nC01.\n",
+    "### Surface: ios\n\nC01.\n\n### Remaining work\n\nE7.\n",
+    "### Surface: ios\n\nC01.\n\n## Implementation\n\nE7.\n",
+    "### Surface: ios\n\nC01.\n\nImplementation\n--------------\n\nE7.\n",
+    "```markdown\n### Surface: ios\n```\n\nE7.\n",
+    "<!--\n### Surface: ios\n-->\n\nE7.\n",
+])
+def test_unscoped_ids_keep_the_legacy_checks(render, tmp_path, body):
+    out = _repo(render, tmp_path)
+    _ios_contract(out)
+    _plan(out, "design-contract: web\ndesign-contract: ios\n\n## Design Contract Trace\n\n" + body)
+    r = _gate(out)
+    assert r.returncode == 1 and "cites web design-contract ID E7" in "\n".join(_hard(r)), r.stdout
+    bundle = _trace_bundle(out)
+    assert _surface_line(bundle, "web").endswith("E7")
+    assert _surface_line(bundle, "ios").endswith("E7")
+
+
+def test_legacy_multi_contract_plan_with_ordinary_headings_keeps_its_bundle(render, tmp_path):
+    out = _repo(render, tmp_path)
+    _ios_contract(out)
+    _plan(out, "design-contract: web\ndesign-contract: ios\n\n## Design Contract Trace\n\n"
+               "### Composition\n\nC01.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    bundle = _trace_bundle(out)
+    assert _surface_line(bundle, "web").endswith("plan cites C01")
+    assert _surface_line(bundle, "ios").endswith("plan cites C01")
+
+
+def test_case_only_surface_names_keep_legacy_path_bindings_and_are_ambiguous_when_scoped(render, tmp_path):
+    out = _repo(render, tmp_path)
+    another = "docs/design/secondary-contract.md"
+    contract = _write(out, another, "# Secondary web\n\n### E9 Overlay\n")
+    _write(out, f"{REG}/Web.json", json.dumps({
+        "surface": "Web", "contract": another, "status": "draft",
+        "pin": f"sha256:{_sha(contract)}", "id_prefixes": ["E"],
+    }))
+    _plan(out, f"Norm `{CONTRACT}`: E1.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    bundle = _trace_bundle(out)
+    assert _surface_line(bundle, "web").endswith("plan cites E1")
+    assert _surface_line(bundle, "Web").endswith("no ID cited by an active plan")
+
+    _plan(out, f"Norm `{another}`: E1.\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "cites Web design-contract ID E1" in "\n".join(_hard(r)), r.stdout
+
+    _plan(out, f"Norm `{CONTRACT}`.\n\n## Design Contract Trace\n\n### Surface: web\n\nE1.\n")
+    r = _gate(out)
+    message = "Design Contract Trace names ambiguous surface `web`"
+    assert r.returncode == 1 and message in "\n".join(_hard(r)), r.stdout
+    bundle = _trace_bundle(out)
+    assert any(message in line and CONTRACT in line and another in line for line in bundle.splitlines()), bundle
+
+
+@pytest.mark.parametrize("quotation", [
+    "```markdown\ndesign-contract: ios\n```",
+    f"<!--\nNorm: `{IOS_CONTRACT}`\n-->",
+])
+def test_surface_sections_require_visible_bindings(render, tmp_path, quotation):
+    out = _repo(render, tmp_path)
+    _ios_contract(out)
+    _plan(out, f"design-contract: web\n\n{quotation}\n\n## Design Contract Trace\n\n"
+               "### Surface: ios\n\nC01.\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "names unbound surface `ios`" in "\n".join(_hard(r)), r.stdout
+    assert "names unbound surface `ios`" in _trace_bundle(out)
+
+
+def test_a_scope_name_alone_cannot_bind_a_contract_path(render, tmp_path):
+    out = _repo(render, tmp_path)
+    contract = _write(out, "ios", "# iOS\n\n### C01 Composer\n")
+    _write(out, f"{REG}/ios.json", json.dumps({
+        "surface": "ios", "contract": "ios", "status": "draft",
+        "pin": f"sha256:{_sha(contract)}", "id_prefixes": ["C"],
+    }))
+    _plan(out, "## Design Contract Trace\n\n### Surface: ios\n\nC01.\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "names unbound surface `ios`" in "\n".join(_hard(r)), r.stdout
+
+
+def test_na_cannot_accompany_a_surface_section_bound_by_path(render, tmp_path):
+    out = _repo(render, tmp_path)
+    _plan(out, "design-contract: n/a — backend\n\n## Design Contract Trace\n\n"
+               f"### Surface: web\n\nFollowing `{CONTRACT}`. E1.\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "mixes `design-contract: n/a` with named surface sections" in r.stdout
+
+
+def test_surface_sections_leave_the_bundle_unchanged_without_the_module(render, tmp_path):
+    out = render(tmp_path, {"project_name": "d"})
+    _git(out, "init", "-q", "-b", "main")
+    _commit(out, "base")
+    _git(out, "checkout", "-q", "-b", "feature")
+    _plan(out, "## Design Contract Trace\n\n### Surface: tv\n\nE99.\n")
+    bundle = _trace_bundle(out)
+    assert "Design contracts governing this change" not in bundle
+    assert "unknown surface" not in bundle
 
 
 def test_zero_padding_does_not_split_an_id(render, tmp_path):
@@ -589,6 +760,23 @@ def test_a_stated_contract_satisfies_the_duty(render, tmp_path, body):
     out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
     _plan(out, body)
     assert _gate(out).returncode == 0, _gate(out).stdout
+
+
+@pytest.mark.parametrize("design_lines,problem", [
+    ("design-contract: web\ndesign-contract: ioss", "unknown design contract `ioss`"),
+    ("design-contract: web\ndesign-contract: n/a", "without a reason"),
+    ("design-contract: web\ndesign-contract: n/a — backend", "mixes"),
+    ("design-contract: n/a — backend\ndesign-contract: web", "mixes"),
+    ("design-contract: web\n<!--\ndesign-contract: ioss\n-->", None),
+])
+def test_declaration_duty_checks_all_visible_contract_lines(render, tmp_path, design_lines, problem):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, f"{design_lines}\n\n## Design Contract Trace\n\nC01.\n")
+    r = _gate(out)
+    if problem:
+        assert r.returncode == 1 and problem in "\n".join(_hard(r)), r.stdout
+    else:
+        assert r.returncode == 0, r.stdout
 
 
 def test_without_the_duty_nothing_changes(render, tmp_path):

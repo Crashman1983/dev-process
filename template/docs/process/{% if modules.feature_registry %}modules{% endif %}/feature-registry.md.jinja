@@ -6,6 +6,9 @@ capability (a story), each tracing to its acceptance items and the tests that
 prove them. Runs via `process-gates` (hosted CI with `ci.github: true`, and the
 pre-push hook) and locally via `python scripts/process/check_feature_registry.py`.
 
+Projects that enable implementation refs can also mark built behaviour
+awaiting proof as a target. See Implementation refs below.
+
 ## Proven behaviour and addressable targets — not a work log
 
 Two questions used to share this registry; the lean pass split them:
@@ -42,6 +45,9 @@ In the template's layout, create `docs/process/feature-registry/STORY-NNNN.json`
 - **story** — one sentence in EARS form: *As a `<role>`, when `<trigger>`,
   the system shall `<response>`.* Wording is graded by humans, not the gate.
 - **acceptance** — a non-empty list of items (below).
+- **group** (optional, with `capability_groups`) — a label from the
+  capability head's `groups` list for ordering stories and arranging inventory
+  sections. The story keeps its own id and acceptance items.
 - **tests** — a **non-empty** list of test refs that prove the entry; at least
   one names an existing test. An inventory entry without a resolvable test is a
   claim, not an inventory item.
@@ -71,8 +77,21 @@ checked once it is there:
   checked; its items have **one implicit surface**.
 - **state** — `"proven"` (the default) or `"target"`, or a map from the item's
   surfaces to one of them (`{"web": "proven", "ios": "target"}`). An item with
-  one implicit surface takes a single value. A target on any surface needs an
-  **issue** on the item.
+  one implicit surface takes a single value. A partial map defaults to
+  `proven` on the other applicable surfaces.
+- **issue** — a target needs an issue ref (`#N`, `owner/repo#N`, or a GitHub
+  issue URL). A single ref covers every target on the item. An item with
+  named surfaces can use a map with exactly its `target` surfaces as keys,
+  including a single named surface or an empty map when all are proven. An
+  implicit surface takes a single ref. The story-level provenance field still accepts a single ref (or
+  `issues` as configured).
+- **impl** (with `implementation_refs`) — a map from surface to a
+  repository-relative `path::symbol` ref or a non-empty list of refs.
+  Every proven surface needs a ref.
+  A target needs a ref if its issue is listed in `built_but_unproven_issues`.
+  A ref keyed by the item's `owned_by` layer covers its surfaces when that
+  layer implements the shared behaviour. The gate checks every supplied ref.
+  See Implementation refs below.
 - **tests** — a map from the item's surfaces (and its `owned_by` layer) to test
   refs: `{"web": ["…"], "ios": ["…"]}`. Each surface is proven by the tests under
   its own key. A plain list is shorthand for an item with exactly one surface,
@@ -106,7 +125,7 @@ test tests the item — that stays review judgment.
 
 - **One behaviour per item, in the present tense.** `text` states what the
   system does — for a proven item and for a target alike. Whether the behaviour
-  exists yet is said only by `state`.
+  is proven or a target is stated by `state`.
 - **No history, plans or issue numbers in `text`.** "No longer", "replaces",
   "since #123" and "will" belong in the issue or the spec; the item's issue goes
   in its `issue` field, the story's issues in the story's field.
@@ -261,6 +280,50 @@ A test ref is a repository path, optionally with a `::node` selector:
   `tests` are all placeholders fails, and an item with only placeholders counts
   as untested.
 
+## Implementation refs
+
+Use a relative path to a source file, followed by a declared symbol, for example
+`app/<area>/settings.py::save_preferences`,
+`web/<area>/preferences.ts::savePreferences`, or
+`ios/<area>/Preferences.swift::save`. Use one symbol after `::`.
+
+- In Python (`.py`), the gate reads function and class definitions with the
+  AST. A dotted name such as `PreferenceStore.save` must resolve to a
+  definition in that class's body.
+- In Swift (`.swift`), use a function, concrete type, or named `let` or
+  `var` declaration from the file. In JavaScript and TypeScript
+  (`.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`), use a
+  named function, class, variable or method. Write method names without their
+  owner and use a method signature whose opening brace follows on the same
+  line as the end of the signature. For both languages the gate checks
+  declaration patterns in source text.
+- Paths outside the repository, missing files, unresolved symbols,
+  declaration files such as `.d.ts`, and test files fail the gate.
+
+A preference-saving behaviour with three applicable surfaces can have a proven
+web implementation, an iOS implementation awaiting proof under `#123`, and
+an Android implementation still to deliver under `#456`:
+
+```json
+{
+  "id": "AC1",
+  "text": "When I save my preferences, they are available after I reopen the app.",
+  "surfaces": ["web", "ios", "android"],
+  "state": {"web": "proven", "ios": "target", "android": "target"},
+  "issue": {"ios": "#123", "android": "#456"},
+  "impl": {
+    "web": "web/preferences.ts::savePreferences",
+    "ios": ["ios/Preferences.swift::save", "ios/PreferenceStorage.swift::persist"]
+  },
+  "tests": {"web": ["web/preferences.test.ts::restores saved preferences"]}
+}
+```
+
+Set `"implementation_refs": {"built_but_unproven_issues": ["#123"]}` in the
+local configuration for this example. Qualified refs and GitHub URLs for the
+same repository and issue number compare equal. A bare issue refers to the
+rendered `github_repo` when configured.
+
 ## Configuration
 
 How the registry is laid out and which rules bind is configuration, read by
@@ -281,6 +344,8 @@ rule silently; `_comment` is allowed at any level.
 | `story_surfaces`, `surfaces` | `none`, `[]` | whether a story carries `surfaces` (`optional`, `required`), and the declared surfaces |
 | `shared_proof_layers` | `[]` | layers an item may be `owned_by` |
 | `story_tests` | `tests` | `tests` (a list) or `test_mapping` (a map from surface or shared layer to a list) |
+| `implementation_refs` | `null` | an object enables `impl` for declared surfaces; `built_but_unproven_issues` lists the target issues whose surfaces also need refs |
+| `capability_groups` | `false` | enables story `group` validation against the capability head's optional `groups` list |
 | `issues` | `issue`, not required | the story's issue field (`issue` or a list `issues`), whether it is required, and which status needs a ref (`required_for`) |
 | `story_status` | `null` | `null`: `status` stays retired. An object: `status` is required, one of `values`; a `deferred` story may leave a test-mapping list empty |
 | `test_ref_roots`, `planned_refs`, `node_check` | `[]`, `false`, `note` | test refs, above |
@@ -296,6 +361,10 @@ Further head fields are the project's. A story file is named after its id, an id
 carries its capability's prefix and is unique across the registry, and JSON
 directly in `root` fails (except `*.example.json`). The prefix is data, not
 configuration: a new capability changes only its own head.
+
+With `capability_groups` enabled, a head can declare
+`"groups": ["preferences", "notifications"]`. A story in that directory can
+set `"group": "preferences"`. Group labels are local to their capability.
 
 Who else reads the registry, through the same module: the product frame
 (`check_product_frame.py`, a story reference in `PRODUCT.md` must resolve;
@@ -375,13 +444,13 @@ one implicit surface and stay green.
 missing/duplicate/misshaped story `id`; a missing text field; empty
 `acceptance` outside a tombstone; an item without `id`, with a misshaped or duplicate id, or
 without text; an item field outside its rules (surfaces, state, a target
-without an issue, tests, `owned_by`); a malformed `retired` list; a tombstone
+without an issue, tests, `owned_by`, or enabled implementation refs); a malformed `retired` list; a tombstone
 outside its form (Retiring a story); with
 `stable_ids`, an id changed against the fork point, a tombstone of the base gone, and a registry ref that
 names no item, or a retired one without `split_into` or `retired_into` (Stable ids); story tests that are empty, all
 placeholders or name a path that does not exist; a retired field; a dangling
 `adr` link; a malformed issue ref; with a project configuration, its rules
-(layout, heads, prefixes, surfaces, status, test mapping, required issues).
+(layout, heads, prefixes, surfaces, status, test mapping, required issues, capability groups).
 
 **Best-effort (note, never fails):** an empty inventory ("no entries yet");
 no base to compare item ids with, and why; a ref to a retired id with

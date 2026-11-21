@@ -510,10 +510,12 @@ def _rounds_of_issue(root: Path, rounds: dict[str, dict], issue,
 
 
 def _review_rounds(root: Path) -> dict[str, dict]:
-    """work id → {max_round, passed, tier, pass_round, blocked, heads} from every REVIEW
+    """Work items from every REVIEW
     line in the journal: `pass_round` is the first passing round (None before
     it), `blocked` the distinct rounds with a block verdict, `heads` round → the
-    reviewed heads its lines name (full SHAs only; v2.78, `_blocks_since_round1`)."""
+    reviewed heads its lines name (full SHAs only; v2.78, `_blocks_since_round1`).
+    `scopes` holds distinct (base, head) pairs within the recorded work id,
+    whose `-plan` suffix marks the phase."""
     import check_review as _review
     out: dict[str, dict] = {}
     jdir = root / _review.JOURNAL_DIR
@@ -523,7 +525,13 @@ def _review_rounds(root: Path) -> dict[str, dict]:
         recs, _e = _review.parse_review_lines(f.read_text(encoding="utf-8", errors="replace"))
         for _ln, r in recs:
             e = out.setdefault(r["work"], {"max_round": 0, "passed": False, "tier": r.get("tier"),
-                                           "pass_round": None, "blocked": set(), "heads": {}})
+                                           "pass_round": None, "blocked": set(), "heads": {},
+                                           "verdicts": 0, "scopes": set(), "unknown_scope": 0})
+            e["verdicts"] += 1
+            if "base" in r and "head" in r:
+                e["scopes"].add((r["base"], r["head"]))
+            else:
+                e["unknown_scope"] += 1
             try:
                 rnd = int(r.get("round") or 0)
             except ValueError:
@@ -1912,6 +1920,9 @@ def rounds(root: Path | None = None) -> int:
         print(f"  blockers: not read ({blockers})")
     elif totals:
         print(f"  all blockers: {_origin_text(totals)}")
+    print(f"  review verdicts: {sum(e['verdicts'] for e in rnds.values())} · "
+          f"distinct reviewed scopes: {sum(len(e['scopes']) for e in rnds.values())} · "
+          f"verdicts with unknown scope: {sum(e['unknown_scope'] for e in rnds.values())}")
     if not isinstance(blockers, str):
         # plan reviews (report header `phase: plan`) apart from code reviews;
         # "-" = a blocker without kind=; the same work items as the table above,

@@ -9,6 +9,28 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.101.0 — Gemeinsames Verhalten über mehrere Surfaces · 2026-11-21
+
+**Warum.** Kenni verfolgt gemeinsame Funktionen mit unterschiedlichem Liefer- und Nachweisstand auf Web, iPhone und Mac. In v2.100 konnte ein gemeinsamer Plan an gleichen ID-Präfixen in getrennten Verträgen scheitern.
+
+**Was sich ändert.**
+- [required] Ein gemeinsamer Plan kann Designreferenzen im Design Contract Trace unter `### Surface: <surface>` zuordnen. Gate und Review-Bundle verwenden dieselbe Zuordnung.
+- [recommended] Wer den Plan schneidet, prüft eine entscheidende technische Annahme am bestehenden Verbraucher. Ein neuer Test kann als erste Aufgabe in die Umsetzung gehen.
+- [optional] Jedes Ziel kann ein Issue je Surface tragen. Projekte können Implementierungsverweise und Story-Gruppen in der Registry aktivieren.
+- [optional] Der Rundenbericht zählt Urteile, verschiedene geprüfte Bereiche und Urteile mit unbekanntem Bereich.
+
+**Wirkung.** Ein Team kann ein Nutzerziel gemeinsam prüfen und erkennen, auf welcher Oberfläche die Funktion oder ihr Nachweis fehlt.
+
+**Geänderte Abschnitte.**
+- `workflow.md` (Workflow, Plan)
+- `modules/design-contracts.md` (Module: design-contracts, Binding a plan to its contract, Declaring the contract)
+- `modules/feature-registry.md` (Module: feature-registry — the feature inventory, One entry per file, Acceptance items, Writing rule and split rule, Configuration, Hard vs. best-effort (no false-green))
+- `modules/telemetry.md` (Module: telemetry, The KPI cockpit)
+
+**Update.** Reines Update. Bestehende Pläne und einfache Issue-Verweise funktionieren weiter. Vor dem Einschalten der Implementierungsverweise die erforderlichen Codestellen zusammentragen.
+
+Details: [Spezifikation v2.101](docs/analysis/2026-11-21-v2.101-issues.md) · [#441](https://github.com/Crashman1983/dev-process/issues/441)
+
 ## v2.100.0 — Härtung hinter einem intakten Schutz; vier Review-Regeln; eine Regel für die Zugehörigkeit von Reports · 2026-11-20
 
 **Warum.**
