@@ -186,11 +186,12 @@ def declared_contracts(text: str, regs: list[dict]) -> list[str]:
     except ImportError:
         return []
     known = {r["surface"] for r in regs}
+    known_lower = {surface.lower() for surface in known}
     out = []
     for value in declarations(text):
         if _NA.match(value):
             continue
-        surface = declared_surface(value)
+        surface = declared_surface(value, known_lower)
         if surface in known and surface not in out:
             out.append(surface)
     return out

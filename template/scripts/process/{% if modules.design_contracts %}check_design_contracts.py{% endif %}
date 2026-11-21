@@ -131,6 +131,7 @@ def id_pattern(prefixes: list[str]) -> re.Pattern[str]:
 # declaration duty (`declaration_problems`) ask here
 _DECLARED = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*design-contract[*_]*[ \t]*:[ \t]*[*_]*[ \t]*(.*)$",
                        re.IGNORECASE | re.MULTILINE)
+_DECLARATION_PUNCTUATION = ".,;:!?"
 
 
 def declarations(text: str) -> list[str]:
@@ -138,19 +139,28 @@ def declarations(text: str) -> list[str]:
     return [m.group(1).strip().strip("*_").strip() for m in _DECLARED.finditer(text)]
 
 
-def declared_surface(value: str) -> str:
-    """The surface a declaration names: its first word, quotes and backticks off, lower case."""
-    return value.split()[0].strip("`'\"").lower() if value else ""
+def declared_surface(value: str, known: set[str] | None = None) -> str:
+    """Read the first word. A registered name takes precedence over trailing prose punctuation."""
+    if not value:
+        return ""
+    word = value.split()[0]
+    surface = word.strip("`'\"").lower()
+    if known is None or surface in known:
+        return surface
+    unpunctuated = word.rstrip(_DECLARATION_PUNCTUATION).strip("`'\"").lower()
+    if unpunctuated not in known:
+        unpunctuated = unpunctuated.rstrip(_DECLARATION_PUNCTUATION)
+    return unpunctuated if unpunctuated in known else surface
 
 
-def bound_to(text: str, surface: str, contract_rel: str) -> bool:
+def bound_to(text: str, surface: str, contract_rel: str, known: set[str]) -> bool:
     """A plan builds on a contract when it names it: the contract's path, or a
     `design-contract: <surface>` line. Two surfaces share ID families (E1 is
     an elevation on web and on mobile) — without the binding an iOS plan
     would be judged against the web contract and vice versa."""
     if contract_rel in text:
         return True
-    return any(declared_surface(v) == surface.lower() for v in declarations(text))
+    return any(declared_surface(v, known) == surface.lower() for v in declarations(text))
 
 
 def _trace_sections(text: str) -> tuple[str, dict[str | None, list[str]]]:
@@ -202,10 +212,11 @@ class PlanCitations:
 def plan_citations(plans: dict[str, str], entries: list[dict]) -> PlanCitations:
     """The contract IDs attributed to each surface, shared by the gate and bundle."""
     registry = {e["surface"].strip(): e for e in entries}
+    known = {s.lower() for s in registry}
     patterns = {s: id_pattern(e["id_prefixes"]) for s, e in registry.items()}
     result = PlanCitations({s: {} for s in registry})
     for rel, text in plans.items():
-        bound = [s for s, e in registry.items() if bound_to(text, s, e["contract"].strip())]
+        bound = [s for s, e in registry.items() if bound_to(text, s, e["contract"].strip(), known)]
         visible, sections = _trace_sections(text)
         unscoped = sections.pop(None)
         if sections and any(_NA.match(value) for value in declarations(visible)):
@@ -214,14 +225,14 @@ def plan_citations(plans: dict[str, str], entries: list[dict]) -> PlanCitations:
         for name, lines in sections.items():
             matches = [s for s in registry if s.lower() == name.lower()]
             if not matches:
-                known = ", ".join(registry) or "(no contract registered yet)"
+                registered = ", ".join(registry) or "(no contract registered yet)"
                 result.problems.append(f"{rel}: {TRACE_HEADING[3:]} names unknown surface "
-                                       f"`{name}` — registered surfaces: {known}")
+                                       f"`{name}` — registered surfaces: {registered}")
             elif len(matches) > 1:
                 candidates = ", ".join(f"`{s}` (`{registry[s]['contract'].strip()}`)" for s in matches)
                 result.problems.append(f"{rel}: {TRACE_HEADING[3:]} names ambiguous surface `{name}` "
                                        f"— matching registry entries: {candidates}. Use distinct surface names.")
-            elif not bound_to(visible, matches[0], registry[matches[0]]["contract"].strip()):
+            elif not bound_to(visible, matches[0], registry[matches[0]]["contract"].strip(), known):
                 result.problems.append(f"{rel}: {TRACE_HEADING[3:]} names unbound surface `{name}` "
                                        f"— declare `design-contract: {matches[0]}` or name its contract path")
             else:
@@ -1693,7 +1704,7 @@ def declaration_problems(text: str, contracts: set[str]) -> list[str]:
             if not re.search(r"\w", na.group(1)):
                 problems.append("`design-contract: n/a` without a reason — name why no visual surface is touched")
             continue
-        surface = declared_surface(value)
+        surface = declared_surface(value, known)
         if surface in known:
             surfaces.append(surface)
         else:

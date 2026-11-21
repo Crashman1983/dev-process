@@ -474,6 +474,35 @@ def test_surface_sections_assign_overlapping_ids_to_the_gate_and_bundle(render, 
     assert _surface_line(bundle, "ios").endswith("plan cites C01, E7")
 
 
+def test_surface_section_can_bind_from_a_punctuated_declaration(render, tmp_path):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _ios_contract(out)
+    _plan(out, "design-contract: web\ndesign-contract: `ios`, for iPhone.\n\n## Design Contract Trace\n\n"
+               "### Surface: web\n\nE1.\n\n### Surface: ios\n\nE7.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    bundle = _trace_bundle(out)
+    assert _surface_line(bundle, "ios").endswith("plan cites E7")
+    assert _surface_line(bundle, "web").endswith("plan cites E1")
+
+
+def test_punctuated_surface_declaration_prefers_the_exact_registered_name(render, tmp_path):
+    out = _repo(render, tmp_path)
+    another = "docs/design/secondary-contract.md"
+    contract = _write(out, another, "# Secondary web\n\n### E9 Overlay\n")
+    _write(out, f"{REG}/web..json", json.dumps({
+        "surface": "web.", "contract": another, "status": "draft",
+        "pin": f"sha256:{_sha(contract)}", "id_prefixes": ["E"],
+    }))
+    _plan(out, "design-contract: `web.`, with this wording.\n\n## Design Contract Trace\n\n"
+               "### Surface: web.\n\nE9.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+    bundle = _trace_bundle(out)
+    assert _surface_line(bundle, "web.").endswith("plan cites E9")
+    assert _surface_line(bundle, "web").endswith("no ID cited by an active plan")
+
+
 @pytest.mark.parametrize("ident", ["E7", "E99"])
 def test_wrong_id_in_the_web_section_is_red_even_with_two_contracts(render, tmp_path, ident):
     out = _repo(render, tmp_path)
@@ -764,6 +793,7 @@ def test_a_stated_contract_satisfies_the_duty(render, tmp_path, body):
 
 @pytest.mark.parametrize("design_lines,problem", [
     ("design-contract: web\ndesign-contract: ioss", "unknown design contract `ioss`"),
+    ("design-contract: web\ndesign-contract: ioss. No fallback.", "unknown design contract `ioss.`"),
     ("design-contract: web\ndesign-contract: n/a", "without a reason"),
     ("design-contract: web\ndesign-contract: n/a — backend", "mixes"),
     ("design-contract: n/a — backend\ndesign-contract: web", "mixes"),
@@ -777,6 +807,15 @@ def test_declaration_duty_checks_all_visible_contract_lines(render, tmp_path, de
         assert r.returncode == 1 and problem in "\n".join(_hard(r)), r.stdout
     else:
         assert r.returncode == 0, r.stdout
+
+
+@pytest.mark.parametrize("punctuation", [".", ","])
+def test_declaration_duty_accepts_a_repeated_known_surface_in_trace_prose(render, tmp_path, punctuation):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, "design-contract: web\n\n## Design Contract Trace\n\n"
+               f"design-contract: web{punctuation} C01 follows the composer role.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
 
 
 def test_without_the_duty_nothing_changes(render, tmp_path):
