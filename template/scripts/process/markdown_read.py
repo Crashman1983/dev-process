@@ -133,12 +133,12 @@ def fence_drift_problem(text: str) -> str | None:
 # Linear time: once no `-->` (or no closing backtick run of a length) follows,
 # none is searched again.
 # Known limits (a record may be read where a renderer hides it, or the other
-# way round): the `<!-->` / `<!--->` forms, comments inside container blocks
+# way round): comments inside container blocks
 # (block quotes, list items indented past three spaces), HTML blocks of other
 # kinds (`<div>`, `<pre>`, `<script>`), indented code blocks, entity-escaped
 # markers, and setext/table edge cases are not modelled. `ambiguity_problem`
 # asks where the first and a comment across a heading or fence line would read
-# apart.
+# apart, and at every `<!-->` / `<!--->` (CommonMark closes the comment there).
 _BLOCK_COMMENT = re.compile(r"^ {0,3}<!--")
 _ASCII_PUNCT = set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
 
@@ -158,8 +158,10 @@ def _closing_run(para: str, run: int, pos: int) -> int:
         pos = end
 
 
-def _comment_spans(para: str) -> list[tuple[int, int]]:
-    """The [start, end) spans of `para` an inline HTML comment hides."""
+def _comment_spans(para: str, empties: list[int] | None = None) -> list[tuple[int, int]]:
+    """The [start, end) spans of `para` an inline HTML comment hides. `empties` collects
+    where a `<!-->` or `<!--->` opens one — a renderer closes it right there, this scan
+    searches on for a later `-->` (rule 7 of `ambiguity_problem`)."""
     spans: list[tuple[int, int]] = []
     i = 0
     n = len(para)
@@ -183,15 +185,18 @@ def _comment_spans(para: str) -> list[tuple[int, int]]:
                 no_tick_close.add(run)
             i = j
             continue
-        if c == "<" and not no_comment_close and para.startswith("<!--", i):
-            k = para.find("-->", i + 4)
-            if k < 0:
-                no_comment_close = True
-                i += 4
+        if c == "<" and para.startswith("<!--", i):
+            if empties is not None and para.startswith((">", "->"), i + 4):
+                empties.append(i)
+            if not no_comment_close:
+                k = para.find("-->", i + 4)
+                if k < 0:
+                    no_comment_close = True
+                    i += 4
+                    continue
+                spans.append((i, k + 3))
+                i = k + 3
                 continue
-            spans.append((i, k + 3))
-            i = k + 3
-            continue
         i += 1
     return spans
 
@@ -245,13 +250,16 @@ class Line(NamedTuple):
 class _Walk(NamedTuple):
     lines: list[Line]
     spans: list[tuple[int, int]]  # (first, last) line of an inline comment over several lines
+    empties: list[tuple[int, str]]  # (line, `<!-->` or `<!--->`) of an inline empty opener
 
 
 def _walk(numbered: list[tuple[int, str]]) -> _Walk:
     """`uncommented` over numbered lines, line for line: the same blocks, paragraphs and
-    spans, each piece of text at the line it stands on (r2 M2)."""
+    spans, each piece of text at the line it stands on (r2 M2). Linear in a paragraph's
+    lines and spans: both run left to right, the spans sorted and disjoint."""
     out: list[Line] = []
     multi: list[tuple[int, int]] = []
+    empty: list[tuple[int, str]] = []
     para: list[tuple[int, str]] = []
 
     def flush() -> None:
@@ -263,18 +271,23 @@ def _walk(numbered: list[tuple[int, str]]) -> _Walk:
         for _n, line in para:
             starts.append(pos)
             pos += len(line) + 1
-        spans = _comment_spans(joined)
+        openers: list[int] = []
+        spans = _comment_spans(joined, openers)
+        first_open = 0  # the first span not ended before the current line
         for (n, line), a in zip(para, starts):
             b = a + len(line)
+            while first_open < len(spans) and spans[first_open][1] <= a:
+                first_open += 1
             pieces: list[str] = []
             cur, hidden_start = a, False
-            for s, e in spans:
-                if e <= a or s >= b:
-                    continue
+            k = first_open
+            while k < len(spans) and spans[k][0] < b:
+                s, e = spans[k]
                 hidden_start = hidden_start or s <= a
                 if s > cur:
                     pieces.append(joined[cur:s])
                 cur = max(cur, e)
+                k += 1
             if cur < b:
                 pieces.append(joined[cur:b])
             if any(pieces):
@@ -284,6 +297,9 @@ def _walk(numbered: list[tuple[int, str]]) -> _Walk:
             last = bisect.bisect_right(starts, e - 1) - 1
             if last > first:
                 multi.append((para[first][0], para[last][0]))
+        for pos in openers:
+            form = "<!--->" if joined.startswith("<!--->", pos) else "<!-->"
+            empty.append((para[bisect.bisect_right(starts, pos) - 1][0], form))
         para.clear()
 
     in_block: int | None = None
@@ -303,7 +319,7 @@ def _walk(numbered: list[tuple[int, str]]) -> _Walk:
             continue
         para.append((n, line))
     flush()
-    return _Walk(out, multi)
+    return _Walk(out, multi, empty)
 
 
 def visible(text: str) -> list[Line]:
@@ -401,38 +417,56 @@ class HeadingRule:
         return next((h for h in headings(text) if self.fits(h.level, h.text)), None)
 
 
-_EMPTY_COMMENTS = ("<!-->", "<!--->")
+def _empty_comment(lineno: int, form: str) -> str:
+    return (f"line {lineno}: `{form}` closes a comment for a renderer but opens one for the "
+            f"gates, which hide what follows up to the next `-->`; write `<!-- … -->` with text "
+            f"between, or remove it")
+
+
+def _closes(mark: str, fence: str) -> bool:
+    """Does the fence marker `mark` close `fence` in the gates' reading (`_legacy_scan`)?"""
+    return mark[0] == fence[0] and len(mark) >= len(fence)
 
 
 def _block_comments(lines: list[str]) -> tuple[int, int, str] | None:
     """Rules 2, 5 and 7 — one walk over the block comments, whichever opens first wins (a
     `<!--` inside a code block is code, r2 M1): (line, rule, message) of the first of a
-    fence marker inside a comment opened outside a fence (2), a comment that never closes
-    (5), a line holding only `<!-->` or `<!--->` (7)."""
+    comment opened outside a fence whose `-->` stands on a line the gates read as code —
+    a fence opened inside it and not closed before (2), a comment that never closes (5),
+    a block line opening with `<!-->` or `<!--->` (7)."""
     fence: str | None = None
     comment: int | None = None
+    inner: str | None = None  # a fence opened inside the comment, in the gates' reading
+    inner_line = 0
     for i, line in enumerate(lines, 1):
         m = _FENCE_MARK.match(line.strip())
         if fence is not None:
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+            if m and _closes(m.group(1), fence):
                 fence = None
             continue
         if comment is not None:
-            if m:
-                return i, 2, (f"line {i}: a code fence stands inside the HTML comment opened on line "
-                              f"{comment} — the gates read a code block from here and hide what "
-                              f"follows the comment, a renderer shows it; take the fence out of the "
-                              f"comment")
+            quoted = inner is not None or m is not None  # a fence line is quoted itself
+            if inner is None and m:
+                inner, inner_line = m.group(1), i
+            elif inner is not None and m and _closes(m.group(1), inner):
+                inner = None
             if "-->" in line:
+                if quoted:
+                    return inner_line, 2, (
+                        f"line {inner_line}: a code fence stands inside the HTML comment opened on "
+                        f"line {comment} and the comment's `-->` on line {i} falls in its code block "
+                        f"— the gates hide what follows the comment, a renderer shows it; close the "
+                        f"fence before the `-->`, or take it out of the comment")
                 comment = None
             continue
         if m:
             fence = m.group(1)
-        elif line.strip() in _EMPTY_COMMENTS:
-            return i, 7, (f"line {i}: `{line.strip()}` closes a comment for a renderer but opens one "
-                          f"for the gates; write `<!-- … -->` or remove the line")
-        elif _BLOCK_COMMENT.match(line) and "-->" not in line[line.index("<!--") + 4:]:
-            comment = i
+        elif _BLOCK_COMMENT.match(line):
+            rest = line[line.index("<!--") + 4:]
+            if rest.startswith((">", "->")):
+                return i, 7, _empty_comment(i, "<!--->" if rest.startswith("->") else "<!-->")
+            if "-->" not in rest:
+                comment = i
     if comment is not None:
         return comment, 5, (f"line {comment}: an HTML comment opens here and never closes — it hides "
                             f"the rest of the file from every gate; close it with `-->`")
@@ -471,7 +505,8 @@ def ambiguity_problem(text: str) -> str | None:
     two ways, with what to do — or None:
 
       1. the two fence readings differ (`fence_drift_problem`, #250);
-      2. a fence marker inside an HTML comment opened outside a fence;
+      2. an HTML comment opened outside a fence whose `-->` falls in a code block the
+         gates read — a fence opened inside the comment and still open there;
       3. U+2028, U+2029, U+0085, a vertical tab, a form feed or FS/GS/RS — `splitlines`
          ends a line there, a renderer does not;
       4. an inline `<!--` closed on a later line, with a line in between (or on either
@@ -480,15 +515,17 @@ def ambiguity_problem(text: str) -> str | None:
       5. a block `<!--` that never closes — it hides the rest of the file;
       6. a fence opened four or more columns in whose closer stands more than three
          columns further left, or never comes;
-      7. a line holding only `<!-->` or `<!--->` — a renderer closes the comment there,
-         `uncommented` does not.
+      7. a `<!-->` or `<!--->` opening a comment, on a line of its own or with text after
+         it, in a block or in running text — a renderer closes the comment there,
+         `uncommented` searches on to the next `-->`.
     """
     body = text.removeprefix(_BOM)
     lines = body.splitlines()
     found: list[tuple[int, int, str]] = []
     odd = ODD_LINE_ENDS.search(body)
     if odd:
-        n = body.count("\n", 0, odd.start()) + 1
+        at = odd.start()  # `\r\n`, `\r` and `\n` end a line, as `splitlines` counts the lines
+        n = body.count("\n", 0, at) + body.count("\r", 0, at) - body.count("\r\n", 0, at) + 1
         found.append((n, 3, (f"line {n} holds {_ODD_NAMES[odd.group()]} (U+{ord(odd.group()):04X}) — "
                              f"the gates end a line there, a renderer does not; replace it with a "
                              f"newline or a space")))
@@ -498,7 +535,9 @@ def ambiguity_problem(text: str) -> str | None:
     comments = _block_comments(lines)
     if comments:
         found.append(comments)
-    for first, last in _walk(fenced_lines(body)[0]).spans:
+    walk = _walk(fenced_lines(body)[0])
+    found += [(n, 7, _empty_comment(n, form)) for n, form in walk.empties]
+    for first, last in walk.spans:
         for n in range(first, last + 1):
             raw = lines[n - 1]
             if heading(raw) is not None or _FENCE_MARK.match(raw.strip()):

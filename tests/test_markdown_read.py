@@ -138,6 +138,69 @@ def test_the_first_line_wins():
     assert md.ambiguity_problem("a <!-- c\n## H\n--> b\n\n## A B\n").startswith("line 2:")
 
 
+@pytest.mark.parametrize("text,line", [
+    ("<!--> TODO\n## Decisions\n- x\n<!-- end -->\n", 1),  # CommonMark closes on the start line
+    ("x\n\n<!---> TODO\n## Decisions\n-->\n", 3),
+    ("  <!-->\n## H\n", 1),
+    ("a <!--> b\nc -->\n", 1),  # in running text the gates search on past it too
+])
+def test_an_empty_comment_opener_is_reported_with_text_after_it(text, line):
+    """Review #443, rule 7: `<!-->` / `<!--->` with text after it hid everything up to the
+    next `-->` without a report."""
+    problem = md.ambiguity_problem(text)
+    assert problem is not None and problem.startswith(f"line {line}:"), problem
+    assert "`<!-- … -->` with text between" in problem
+
+
+@pytest.mark.parametrize("text", [
+    "<!---->\n## H\n",  # `-->` four after `<!--`: closes for both readings
+    "<!-- a --> b\n## H\n",
+    "<!--\n<!-->\n-->\n\n## H\n",  # inside an open comment it is comment text
+])
+def test_a_comment_closed_for_both_readings_is_not_rule_7(text):
+    assert md.ambiguity_problem(text) is None
+
+
+def test_a_fence_balanced_inside_a_comment_is_no_ambiguity():
+    """Review #443, rule 2: the fence opens and closes inside the comment, `-->` closes it —
+    both readings agree and the heading below is read."""
+    text = "<!--\n```yaml\nx: 1\n```\n-->\n## H"
+    assert md.ambiguity_problem(text) is None
+    assert md.headings(text) == [md.Heading(2, "H", 6)]
+
+
+@pytest.mark.parametrize("text,needle", [
+    ("<!--\n```\n-->\n\n## Regel\n", "line 2: a code fence stands inside the HTML comment opened on line 1"),
+    ("<!--\n```\nx\n``` -->\n\n## Regel\n", "line 2:"),  # `-->` on the closing fence line
+    ("<!--\n```-->\n```\n## Regel\n", "line 2:"),  # `-->` on the opening fence line
+    ("<!--\n~~~\n-->\n~~~\n## Regel\n", "line 2:"),  # the fence closes only after the comment
+])
+def test_a_comment_closing_inside_a_fence_is_reported(text, needle):
+    problem = md.ambiguity_problem(text)
+    assert problem is not None and problem.startswith(needle), problem
+
+
+def test_rule_3_counts_every_line_end_the_other_rules_count():
+    """Review #443: a lone `\\r` ends a line for `splitlines` — rule 3 named line 1 here."""
+    assert md.ambiguity_problem("## A\r<!-- x  --> \r## B\r").startswith("line 2 holds a line separator")
+    assert md.ambiguity_problem("a\r\nb\r\nc \n").startswith("line 3 holds")
+
+
+def test_the_comment_walk_is_linear_in_one_paragraph():
+    """Review #443: `_walk.flush` read every span for every line — 16000 rows with an inline
+    comment each took 14.7 s."""
+    import time
+    sample = "a <!-- x --> b <!-- y\nz --> c <!-- w --> d\n<!-- only -->\ne <!-- p --><!-- q --> f\ng\n"
+    assert md._walk(list(enumerate(sample.splitlines(), 1))) == md._Walk(
+        [md.Line(1, "a  b ", False), md.Line(2, " c  d", True), md.Line(4, "e  f", False),
+         md.Line(5, "g", False)], [(1, 2)], [])
+    rows = "".join(f"row {i} <!-- c -->\n" for i in range(20000))
+    start = time.perf_counter()
+    seen = md.visible_lines(rows)
+    assert time.perf_counter() - start < 2.0
+    assert len(seen) == 20000 and seen[-1] == (20000, "row 19999 ")
+
+
 # --- one owner: the moved names, re-exported --------------------------------------
 
 MOVED = ("_legacy_scan", "_strict_scan", "fenced_lines", "fence_drift_problem", "uncommented",
