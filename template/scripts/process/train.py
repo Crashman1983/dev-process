@@ -1269,24 +1269,9 @@ def _clear_aborts(root: Path, stamp: str) -> None:
 _DISK_NOTES: set[str] = set()  # a misconfigured limit is said once per process, logged per check
 
 
-def _nearest_dir(path: Path) -> Path:
-    """`path` or its nearest ancestor that exists: before the first train `<root>-train` is not there."""
-    while not path.exists() and path.parent != path:
-        path = path.parent
-    return path
-
-
-def _temp_root() -> Path:
-    """The temp dir the suite's children write to, read as they read it: `TMPDIR`, `TEMP`,
-    `TMP` (Python's order), else the platform's default. Never `tempfile.gettempdir()`: it
-    test-writes, falls back to another dir (or the cwd) when that disk is full, and caches
-    the answer — the full disk would never be checked."""
-    for name in ("TMPDIR", "TEMP", "TMP"):
-        if value := os.environ.get(name):
-            return Path(value)
-    if os.name == "nt":
-        return Path(os.environ.get("SYSTEMROOT") or r"C:\Windows") / "Temp"
-    return Path("/tmp")
+# the readers live in process_git (v2.102 M5: tools/release.py checks the same disks)
+_nearest_dir = process_git.nearest_dir
+_temp_root = process_git.temp_root
 
 
 def _disk_full(where: Path, log) -> str | None:

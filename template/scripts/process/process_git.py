@@ -95,6 +95,28 @@ def disk_use(path: Path, *, fallback: bool = False) -> DiskUse:
     return DiskUse(100.0 * u.used / (u.used + u.free), misconfigured, limit, u.free)
 
 
+def nearest_dir(path: Path) -> Path:
+    """`path` or its nearest ancestor that exists: before the first train `<root>-train` is
+    not there, and a `TMPDIR` may name a folder nobody made."""
+    while not path.exists() and path.parent != path:
+        path = path.parent
+    return path
+
+
+def temp_root() -> Path:
+    """The temp dir a suite's children write to, read as they read it: `TMPDIR`, `TEMP`,
+    `TMP` (Python's order), else the platform's default. Never `tempfile.gettempdir()`: it
+    test-writes, falls back to another dir (or the cwd) when that disk is full, and caches
+    the answer — the full disk would never be checked. One reader for the train and
+    `tools/release.py`."""
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        if value := os.environ.get(name):
+            return Path(value)
+    if os.name == "nt":
+        return Path(os.environ.get("SYSTEMROOT") or r"C:\Windows") / "Temp"
+    return Path("/tmp")
+
+
 def disk_full_line(path: Path, use_pct: float) -> str:
     """`disk-full <path> <use>%`: the reason of a train that halts and the marker line of a
     refused start — one grammar, counted by its first two words (`train-phases`)."""

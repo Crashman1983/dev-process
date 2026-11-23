@@ -358,3 +358,191 @@ def test_a_released_entry_is_not_held_to_the_marks(tmp_path):
 def test_the_release_tools_read_the_entry_grammar_from_their_own_tree():
     """not from the `root` argument: a test root has no template (plan r3 m7)"""
     assert Path(rel.changelog.__file__) == REPO / "template/scripts/process/changelog.py"
+
+
+# --- v2.102 M5: a release does not fill the disk, and a failed run loses no notes ---
+
+GB = 2**30
+VERSION_FILES = (*(path for path, _ in rel.LOCATIONS), "docs/sbom.cdx.json", "docs/SBOM.md")
+
+
+@pytest.fixture(autouse=True)
+def _room(monkeypatch, tmp_path_factory):
+    """Every release test here runs with room to spare and its own temp dir — the host's
+    free space is no input; the M5 tests below set what they measure."""
+    monkeypatch.setenv("RELEASE_MIN_FREE_GB", "0")
+    monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "100")
+    tmp = tmp_path_factory.mktemp("tmpdir")
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.setenv(name, str(tmp))
+    return tmp
+
+
+def _git_release_repo(tmp_path: Path) -> Path:
+    """`_git_repo` with the SBOM the release regenerates, committed (`git add` names it)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    root = _copy(tmp_path)
+    _changelogs(root)
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs/sbom.cdx.json").write_text('{"version": "old"}\n', encoding="utf-8")
+    (root / "docs/SBOM.md").write_text("# SBOM old\n", encoding="utf-8")
+    for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@t"],
+                 ["config", "user.name", "t"], ["config", "commit.gpgsign", "false"],
+                 ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    return root
+
+
+def _bytes(root: Path, rels=VERSION_FILES) -> dict[str, bytes | None]:
+    return {r: (root / r).read_bytes() if (root / r).is_file() else None for r in rels}
+
+
+def _faking(root: Path, monkeypatch, *, fail: str | None = None, interrupt: bool = False):
+    """Real git; the SBOM writes both of its files, every other step passes — but `fail`
+    (a word of the step's argv) exits 1, and with `interrupt` the suite is interrupted."""
+    real, calls = subprocess.run, []
+
+    def fake(argv, **kw):
+        calls.append((list(argv), kw))
+        if fail and fail in argv:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+        if "pytest" in argv and interrupt:
+            raise KeyboardInterrupt
+        if argv[0] == "git":
+            return real(argv, **kw)
+        if any("gen_sbom" in str(a) for a in argv):
+            (root / "docs/sbom.cdx.json").write_text('{"version": "9.9.9"}\n', encoding="utf-8")
+            (root / "docs/SBOM.md").write_text("# SBOM 9.9.9\n", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+    monkeypatch.setattr(rel.subprocess, "run", fake)
+    return calls
+
+
+def test_too_little_room_refuses_before_the_bump(tmp_path, monkeypatch, _room):
+    """r1 B2: the suite filled the disk mid-release. Below RELEASE_MIN_FREE_GB on the repo's
+    or the temp dir's disk: no change, and what to clear (the train's hint)."""
+    root = _git_release_repo(tmp_path)
+    before = _bytes(root)
+    monkeypatch.setenv("RELEASE_MIN_FREE_GB", "12")
+    monkeypatch.setattr(rel.process_git, "disk_use",
+                        lambda path, fallback=False: rel.process_git.DiskUse(50.0, None, 90.0, 3 * GB))
+    calls = _faking(root, monkeypatch)
+
+    with pytest.raises(SystemExit) as refused:
+        rel.release(root, "v9.9.9")
+    msg = str(refused.value)
+    assert "needs 12 GB" in msg and "RELEASE_MIN_FREE_GB" in msg and "nothing changed" in msg, msg
+    assert f"old test basetemps under {_room} (pytest-of-*" in msg, msg
+    assert _bytes(root) == before
+    assert not [argv for argv, _ in calls if argv[0] != "git"], calls  # no sbom, lint, suite
+
+
+def test_a_disk_over_the_percent_limit_refuses_too(tmp_path, monkeypatch):
+    """The train's limit holds here as well (PROCESS_DISK_LIMIT_PCT), however many GB are free."""
+    root = _git_release_repo(tmp_path)
+    before = _bytes(root)
+    monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "90")
+    monkeypatch.setattr(rel.process_git, "disk_use",
+                        lambda path, fallback=False: rel.process_git.DiskUse(95.0, None, 90.0, 500 * GB))
+    _faking(root, monkeypatch)
+
+    with pytest.raises(SystemExit, match=r"disk-full .* 95%"):
+        rel.release(root, "v9.9.9")
+    assert _bytes(root) == before
+
+
+def test_a_missing_tmpdir_does_not_crash(tmp_path, monkeypatch):
+    """Unset, the platform default is read; set to a folder that is not there, the check
+    measures its nearest existing parent and the suite's folder goes there."""
+    root = _git_release_repo(tmp_path / "first")
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        monkeypatch.delenv(name, raising=False)
+    _faking(root, monkeypatch)
+    rel.release(root, "v9.9.9", suite=False)
+
+    root = _git_release_repo(tmp_path / "second")
+    gone = tmp_path / "gone" / "deeper"
+    monkeypatch.setenv("TMPDIR", str(gone))
+    calls = _faking(root, monkeypatch)
+    rel.release(root, "v9.9.9")
+    suite = next(argv for argv, _ in calls if "pytest" in argv)
+    basetemp = Path(next(a for a in suite if a.startswith("--basetemp=")).split("=", 1)[1])
+    assert basetemp.parent.parent == tmp_path and not basetemp.parent.exists(), basetemp
+
+
+def test_the_suite_runs_in_its_own_temp_folder_and_leaves_none(tmp_path, monkeypatch, _room):
+    """r2 M4: `--basetemp` before the xdist arguments, and TMPDIR/TEMP/TMP of the suite in the
+    same folder — pytest runs inside tests land there too; the folder is gone afterwards."""
+    root = _git_release_repo(tmp_path)
+    calls = _faking(root, monkeypatch)
+    monkeypatch.setattr(rel.importlib.util, "find_spec", lambda name: object())
+    rel.release(root, "v9.9.9")
+    suite, kw = next((argv, kw) for argv, kw in calls if "pytest" in argv)
+    assert suite[-4:] == ["-n", "4", "--dist", "loadfile"] and suite[-5].startswith("--basetemp="), suite
+    folder = Path(suite[-5].split("=", 1)[1]).parent
+    assert folder.parent == _room, folder
+    assert {kw["env"][name] for name in ("TMPDIR", "TEMP", "TMP")} == {str(folder / "tmp")}, kw["env"]
+    assert list(_room.iterdir()) == []
+
+
+@pytest.mark.parametrize("how", ["pytest", "ruff", "interrupt"])
+def test_a_failed_run_restores_the_version_files_and_keeps_the_notes(tmp_path, monkeypatch, _room, how):
+    """r1 B2, r2 M6: a failed run left the files bumped; resetting every release file would
+    have dropped the unsaved notes. Only what bump and gen_sbom write goes back, byte for
+    byte — also on an interrupt — and no temp folder is left."""
+    root = _git_release_repo(tmp_path)
+    before = _bytes(root)
+    notes = "## v9.9.9 — t · 2026-10-15\n\nbody, still being written\r\n"
+    (root / "CHANGELOG.md").write_text(notes, encoding="utf-8", newline="")
+    unsaved = (root / "CHANGELOG.md").read_bytes()
+    calls = _faking(root, monkeypatch, fail=None if how == "interrupt" else how, interrupt=how == "interrupt")
+
+    with pytest.raises(KeyboardInterrupt if how == "interrupt" else SystemExit):
+        rel.release(root, "v9.9.9")
+    assert _bytes(root) == before
+    assert (root / "CHANGELOG.md").read_bytes() == unsaved
+    assert list(_room.iterdir()) == []
+    assert not any("commit" in argv or "add" in argv for argv, _ in calls)
+
+
+def test_a_failed_restore_is_named(tmp_path, monkeypatch, capsys):
+    root = _git_release_repo(tmp_path)
+    _faking(root, monkeypatch, fail="ruff")
+    real_write = Path.write_bytes
+
+    def write_bytes(self, data):
+        if self.name == "README-DE.md":
+            raise OSError("read-only")
+        return real_write(self, data)
+    monkeypatch.setattr(Path, "write_bytes", write_bytes)
+
+    with pytest.raises(SystemExit, match="lint failed"):
+        rel.release(root, "v9.9.9")
+    err = capsys.readouterr().err
+    assert "not restored" in err and "README-DE.md" in err.split("not restored", 1)[1], err
+    assert "pyproject.toml" not in err.split("not restored", 1)[1], err
+
+
+def test_a_failed_commit_keeps_the_staged_release(tmp_path, monkeypatch):
+    """r2 M6: past `git add` the run is tested and staged — nothing is reset, the message
+    says only the commit is missing."""
+    root = _git_release_repo(tmp_path)
+    _faking(root, monkeypatch, fail="commit")
+
+    with pytest.raises(SystemExit, match="tested and staged, only the commit is missing"):
+        rel.release(root, "v9.9.9")
+    assert rel.mismatches(root, "9.9.9") == []
+    staged = subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=root,
+                            capture_output=True, text=True, check=True).stdout.split()
+    assert set(VERSION_FILES) <= set(staged), staged
+
+
+def test_the_free_space_default_is_the_one_maintaining_names():
+    text = " ".join((REPO / "MAINTAINING.md").read_text(encoding="utf-8").split())
+    assert f"`RELEASE_MIN_FREE_GB` frei sein (Vorgabe {rel.MIN_FREE_GB:g} GB" in text
+
+
+def test_release_reads_the_disk_with_process_git_of_its_own_tree():
+    """loaded by its path, not through the train and its imports (r2 M5)"""
+    assert Path(rel.process_git.__file__) == REPO / "template/scripts/process/process_git.py"
+    assert "train" not in vars(rel)
