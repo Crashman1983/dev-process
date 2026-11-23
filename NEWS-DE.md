@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.102.0 — Ein Leser für Markdown-Überschriften; ein Release-Lauf, der die Platte schont
+
+Die Prüfungen lesen Markdown-Überschriften jetzt so, wie ein Leser sie sieht, alle mit einer Regel. Eine Zeile nur aus `##`, ein Code-Block, den eine Zeile mit zusätzlichem Text schließt, oder eine Code-Marke in einem Kommentar lassen keine Prüfung mehr eine Überschrift sehen, die das Dokument nicht zeigt. Lässt sich eine Datei zweifach lesen, sagt die Prüfung das und nennt die Zeile, statt zu raten. Das Release-Werkzeug des Templates füllt die Platte nicht mehr und verliert bei einem gescheiterten Lauf keine halb geschriebenen Release-Notizen.
+
 ## v2.101.0 — Ein Nutzerziel für Web und native Apps
 
 Ein Team kann gemeinsames Verhalten auf mehreren Geräten in einer Story beschreiben. Pro Gerät lässt sich festhalten, welches Issue noch offen ist. Ein gemeinsamer Plan kann die Designregeln jeder Plattform gezielt zitieren. Im Review-Bericht wird sichtbar, wenn mehrere Urteile denselben Änderungsstand betreffen.

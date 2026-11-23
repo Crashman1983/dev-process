@@ -10,6 +10,56 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.102.0 — One reader for Markdown headings; a release run that spares the disk · 2026-11-23
+
+**Why.**
+- The gates read Markdown headings with about ten patterns of their own (#443, found in Kenni's registry checker). The inputs were found on v2.101.0:
+  - `##` with "Regel" on the next line read as the heading "Regel";
+  - a fence line such as ```` ```suffix ```` closed a code block;
+  - a fence marker inside an HTML comment hid everything after it;
+  - U+2028 split a heading.
+
+  A design contract could thereby treat a clause as defined that the rendered document does not show.
+- `tools/release.py` stopped on a full disk with a traceback and left a half-written version bump. The suite filled pytest's default temp directory, about 15 GB per run.
+
+**What changes.**
+- [required] **One reader for headings.** `markdown_read.py` (new, stdlib only) owns `headings()`, `visible_lines()` and `ambiguity_problem()`. The record readers (`fenced_lines`, `readable`, `uncommented`) move there unchanged and stay importable from `check_review`.
+  - **Gates on the reader:** the design-contract gate, the overlays gate, the plan-structure gate, the product frame, the decisions gate, Spec Kit, and the Transitions and Decisions headings. Each reads headings by CommonMark's ATX rules: indent up to 3, never across a line, closing `#` stripped.
+  - **What counts as visible:** the reader sees only the text the record readers see.
+- [required] **A file that reads two ways is red.** Every gate that reads headings asks `ambiguity_problem` on the same file and fails hard on:
+  - fence drift, for example ```` ```suffix ````;
+  - a comment that closes inside a fence;
+  - U+2028 and other odd line separators;
+  - an inline comment spanning a heading;
+  - an unclosed comment;
+  - a fence indented 4+ spaces without a matching closer;
+  - `<!-->`.
+
+  No gate guesses which reading the renderer takes. Template docs are clean, and in Kenni no gated file goes red (4452 files scanned).
+- [recommended] **Behaviour changes, named:**
+  - a heading inside an HTML comment no longer counts (for example as a required plan section);
+  - an indented heading (up to 3 spaces) counts everywhere;
+  - a bare `##` never joins the next line;
+  - the design-contract Trace also ends at a level-1 heading;
+  - an ADR `## Status` indented 4 or more spaces is indented code and no longer counts.
+- [optional] **`tools/release.py`.** These are maintainer tooling changes; adopters are unaffected.
+  - It checks free space (`RELEASE_MIN_FREE_GB`, default 18) before the bump.
+  - It runs the suite in its own temp folder and removes it afterwards.
+  - If a step fails before staging, it restores exactly the files the bump and the SBOM wrote, and never the release notes.
+
+**Effect.**
+- Every gate reads the same headings a reader sees. A document whose fences or comments can be read two ways is reported instead of read silently.
+
+**Changed sections.**
+- `overlays.md` (Overlays: project notes on template docs; What an overlay says)
+
+**Update.**
+- Pure update. Overlay anchors keep their hashes, checked against the v2.101 reader for every rendered template doc and all of Kenni's anchors.
+- A project file that reads two ways now fails its gate. The message names the line and what to change.
+- Not read, as before: headings in list items, block quotes or raw HTML blocks, and setext headings outside the plan-structure gate.
+
+Details: [Plan](docs/analysis/2026-11-23-v2.102.md) #443
+
 ## v2.101.0 — Shared behaviour across surfaces · 2026-11-21
 
 **Why.** Kenni tracks shared behaviour with different delivery and proof status on Web, iPhone and Mac. In v2.100 a plan citing separate contracts could fail because they used the same ID prefix.

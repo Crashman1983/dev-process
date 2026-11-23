@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.102.0 — One reader for Markdown headings; a release run that spares the disk
+
+The checks now read Markdown headings the way a reader sees them, all with one rule. A line with only `##`, a code block closed by a line that carries extra text, or a code fence inside a comment no longer makes a check see a heading the document does not show. Where a file can be read two ways, the check says so and names the line, instead of guessing. The template's own release tool no longer fills the disk or loses half-written release notes when a run fails.
+
 ## v2.101.0 — One user goal across Web and native apps
 
 A team can keep one story for a behaviour that people expect on several devices. The story can point to a different open issue on each device. A shared plan can cite each platform’s design rules separately. Review reporting also shows how often people judged the same change.
