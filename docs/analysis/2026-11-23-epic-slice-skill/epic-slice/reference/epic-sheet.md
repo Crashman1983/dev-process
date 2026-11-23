@@ -45,12 +45,16 @@ Darunter der Datenblock:
     "frontend-react/src/routes.tsx",
     "docs/openapi.json"
   ],
+  "bootstrap": [
+    ["npm", "--prefix", "frontend-react", "ci"]
+  ],
   "regular": [
     {"issue": 3093, "reason": "Auth- und Sitzungszustand, Tier 3, landet vor Scheibe s2"}
   ],
   "slices": [
     {
       "id": "s1",
+      "branch": "3061-s1",
       "base": "origin/main",
       "max_parallel": 4,
       "checks": [
@@ -84,20 +88,39 @@ müssen für das Projekt ersetzt werden.
 | `integration_owner` | Pflicht. Wer zusammenführt und gemeinsame Dateien ändert |
 | `cross_cutting` | Je Eintrag `behavior` und `owner` |
 | `shared_paths` | Muster der gemeinsamen Dateien; kein Issue darf sie besitzen |
+| `bootstrap` | Befehle, die einmal in jedem frischen Worktree laufen (Abhängigkeiten) |
 | `regular` | Issues, die den normalen Weg gehen (alles ab Tier 3) |
+| `slices[].branch` | Name des Scheibenzweigs; Standard `<epic>-<id>` |
 | `slices[].base` | Pflicht. Von wo die Scheibe abzweigt |
 | `slices[].checks` | Prüfbefehle auf dem zusammengeführten Stand, je Befehl eine Liste |
-| `slices[].issues[].owns` | Pflicht. Muster der Dateien, die dem Issue gehören |
-| `slices[].issues[].tier` | Höchstens 2; Tier 3 wird abgelehnt |
+| `slices[].issues[].issue` | Nummer; je Scheibe nur einmal |
+| `slices[].issues[].owns` | Pflicht. Muster der Dateien, die dem Issue gehören; jedes beginnt mit einem festen Ordner |
+| `slices[].issues[].tier` | Pflicht, eine Zahl bis 2; Tier 3 wird abgelehnt |
 | `slices[].issues[].tests` | Was der Arbeiter und sein Prüfer ausführen |
 
 `load_sheet()` lehnt das Blatt ab, wenn sich die Dateien zweier Issues einer
 Scheibe überlappen oder ein Issue eine gemeinsame Datei besitzt. Die Prüfung
-vergleicht nur den festen Anfang der Muster, sie ist also grob: `src/a/*` und
-`src/a/x/*` überlappen, `src/a/*` und `src/ab/*` ebenfalls. Schneide die Muster
-im Zweifel entlang von Ordnern.
+vergleicht nur den festen Anfang der Muster und meldet lieber zu viel:
+`src/a/*` und `src/a/x/*` überlappen, `src/a/*.tsx` und `src/a/*.css` gelten
+ebenfalls als überlappend. Schneide die Muster entlang von Ordnern.
 
-`*` überschreitet Verzeichnisgrenzen: `src/chat/*` meint den ganzen Baum.
+Die Mustersprache ist bewusst klein und nicht die des Prozess-Werkzeugs:
+
+- Nur `*` und `?` sind besonders. `*` überschreitet Verzeichnisgrenzen:
+  `src/chat/*` meint den ganzen Baum.
+- Ein Muster ohne Platzhalter meint die Datei oder den ganzen Ordner dieses
+  Namens: `src/chat` und `src/chat/` sind dasselbe wie `src/chat/*`.
+- Eckige Klammern sind wörtlich, Ordner wie `[id]` bleiben also treffbar.
+- Groß- und Kleinschreibung zählt, auch auf einem Mac.
+
+## Das Blatt ist nicht der Plan der Scheibe
+
+Das Blatt klärt Referenz, Aufteilung und Reihenfolge für das ganze Epic. Die
+Gates eines Projekts binden Review und Tests aber an einen Plan je Arbeit, mit
+Kriterien in fester Form und je Kriterium einer Testzeile. Für jede Scheibe
+entsteht deshalb vor dem ersten Push ein Plan im Format des Projekts, der die
+Kriterien ihrer Issues sammelt. Wie knapp dieser Plan sein darf, entscheidet
+das Projekt; der Skill legt es nicht fest.
 
 ## Woran ein gutes Blatt zu erkennen ist
 

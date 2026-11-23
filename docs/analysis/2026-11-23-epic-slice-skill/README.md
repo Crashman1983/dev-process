@@ -1,9 +1,9 @@
 # Entwurf: Skill „Epic-Scheibe"
 
-Stand 2026-11-23. Ein Entwurf zum Ausprobieren in Kenni, kein Teil des
-Templates. Er folgt aus der Frage, ob sich das schnelle, parallele Bauen aus
-der KenniHybrid-Sitzung im Dev-Prozess abbilden lässt, ohne an ein Harness
-gebunden zu sein.
+Stand 2026-11-23, zweite Fassung nach einem unabhängigen Review. Ein Entwurf
+zum Ausprobieren in Kenni, kein Teil des Templates. Er folgt aus der Frage, ob
+sich das schnelle, parallele Bauen aus der KenniHybrid-Sitzung im Dev-Prozess
+abbilden lässt, ohne an ein Harness gebunden zu sein.
 
 ## Was der Ordner enthält
 
@@ -26,54 +26,107 @@ ohne Dialog, und er liefert sein Ergebnis als JSON-Datei; deshalb hängt nichts
 an Claude. Der Prozess hält nur Eingabe (Epic-Blatt) und Ausgabe
 (zusammengeführter, geprüfter Stand) fest, und Landen geht den normalen Weg.
 
-## Was geprüft ist und was nicht
+## Das Review und was daraus wurde
 
-Geprüft, mit einem Attrappen-Arbeiter in einem Wegwerf-Repository:
+Ein Agent mit frischem Kontext hat die erste Fassung gelesen und gegen ein
+Wegwerf-Repository ausgeführt. Er fand vier Blocker, sechs schwere und acht
+mittlere Mängel. Derselben Modellfamilie; ein Review durch eine zweite Familie
+steht aus.
 
-- Das Blatt wird abgelehnt bei fehlender Referenz, überlappenden Dateien und
-  einem Tier-3-Issue; alle Mängel kommen in einer Meldung.
-- Drei Issues bauen parallel in eigenen Worktrees und werden zusammengeführt.
-- Ein Arbeiter, der eine gemeinsame Datei ändert, bekommt eine Korrekturrunde;
-  sein Wunsch landet als `shared_requests` im Bericht.
-- Ein zweiter Lauf nimmt alle fertigen Ergebnisse aus dem Protokoll.
-- Zeitgrenze, Obergrenze je Lauf, fehlende Pflichtschlüssel und ein Konflikt
-  beim Zusammenführen verhalten sich wie beschrieben; `integrate` verweigert
-  einen Worktree auf `main`.
+Behoben und danach nachgespielt:
+
+| Befund | Jetzt |
+|---|---|
+| Lauf-Ordner und Worktrees im verfolgten Baum | liegen außerhalb; ein Ordner im verfolgten Baum wird abgelehnt |
+| Nicht committete Arbeit galt als zusammengeführt | `unfinished()` meldet es, das Issue landet unter `failed_issues` |
+| Fortsetzen nahm ein altes Prüfurteil für neuen Code | `state=` bindet ein Ergebnis an den Stand; der Prüfer läuft neu |
+| Fortsetzen verlor `shared_requests` | kommen über `recall()` aus dem Protokoll |
+| Umbenennen umging die Besitzprüfung | Diff ohne Umbenennungserkennung |
+| Abbruch ließ Arbeiter weiterlaufen | Arbeiter enden mit, wartende starten nicht mehr, ein Lauf je Ordner |
+| Kopierte Vorlage fand `flow.py` nicht | `EPIC_SLICE_HOME` |
+| Eine greifende Leitplanke kippte den Lauf ohne Bericht | beendet nur ihren Eintrag |
+| Ergebnistypen ungeprüft | `required` mit Typen |
+| Obergrenze galt je Prozess | zählt je Lauf-Ordner über Neustarts |
+| Mustersprache mit Fallen | nur `*` und `?`, Ordner ohne Platzhalter, Klammern wörtlich |
+| `tier` fehlend oder falsch getippt | Pflichtfeld, wird gemeldet statt abzustürzen |
+| „Kein Push" nur als Text | Arbeiter starten mit ungültiger Push-Adresse; `check` und `git` verweigern `push`; der Text sagt, dass das nur Versehen fängt |
+
+Im Entwurf beschrieben, aber nicht gelöst:
+
+- **Die Scheibe braucht einen Plan, den Kennis Gates annehmen.** Das Blatt hat
+  weder die Kriterien in fester Form noch die Pflichtabschnitte. Der Skill
+  verlangt jetzt einen Plan je Scheibe vor dem ersten Push und benennt den
+  Zweig `<epic>-<scheibe>`; wie dieser Plan aussieht und ob Kennis Werkzeuge
+  den Zweignamen so zuordnen, ist nicht ausprobiert.
+- **Der Rundendeckel zählt je Arbeit.** Vier bis fünf Issues teilen sich drei
+  Runden. Das ist gewollt unverändert, begrenzt aber die Scheibengröße.
+- **Merge-Commits im Scheibenzweig.** Kennis `finish` rebased; gelöste
+  Konflikte müssten dabei neu gelöst werden. Nicht ausprobiert.
+- **Ein Arbeiter, der sich aus seiner Prozessgruppe löst,** überlebt Zeitgrenze
+  und Abbruch.
+
+## Was geprüft ist
+
+Mit einem Attrappen-Arbeiter in einem Wegwerf-Repository mit eigenem Remote:
+
+- Sechs Issues parallel: vier werden zusammengeführt, eines ohne Commit und
+  eines mit verschobener gemeinsamer Datei landen unter `failed_issues`.
+- Der Push-Versuch eines Arbeiters scheitert; das Remote bleibt unverändert.
+- Der Hauptcheckout bleibt sauber.
+- Fortsetzen übernimmt fertige Ergebnisse und behält `shared_requests`; nach
+  einem neuen Commit im Worktree läuft der Prüfer neu.
+- Abbruch mit SIGINT: kein Arbeiter überlebt, die Sperre ist frei.
+- `find_verify.py` und `judge_panel.py` laufen durch, auch mit einem
+  scheiternden Arbeiter, falschem Typ und kaputtem JSON.
+- Verweigert werden: Lauf-Ordner im Baum, zweiter Lauf im selben Ordner,
+  `integrate` außerhalb der eigenen Worktrees, `git push` über `check` und `git`.
 - `ruff check` und `ruff format --check` sind sauber.
 
-Nicht geprüft:
+## Was nicht geprüft ist
 
-- **Kein Lauf mit einem echten Harness.** Ob Claude und Codex ohne Dialog
-  zuverlässig die Ergebnisdatei schreiben, ist offen.
+- **Kein Lauf mit einem echten Harness.** Ob Claude, Codex oder Copilot ohne
+  Dialog zuverlässig die Ergebnisdatei schreiben, ist offen; ebenso, ob eine
+  Sitzung in einem neuen Worktree eine Vertrauensabfrage stellt.
 - **Die Befehle in `workers.example.json` sind Beispiele.** Die Schalter für
-  Codex habe ich nicht nachgeschlagen; Kenni hat für hängende Codex-Läufe
-  eigene Regeln (`docs/dev/codex-cli-policy.md`), die hier noch fehlen.
-- **`find_verify.py` und `judge_panel.py` sind nur auf Lint geprüft**, nicht
-  durchgespielt.
-- **Kein Test im Repository.** Die Prüfung oben lief aus dem Arbeitsordner
-  der Sitzung; für das Template bräuchte es Tests in `tests/`.
-- **Verbrauch.** Jeder Arbeiter ist eine ganze Sitzung und liest seinen
-  Kontext neu ein.
+  Codex sind nicht nachgeschlagen; Kennis Regeln für hängende Codex-Läufe
+  (`docs/dev/codex-cli-policy.md`) sind nicht eingearbeitet. Ein Eintrag für
+  Copilot fehlt.
+- **Kein Gate von Kenni wurde ausgeführt.** Die Aussagen zur Passung sind
+  gelesen, nicht gelaufen.
+- **Kein Test im Repository.** Die Prüfung lief aus dem Arbeitsordner der
+  Sitzung; für das Template bräuchte es Tests in `tests/`.
+- **Verbrauch und Last.** Jeder Arbeiter ist eine ganze Sitzung.
 
-## Was vor einem Versuch in Kenni zu entscheiden ist
+## Voraussetzungen vor einem Versuch in Kenni
 
-1. **Die eine Abschwächung:** Für Tier-2-Issues einer Scheibe ersetzt das
-   einmal geprüfte Epic-Blatt das Plan-Review je Issue. Das entscheidet der
-   Owner.
-2. **Die Erlaubnis:** Im Epic-Vorgehen darf der Integrationsowner solche
-   Läufe starten, ohne jedes Mal zu fragen.
-3. **Die Zuordnung der Rollen:** welches Modell baut, welches prüft
-   (`workers.json` im Projekt).
+1. **Plan je Scheibe:** eine Vorlage, die Kennis Planstruktur erfüllt und die
+   Kriterien der Issues sammelt; ein Probe-Push zeigt, ob die Gates sie annehmen.
+2. **Abhängigkeiten je Worktree:** `bootstrap` im Blatt mit Kennis Befehlen
+   für Backend und Frontend. Ohne sie laufen weder Tests noch Build.
+3. **Testlauf-Regel:** Kennis Sperre für parallele Testläufe lässt einen
+   zweiten größeren Lauf warten und abbrechen. `max_parallel` und die Tests je
+   Issue müssen dazu passen.
+4. **Rechte der Arbeiter ohne Dialog:** committen und Tests starten ohne
+   Rückfrage; für Codex entsprechend in dessen Sandbox. Arbeiter brauchen
+   Zugriff auf die Issues.
+5. **Geprüfte Startbefehle** in `workers.json`; je Harness ein einzelner
+   Arbeiter als Rauchtest.
+6. **Der Rechner:** Auf dem Gate-Host konkurrieren die Arbeiter mit dem Zug.
+7. **Drei Entscheidungen des Owners:**
+   - Das einmal geprüfte Blatt ersetzt für Tier-2-Issues einer Scheibe das
+     Plan-Review je Issue.
+   - Der Integrationsowner darf solche Läufe ohne Rückfrage starten.
+   - Welches Modell baut und welches prüft.
 
 Unverändert bleiben sollen der Rundendeckel je Arbeit und die Regel, dass ein
-Review den ganzen Zweig ab seinem Abzweig von main deckt. Der Skill arbeitet
-mit beiden, indem Scheiben klein bleiben und laufend landen.
+Review den ganzen Zweig ab seinem Abzweig von main deckt.
 
 ## Übernahme in Kenni
 
 - Ordner `epic-slice/` nach `.agents/skills/epic-slice/` kopieren (dort liest
-  Codex seine Skills) und für Claude verlinken oder nach `.claude/skills/`
-  spiegeln.
+  Codex seine Skills) und für Claude nach `.claude/skills/` spiegeln; den
+  Ordner gibt es dort noch nicht.
+- `FLOW_ROOT` auf Kennis Worktree-Wurzel setzen.
 - `workers.json` im Projekt anlegen.
 - Eine Zeile in den Projektregeln, die das Vorgehen und seine Stelle benennt.
 - Den ersten Versuch an einer Scheibe mit vier bis fünf kleinen UI-Issues

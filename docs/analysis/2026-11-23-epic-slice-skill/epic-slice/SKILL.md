@@ -49,15 +49,21 @@ nicht in den Projektregeln, frag ihn.
 
 ## Schritt 2: den Ablauf schreiben
 
-Kopiere `templates/build_slice.py` in den Lauf-Ordner und ändere es. Bausteine:
+Kopiere `templates/build_slice.py` und ändere es. Liegt die Kopie nicht mehr im
+Skill-Ordner, setz `EPIC_SLICE_HOME` auf ihn, damit sie `flow.py` findet. Der
+Lauf-Ordner mit Protokoll und Worktrees liegt außerhalb des Checkouts
+(`default_run_dir()`: `$FLOW_ROOT/<epic>-<scheibe>`, sonst neben dem Repo); einen
+Ordner im verfolgten Baum lehnt `Flow` ab. Bausteine:
 
 | Baustein | Zweck |
 |---|---|
-| `flow.agent(prompt, label=, role=, cwd=, required=)` | ein Arbeiter; liefert sein JSON-Ergebnis oder `None` |
+| `flow.agent(prompt, label=, role=, cwd=, required=, state=)` | ein Arbeiter; liefert sein JSON-Ergebnis oder `None` |
 | `flow.pipeline(items, stufe1, stufe2, …)` | je Element eine Kette, keines wartet auf die anderen |
 | `flow.parallel([…])` | alle zugleich, wartet auf alle |
-| `flow.worktree(label, base)` | eigener Worktree und Zweig für einen schreibenden Arbeiter |
+| `flow.worktree(label, base, branch=, bootstrap=)` | eigener Worktree und Zweig; `bootstrap` installiert einmal die Abhängigkeiten |
+| `flow.unfinished(path, base)` | warum ein Arbeiterstand nicht übernehmbar ist (nicht committet, kein Commit) |
 | `flow.ownership(branch, base, owns, shared)` | welche geänderten Dateien dem Arbeiter nicht gehören |
+| `flow.recall(label)` | das letzte gültige Ergebnis unter einem Label, auch aus einem früheren Lauf |
 | `flow.integrate(worktree, branches)` | lokal zusammenführen; Konflikte werden gemeldet, nicht gelöst |
 | `flow.check(argv, cwd)` | ein Prüfbefehl auf dem zusammengeführten Stand |
 
@@ -69,7 +75,14 @@ Regeln für das Skript:
   laufen im Repo.
 - **Ein Arbeiter bekommt alles im Auftrag:** Referenz, eigene Dateien,
   verbotene Dateien, Tests, Ergebnisformat. Er kennt deinen Verlauf nicht.
-- **Verlange ein Ergebnisformat** über `required`. Prosa wertest du nicht aus.
+- **Verlange ein Ergebnisformat mit Typen** über `required={"findings": "list"}`.
+  Prosa wertest du nicht aus, und ein Text, wo eine Liste stehen soll, gilt als
+  gescheitert.
+- **Sag, woran ein Ergebnis hängt.** Ein Prüfer bekommt `state=flow.head(worktree)`.
+  Ändert sich der Stand, läuft er beim nächsten Mal neu; ohne `state` käme sein
+  altes Urteil aus dem Protokoll.
+- **Nicht committete Arbeit zählt nicht.** Prüfe mit `flow.unfinished`, bevor du
+  zusammenführst.
 - **Rollen statt Modelle.** `role="build"`, `"check"`, `"plan"`; welcher Befehl
   und welches Modell dahinterstehen, sagt `workers.json` des Projekts. So kann
   dieselbe Scheibe mit Claude bauen und mit Codex prüfen.
@@ -107,6 +120,14 @@ Landen ist nicht Teil des Laufs und geht den normalen Weg des Projekts:
 
 - Der Scheibenzweig geht als eine Arbeit ins unabhängige Review und in den
   Merge-Zug. Die Bausteine pushen nicht und mergen nicht nach main.
+- **Die Scheibe braucht einen Plan, den die Gates des Projekts annehmen.** Das
+  Epic-Blatt ist dieser Plan nicht von selbst: Die Kriterien aller Issues der
+  Scheibe mit ihren Testzeilen und die Pflichtabschnitte des Projekts gehören
+  in einen Plan zur Scheibe, bevor der Zweig zum ersten Mal gepusht wird. Der
+  Scheibenzweig heißt `<epic>-<scheibe>`, damit die Werkzeuge die Arbeit
+  zuordnen können.
+- Runden zählen je Arbeit. Eine Scheibe hat denselben Rundendeckel wie ein
+  einzelnes Issue; auch deshalb bleibt sie klein.
 - **Scheiben landen laufend, eine nach der anderen**, sobald sie stabil sind.
   Ein Review deckt immer den ganzen Zweig ab seinem Abzweig von main; ein
   Stapel ungelandeter Scheiben macht das letzte Review so groß wie das Epic.
@@ -115,11 +136,17 @@ Landen ist nicht Teil des Laufs und geht den normalen Weg des Projekts:
 
 ## Leitplanken
 
-Die Bausteine erzwingen: Obergrenze für Arbeiter gleichzeitig (Standard 4) und
-je Lauf (40), Zeitgrenze je Arbeiter (30 Minuten), eigener Worktree je
-schreibendem Arbeiter, keine Zusammenführung auf `main`/`master`, kein Push.
+Die Bausteine halten: Obergrenze für Arbeiter gleichzeitig (Standard 4) und je
+Lauf-Ordner über alle Neustarts (40), Zeitgrenze je Arbeiter (30 Minuten), ein
+Lauf je Ordner, Zusammenführen nur in einem Worktree dieses Laufs und nie auf
+`main`/`master`. Bricht dein Skript ab, enden die Arbeiter mit.
 Heb eine Grenze nur an, wenn die Aufgabe es verlangt, und schreib den Grund
 ins Protokoll. Vier bis sechs parallele Issues kann ein Integrationsowner
 aufnehmen; mehr Breite verschiebt die Arbeit nur ans Zusammenführen.
+
+Was sie nicht halten: Ein Arbeiter ist eine eigene Sitzung mit eigenen Rechten.
+Er startet mit einer Git-Einstellung, die `git push` zu den Remotes des Repos
+scheitern lässt, und sein Auftrag verbietet Push und Merge. Das fängt Versehen,
+keinen Vorsatz. Die Grenze, die hält, ist das Gate des Projekts am Gang nach main.
 
 Ein Arbeiter aus deinem Lauf ist nie der Reviewer am Landen.
