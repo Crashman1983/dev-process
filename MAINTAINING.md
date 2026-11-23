@@ -149,6 +149,18 @@ Der bestehende Weg, unverändert:
    nicht im CHANGELOG. Dazu je ein Abschnitt in `NEWS.md` und `NEWS-DE.md` (`## vX.Y.Z — <Titel>`, drei bis sechs Sätze ohne
    Fachbegriffe: was ändert sich für ein Projekt, was bringt es);
    `python3 tools/release.py vX.Y.Z` nach Freigabe durch den Owner.
+   Vor dem Bump prüft es den Platz: Auf der Platte des Repos und der des
+   Temp-Verzeichnisses (`TMPDIR`, `TEMP`, `TMP`) müssen `RELEASE_MIN_FREE_GB`
+   frei sein (Vorgabe 18 GB, gezählt wie `df -h`) und die Prozent-Grenze des
+   Zugs (`PROCESS_DISK_LIMIT_PCT`) gilt; sonst bricht es ohne Änderung ab. Die
+   Vorgabe kommt aus einer Messung am 2026-11-23: Ein Suite-Lauf wie im Release
+   (4 Worker, `--dist loadfile`, 4457 Tests) belegte in seinem Temp-Ordner
+   zuletzt 14,7 GB, die Spitze, weil pytest die Ordner bis zum Ende behält; die
+   Vorgabe lässt Raum für Wachstum der Suite. Wächst die Suite deutlich, neu messen.
+   Die Suite läuft in einem eigenen Ordner, der danach gelöscht wird. Scheitert ein
+   Schritt vor `git add`, stellt es die Versions- und SBOM-Dateien
+   byte-genau wieder her, die Release-Notizen bleiben, wie sie sind; scheitert nur
+   der Commit, bleibt der getestete Stand gestaged.
    Jedes Release ist entweder ein **reines Update** (kein Projektschritt über
    `template_update.py` hinaus, `template_verify` meldet `migration: false`)
    oder ein **Migrations-Release** mit eigenem Abschnitt `Migration`: die

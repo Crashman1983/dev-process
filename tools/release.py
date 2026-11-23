@@ -19,11 +19,19 @@ steps, in order, stopping at the first failure:
    first-level item under **What changes.** / **Was sich ändert.** starts with
    its mark, `[required]`, `[recommended]` or `[optional]` (`_marks_missing`;
    the grammar is the core `changelog.py`, read from this tool's tree);
-2. every version location carries it (`LOCATIONS`);
-3. the SBOM is regenerated (`tools/gen_sbom.py`);
-4. `ruff check .` and the full suite pass;
-5. the template's `__pycache__` is gone;
-6. one commit `release: <version>`.
+2. the repository's and the temp dir's disk have room: RELEASE_MIN_FREE_GB free
+   (MAINTAINING.md) and under the train's PROCESS_DISK_LIMIT_PCT — else it stops
+   here, nothing changed;
+3. every version location carries it (`LOCATIONS`);
+4. the SBOM is regenerated (`tools/gen_sbom.py`);
+5. `ruff check .` and the full suite pass, the suite in its own temp folder
+   (`--basetemp` and its children's TMPDIR), removed afterwards;
+6. the template's `__pycache__` is gone;
+7. one commit `release: <version>`.
+
+A step that fails before `git add` puts back what 3 and 4 wrote (`BUMPED`, byte for
+byte, and names a file it could not); the release notes are never touched. A failed
+commit keeps the tested, staged tree.
 
 The suite runs by default: it tests the bumped tree with the new SBOM before the
 commit — skipped, a broken release commit can reach main, and the version is then
@@ -41,16 +49,37 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
+import math
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from release_notes import changelog, news, notes  # noqa: E402
+
+
+def _load_process_git():
+    """The disk readers of this tool's tree (`template/scripts/process/process_git.py`, stdlib),
+    loaded by path — not through `train` and its imports, and without a `__pycache__`."""
+    spec = importlib.util.spec_from_file_location(
+        "release_process_git", ROOT / "template/scripts/process/process_git.py")
+    mod = importlib.util.module_from_spec(spec)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = keep
+    return mod
+
+
+process_git = _load_process_git()
 
 VERSION = re.compile(r"^v(\d+\.\d+\.\d+)$")
 
@@ -95,12 +124,18 @@ def bump(root: Path, number: str) -> None:
 # CHANGELOG (what changed, why, what it leads to) and NEWS (a few plain sentences)
 CHANGELOGS = ("CHANGELOG.md", "CHANGELOG-DE.md")
 NEWS_FILES = ("NEWS.md", "NEWS-DE.md")
-RELEASE_FILES = (*CHANGELOGS, *NEWS_FILES, *(rel for rel, _ in LOCATIONS), "docs/sbom.cdx.json", "docs/SBOM.md")
+SBOM_FILES = ("docs/sbom.cdx.json", "docs/SBOM.md")
+# what `bump` and `tools/gen_sbom.py` write — and all a failed run puts back. Never the
+# release notes: they are written by hand before the run, often not yet saved in git (r1 B2).
+BUMPED = (*(rel for rel, _ in LOCATIONS), *SBOM_FILES)
+RELEASE_FILES = (*CHANGELOGS, *NEWS_FILES, *BUMPED)
 
 
 def _current(root: Path) -> tuple[int, ...]:
-    """The released version: the committed one — a failed run leaves the files bumped, and
-    read from them the rerun it asks for was refused as "not above" (refute of #123)."""
+    """The released version: the committed one. A run that fails before `git add` puts the
+    bumped files back, but one whose commit failed leaves them bumped and staged (and a
+    restore can fail) — read from them, the rerun it asks for was refused as "not above"
+    (refute of #123)."""
     shown = subprocess.run(["git", "-C", str(root), "show", f"HEAD:{LOCATIONS[0][0]}"],
                            capture_output=True, text=True)
     text = shown.stdout if shown.returncode == 0 and shown.stdout else (root / LOCATIONS[0][0]).read_text(encoding="utf-8")
@@ -222,10 +257,90 @@ def check(root: Path, tag: str) -> list[str]:
     return left
 
 
-def _run(root: Path, what: str, *argv: str) -> None:
+def _run(root: Path, what: str, *argv: str, env: dict[str, str] | None = None,
+         failed: str = "nothing committed; fix it and run again") -> None:
     print(f"release: {what}: {' '.join(argv)}", flush=True)
-    if subprocess.run(argv, cwd=root).returncode != 0:
-        raise SystemExit(f"release: {what} failed — nothing committed; fix it and run again")
+    if subprocess.run(argv, cwd=root, env=env).returncode != 0:
+        raise SystemExit(f"release: {what} failed — {failed}")
+
+
+# --- the disk (v2.102 M5) ------------------------------------------------------------------
+# A release ran its suite on a disk with too little room: the suite filled it, the run
+# failed late, and the bumped files stayed. Before the bump the disks it writes to — the
+# repository's and the temp dir's — need RELEASE_MIN_FREE_GB free and stay under the
+# train's percentage limit (`process_git.disk_use`, PROCESS_DISK_LIMIT_PCT).
+MIN_FREE_ENV = "RELEASE_MIN_FREE_GB"
+MIN_FREE_GB = 18.0  # a measured run's peak (14.7 GB, MAINTAINING.md) and room to grow
+GB = 2**30  # as `df -h` counts
+
+
+def _min_free_gb() -> float:
+    raw = os.environ.get(MIN_FREE_ENV, "").strip()
+    try:
+        need = float(raw) if raw else MIN_FREE_GB
+    except ValueError:
+        need = math.nan
+    if not (math.isfinite(need) and need >= 0):
+        raise SystemExit(f"release: {MIN_FREE_ENV}={raw!r} is no number of GB — fix or unset it "
+                         f"(default {MIN_FREE_GB:g}); nothing changed")
+    return need
+
+
+def _disk_short(root: Path) -> list[str]:
+    """Every disk the release writes to that is over the limit or has less than
+    RELEASE_MIN_FREE_GB free, measured at the nearest folder that exists (a `TMPDIR` nobody
+    made is no crash). A use that cannot be read is a note, as in the train."""
+    need, short = _min_free_gb(), []
+    for what, path in (("the repository", root), ("the temp dir", process_git.temp_root())):
+        at = process_git.nearest_dir(Path(path))
+        use = process_git.disk_use(at, fallback=True)
+        if use.problem:
+            print(f"release: note — {use.problem}", file=sys.stderr, flush=True)
+        if use.full and use.use_pct is not None:
+            short.append(f"{what}: {process_git.disk_full_line(at, use.use_pct)} — at or over the "
+                         f"{use.limit:g}% limit ({process_git.DISK_LIMIT_ENV})")
+        elif use.free is not None and use.free < need * GB:
+            short.append(f"{what} {at}: {use.free / GB:.1f} GB free, a release needs {need:g} GB "
+                         f"({MIN_FREE_ENV})")
+    return short
+
+
+def _suite_folder() -> Path:
+    """The suite's own temp folder, where the space was measured: `--basetemp` and the
+    children's TMPDIR inside it, removed after the run."""
+    base = process_git.nearest_dir(process_git.temp_root())
+    try:
+        return Path(tempfile.mkdtemp(prefix="release-suite-", dir=base))
+    except OSError as exc:
+        raise SystemExit(f"release: no temp folder for the suite under {base}: {exc} — "
+                         "set TMPDIR to a writable folder; nothing changed") from None
+
+
+def _snapshot(root: Path) -> dict[str, bytes | None]:
+    """The bytes of what the run will write (`BUMPED`); None for a file that is not there."""
+    return {rel: (root / rel).read_bytes() if (root / rel).is_file() else None for rel in BUMPED}
+
+
+def _restore(root: Path, saved: dict[str, bytes | None]) -> None:
+    """Put `saved` back where the run changed it, then compare the bytes: every file that
+    is not as before is named — the rerun needs them as they were."""
+    def now(path: Path) -> bytes | None | OSError:
+        try:
+            return path.read_bytes() if path.is_file() else None
+        except OSError as exc:
+            return exc
+
+    for rel, data in saved.items():
+        path = root / rel
+        if now(path) != data:
+            with contextlib.suppress(OSError):  # one failed write does not stop the others
+                path.unlink() if data is None else path.write_bytes(data)
+    left = [rel for rel, data in saved.items() if now(root / rel) != data]
+    if left:
+        print("release: not restored to their state before the run — put them back by hand: "
+              + ", ".join(left), file=sys.stderr, flush=True)
+    else:
+        print("release: the version and SBOM files are as before the run", file=sys.stderr, flush=True)
 
 
 def _parallel() -> list[str]:
@@ -274,17 +389,37 @@ def release(root: Path, tag: str, *, suite: bool = True) -> None:
     if others:
         raise SystemExit("release: the tree is not clean outside the release's own files — "
                          "commit or stash first: " + ", ".join(sorted(others)[:5]))
-    bump(root, number)
-    left = mismatches(root, number)
-    if left:
-        raise SystemExit("release: still not at the version:\n  " + "\n  ".join(left))
-    _run(root, "sbom", sys.executable, "tools/gen_sbom.py")
-    _run(root, "lint", "ruff", "check", ".")
-    if suite:
-        _run(root, "suite", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *_parallel())
-    shutil.rmtree(root / "template/scripts/process/__pycache__", ignore_errors=True)
-    _run(root, "stage", "git", "add", "-A", *RELEASE_FILES)
-    _run(root, "commit", "git", "commit", "-q", "-m", f"release: {tag}")
+    short = _disk_short(root)
+    if short:
+        tmp = process_git.temp_root()
+        raise SystemExit("release: too little room for the suite — nothing changed:\n  " + "\n  ".join(short)
+                         + f"\nclear there: old test basetemps under {tmp} (pytest-of-*, other runs' "
+                         "leftovers), merged worktrees and their environments")
+    saved = _snapshot(root)
+    folder = _suite_folder() if suite else None
+    staged = False
+    try:
+        bump(root, number)
+        left = mismatches(root, number)
+        if left:
+            raise SystemExit("release: still not at the version:\n  " + "\n  ".join(left))
+        _run(root, "sbom", sys.executable, "tools/gen_sbom.py")
+        _run(root, "lint", "ruff", "check", ".")
+        if folder is not None:
+            (folder / "tmp").mkdir()
+            env = {**os.environ, **dict.fromkeys(("TMPDIR", "TEMP", "TMP"), str(folder / "tmp"))}
+            _run(root, "suite", sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                 f"--basetemp={folder / 'basetemp'}", *_parallel(), env=env)
+        shutil.rmtree(root / "template/scripts/process/__pycache__", ignore_errors=True)
+        _run(root, "stage", "git", "add", "-A", *RELEASE_FILES)
+        staged = True
+        _run(root, "commit", "git", "commit", "-q", "-m", f"release: {tag}",
+             failed=f"tested and staged, only the commit is missing: git commit -m 'release: {tag}'")
+    finally:
+        if folder is not None:
+            shutil.rmtree(folder, ignore_errors=True)
+        if not staged:  # failed before `git add` — SystemExit, KeyboardInterrupt, anything
+            _restore(root, saved)
     print(f"""release: {tag} committed. Remote steps:
   1. push the branch, open the PR, merge it (rebase)
   2. wait for CI on main to be green for the merged SHA (release-tag refuses otherwise)
