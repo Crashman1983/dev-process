@@ -9,6 +9,56 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.102.0 — Ein Leser für Markdown-Überschriften; ein Release-Lauf, der die Platte schont · 2026-11-23
+
+**Warum.**
+- Die Gates lasen Markdown-Überschriften mit etwa zehn eigenen Mustern (#443, gefunden in Kennis Registry-Checker). Gefunden auf v2.101.0:
+  - `##` mit „Regel“ in der nächsten Zeile galt als Überschrift „Regel“;
+  - eine Fence-Zeile wie ```` ```suffix ```` schloss einen Code-Block;
+  - eine Fence-Marke in einem HTML-Kommentar verbarg alles danach;
+  - U+2028 teilte eine Überschrift.
+
+  Ein Design-Vertrag konnte so eine Klausel als definiert lesen, die das gerenderte Dokument nicht zeigt.
+- `tools/release.py` brach auf voller Platte mit einem Traceback ab und ließ einen halb geschriebenen Versions-Bump liegen. Die Suite füllte pytests Standard-Temp-Verzeichnis, rund 15 GB pro Lauf.
+
+**Was sich ändert.**
+- [required] **Ein Leser für Überschriften.** `markdown_read.py` (neu, nur Standardbibliothek) ist Eigentümer von `headings()`, `visible_lines()` und `ambiguity_problem()`. Die Datensatz-Leser (`fenced_lines`, `readable`, `uncommented`) ziehen unverändert dorthin um und bleiben aus `check_review` importierbar.
+  - **Gates auf dem Leser:** Design-Contract-Gate, Overlays-Gate, Plan-Struktur-Gate, Produkt-Rahmen, Decisions-Gate, Spec Kit sowie die Überschriften Transitions und Decisions. Jedes liest Überschriften nach CommonMarks ATX-Regeln: Einrückung bis 3, nie über eine Zeile hinweg, schließende `#` abgeschnitten.
+  - **Was als sichtbar gilt:** Der Leser sieht nur den Text, den die Datensatz-Leser sehen.
+- [required] **Eine Datei, die sich zweifach lesen lässt, ist rot.** Jedes Gate, das Überschriften liest, fragt für dieselbe Datei `ambiguity_problem` und scheitert hart bei:
+  - abweichender Lesart eines Code-Blocks, etwa ```` ```suffix ````;
+  - einem Kommentar, der in einem Code-Block schließt;
+  - U+2028 und anderen ungewöhnlichen Zeilentrennern;
+  - einem Inline-Kommentar über eine Überschrift hinweg;
+  - einem offenen Kommentar;
+  - einem um 4+ Leerzeichen eingerückten Code-Block ohne passenden Schließer;
+  - `<!-->`.
+
+  Kein Gate rät, welche Lesart der Renderer nimmt. Die Template-Doku ist sauber, und in Kenni wird keine von einem Gate gelesene Datei rot (4452 Dateien geprüft).
+- [recommended] **Benannte Verhaltensänderungen:**
+  - Eine Überschrift in einem HTML-Kommentar zählt nicht mehr, etwa als Pflichtabschnitt eines Plans.
+  - Eine eingerückte Überschrift (bis 3 Leerzeichen) zählt überall.
+  - Ein bloßes `##` verbindet nie die nächste Zeile.
+  - Die Trace des Design-Contract-Gates endet auch an einer Überschrift der Ebene 1.
+  - Ein ADR-`## Status`, das um 4 oder mehr Leerzeichen eingerückt ist, ist eingerückter Code und zählt nicht mehr.
+- [optional] **`tools/release.py`.** Das sind Änderungen am Werkzeug der Maintainer; Adopter sind nicht betroffen.
+  - Es prüft vor dem Bump den freien Platz (`RELEASE_MIN_FREE_GB`, Vorgabe 18).
+  - Es lässt die Suite in einem eigenen Temp-Ordner laufen und löscht ihn danach.
+  - Scheitert ein Schritt vor dem Stagen, schreibt es genau die Dateien zurück, die der Bump und die SBOM geschrieben haben, nie die Release-Notizen.
+
+**Wirkung.**
+- Jedes Gate liest dieselben Überschriften, die ein Leser sieht. Ein Dokument, dessen Code-Blöcke oder Kommentare sich zweifach lesen lassen, wird gemeldet, statt still gelesen zu werden.
+
+**Geänderte Abschnitte.**
+- `overlays.md` (Overlays: project notes on template docs; What an overlay says)
+
+**Update.**
+- Reines Update. Overlay-Anker behalten ihre Hashes, geprüft gegen den v2.101-Leser für jedes gerenderte Template-Dokument und alle Anker von Kenni.
+- Eine Projektdatei, die sich zweifach lesen lässt, lässt ihr Gate jetzt scheitern. Die Meldung nennt die Zeile und was zu ändern ist.
+- Wie bisher nicht gelesen: Überschriften in Listenpunkten, Zitaten oder rohen HTML-Blöcken sowie Setext-Überschriften außerhalb des Plan-Struktur-Gates.
+
+Details: [Plan](docs/analysis/2026-11-23-v2.102.md) #443
+
 ## v2.101.0 — Gemeinsames Verhalten über mehrere Surfaces · 2026-11-21
 
 **Warum.** Kenni verfolgt gemeinsame Funktionen mit unterschiedlichem Liefer- und Nachweisstand auf Web, iPhone und Mac. In v2.100 konnte ein gemeinsamer Plan an gleichen ID-Präfixen in getrennten Verträgen scheitern.
