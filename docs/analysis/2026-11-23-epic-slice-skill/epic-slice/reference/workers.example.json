@@ -1,0 +1,5 @@
+{
+  "plan": ["claude", "-p", "{prompt}", "--model", "<modell-fuer-planung>"],
+  "build": ["claude", "-p", "{prompt}", "--permission-mode", "acceptEdits", "--model", "<modell-fuer-bau>"],
+  "check": ["codex", "exec", "{prompt}"]
+}
