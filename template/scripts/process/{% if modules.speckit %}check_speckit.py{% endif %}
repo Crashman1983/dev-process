@@ -40,6 +40,10 @@ design review's F3/F7 conditions — prompts alone must not carry rule 5):
     directory is harness-specific, and a failed read is a note, never "all
     committed".
 
+Phase and Owner-brief headings are read as rendered (`markdown_read.headings`: none
+in a code block or an HTML comment); a tasks.md or spec.md that could read two ways
+(`markdown_read.ambiguity_problem`, #443) is HARD.
+
 Unresolved [NEEDS CLARIFICATION] markers in specs/ are the clarification
 gate's job (one owner). Pure stdlib.
 """
@@ -54,6 +58,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_review import plan_tier, _unfenced, waiver_debt_notes  # noqa: E402  (one owner: the
 # review gate owns the plan-field grammar and fence discipline; import, don't copy)
+from markdown_read import HeadingRule, ambiguity_problem, headings  # noqa: E402  (#443: one reader)
 
 CONSTITUTION = ".specify/memory/constitution.md"
 POINTER_MARK = "DEV-PROCESS-CONSTITUTION-POINTER"
@@ -62,8 +67,10 @@ PLANS_ACTIVE = ".process-work/plans"
 SPEC_REF = re.compile(r"\bspecs/[\w][\w.-]*", re.IGNORECASE)
 SPEC_WAIVED = re.compile(r"^[>\s\-*]*spec-waived[*_]*\s*:\s*\S", re.IGNORECASE | re.MULTILINE)
 
-STORY_PHASE = re.compile(r"^##+\s+Phase\s+\d+.*User Story", re.IGNORECASE)
-ANY_PHASE = re.compile(r"^##+\s+(?:Phase\b|Final phase\b)", re.IGNORECASE)
+# phase headings (level 2 or deeper) as a reader sees them (`markdown_read`, #443)
+STORY_PHASE = HeadingRule(r"Phase\s+\d+.*User Story", range(2, 7), re.IGNORECASE)
+ANY_PHASE = HeadingRule(r"(?:Phase\b|Final phase\b)", range(2, 7), re.IGNORECASE)
+OWNER_BRIEF = HeadingRule(r"Owner brief\b", range(1, 7), re.IGNORECASE)
 TASK_LINE = re.compile(r"^\s*- \[[ xX]\] ")
 TESTY = re.compile(r"\btest", re.IGNORECASE)
 
@@ -81,17 +88,20 @@ IGNORE_SOURCE = re.compile(r"^(.*?):(\d+):(.*)$")  # check-ignore -v: source:lin
 
 
 def _story_phases_without_tests(text: str) -> list[str]:
+    """The user-story phases with no task that names a test. A phase is a heading a
+    reader sees (none in a code block or a comment); task lines are read as before."""
     missing: list[str] = []
-    lines = text.splitlines()
+    lines = text.removeprefix("\ufeff").splitlines()
+    phases = {h.lineno - 1: h for h in headings(text) if ANY_PHASE.fits(h.level, h.text)}
     current: str | None = None
     has_test = False
     def flush():
         if current is not None and not has_test:
             missing.append(current)
-    for line in lines:
-        if ANY_PHASE.match(line):
+    for i, line in enumerate(lines):
+        if i in phases:
             flush()
-            current = line.strip() if STORY_PHASE.match(line) else None
+            current = line.strip() if STORY_PHASE.fits(phases[i].level, phases[i].text) else None
             has_test = False
             continue
         if current is not None and TASK_LINE.match(line) and TESTY.search(line):
@@ -373,6 +383,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         for tasks in sorted(sdir.glob("*/tasks.md")):
             rel = tasks.relative_to(root)
             text = tasks.read_text(encoding="utf-8", errors="replace")
+            if problem := ambiguity_problem(text):  # its phases could read two ways (#443)
+                hard.append(f"{rel}: {problem}")
             for phase in _story_phases_without_tests(text):
                 hard.append(f"{rel}: {phase!r} has no task that references a "
                             f"test — tests prove acceptance (mandatory rule 5); "
@@ -390,8 +402,9 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         # the template mandates it, the note catches the forgotten ones ---
         for spec in sorted(sdir.glob("*/spec.md")):
             stext = spec.read_text(encoding="utf-8", errors="replace")
-            if not re.search(r"^#{1,6}\s+Owner brief\b", stext,
-                             re.IGNORECASE | re.MULTILINE):
+            if problem := ambiguity_problem(stext):  # its sections could read two ways (#443)
+                hard.append(f"{spec.relative_to(root)}: {problem}")
+            if not OWNER_BRIEF.search(stext):
                 soft.append(f"{spec.relative_to(root)}: no 'Owner brief' "
                             f"section — five plain-language sentences, first "
                             f"(spec-template); the owner steers from this "

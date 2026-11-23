@@ -698,9 +698,8 @@ def test_an_example_refute_line_does_not_count(render, tmp_path):
                     "\nREFUTE work=9 round=1:\n",
                     "\n`REFUTE work=9 round=1: done`\n",
                     "\nSee `REFUTE work=9 round=1: done` in the brief.\n",
-                    # refute of the fix: an unclosed comment hides the rest, a lone
-                    # marker does not lift a code block, a to-do is not a record
-                    "\n<!-- draft\nREFUTE work=9 round=1: done\n",
+                    # refute of the fix: a lone marker does not lift a code block, a
+                    # to-do is not a record
                     "\n-\n\n    REFUTE work=9 round=1: code block\n",
                     "\n- [ ] REFUTE work=9 round=1: run before review\n",
                     "\nREFUTE work=9 round=1: TODO\n",
@@ -708,6 +707,13 @@ def test_an_example_refute_line_does_not_count(render, tmp_path):
         plan.write_text(base + example)
         _git(out, "commit", "-q", "-am", "plan")
         assert "**REFUTE WARNING:**" in _run(out, "--base", "main").stdout, example
+    # an unclosed comment hides the rest: since #443 the gates refuse the plan before any
+    # bundle is built (markdown_read.ambiguity_problem, rule 5)
+    plan.write_text(base + "\n<!-- draft\nREFUTE work=9 round=1: done\n")
+    _git(out, "commit", "-q", "-am", "plan")
+    r = _run(out, "--base", "main")
+    assert "**REFUTE WARNING:**" not in r.stdout and "never closes" in r.stdout + r.stderr, \
+        r.stdout + r.stderr
 
 
 def test_list_styles_of_a_real_refute_line_count(render, tmp_path):

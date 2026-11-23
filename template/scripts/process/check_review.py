@@ -78,6 +78,23 @@ from process_git import (  # noqa: E402
     repo_probe,
     start_failure,
 )
+# how Markdown is read — fences, comments, headings (#443); re-exported: every record
+# reader and gate imports these names from here
+from markdown_read import (  # noqa: E402,F401
+    _ASCII_PUNCT,
+    _BLOCK_COMMENT,
+    ODD_LINE_ENDS,
+    HeadingRule,
+    _closing_run,
+    _inline_uncommented,
+    _legacy_scan,
+    _strict_scan,
+    ambiguity_problem,
+    fence_drift_problem,
+    fenced_lines,
+    headings,
+    uncommented,
+)
 from template_update import ANSWERS  # noqa: E402
 from template_verify import carried_base, update_paths, update_seen, verify  # noqa: E402
 
@@ -285,69 +302,12 @@ def parse_issue_ref(ref: str) -> tuple[str | None, int] | None:
 _REVIEW_LINE = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*REVIEW(\s+.*|)$")
 
 
-def fenced_lines(text: str) -> tuple[list[tuple[int, str]], int | None]:
-    """The one fence walk every record reader shares (#250): (unquoted lines as
-    (1-based lineno, line), line number of a fence still open at end of file or None).
-    Fence lines themselves are not returned. It reads as the gates always read; where
-    #250's stricter reading would quote a line differently, `fence_drift_problem` asks."""
-    lines = text.splitlines()
-    code, opened = _legacy_scan(lines)
-    return ([(i, line) for i, (line, quoted) in enumerate(zip(lines, code), start=1) if not quoted],
-            None if opened is None else opened + 1)
-
-
 def _unfenced(text: str) -> str:
     """Text with fenced blocks (``` and ~~~, each closed by its own,
     length-aware marker) removed. A `tier:`/`issue:`/`review-waived:` line
     inside a fenced example is a quotation, not a declaration — the same
     discipline the journal parser applies to REVIEW lines."""
     return "\n".join(line for _i, line in fenced_lines(text)[0])
-
-
-def _legacy_scan(lines: list[str]) -> tuple[list[bool], int | None]:
-    """(per line: quoted?, index of a fence still open at the end) — the reading the
-    gates have always used: a fence opens on a line starting with ``` or ~~~ after any
-    indentation and closes on the next line starting with a run of its character at
-    least as long."""
-    out: list[bool] = []
-    fence: str | None = None
-    opened = None
-    for i, line in enumerate(lines):
-        m = re.match(r"(`{3,}|~{3,})", line.strip())
-        if fence is None:
-            if m:
-                fence, opened = m.group(1), i
-            out.append(fence is not None)
-        else:
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
-                fence = None
-            out.append(True)
-    return out, (opened if fence is not None else None)
-
-
-def _strict_scan(lines: list[str]) -> list[bool]:
-    """Per line: quoted? — #250's reading (CommonMark's closer): a fence opens on a line
-    starting with ``` or ~~~ after any indentation (a backtick fence's info string holds
-    no backtick) and closes only on a line holding nothing but its character, at least
-    as long, at most three columns deeper than its opener. Only the yardstick of
-    `fence_drift_problem`: each attempt to read records this way opened a new silent case
-    (v2.75 review rounds 2–7)."""
-    out: list[bool] = []
-    fence, col = "", 0
-    for raw in lines:
-        line = raw.rstrip("\r\n").expandtabs(4)
-        indent = len(line) - len(line.lstrip(" "))
-        stripped = line.strip()
-        if fence:
-            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= col + 3:
-                fence = ""
-            out.append(True)
-            continue
-        m = re.match(r"(`{3,}|~{3,})(.*)$", stripped)
-        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
-            fence, col = m.group(1), indent
-        out.append(bool(fence))
-    return out
 
 
 def _reads(line: str, patterns: tuple[re.Pattern[str], ...]) -> bool:
@@ -375,24 +335,6 @@ def unclosed_fence_problem(text: str, patterns: tuple[re.Pattern[str], ...] | No
         if _reads(line, gated):
             return (f"fence opened on line {opened + 1} never closes — line {i} and "
                     f"everything after it read as quoted; close the fence")
-    return None
-
-
-def fence_drift_problem(text: str) -> str | None:
-    """The first line #250's reading of fences (`_strict_scan`) quotes differently from the
-    gates' reading (`_legacy_scan`), or None. #250: a closing fence carries no info
-    string — a ```python line inside a ``` example closes nothing — yet every refinement
-    that read records that way opened a new silent case, in both directions (v2.75 review
-    rounds 2–7). So the gates keep their reading, and where the stricter one disagrees
-    on any line the gate asks instead of guessing."""
-    lines = text.splitlines()
-    for i, (quoted, was_quoted) in enumerate(zip(_strict_scan(lines), _legacy_scan(lines)[0]), start=1):
-        if quoted != was_quoted:
-            return (f"line {i} reads as {'quoted' if was_quoted else 'text'}, but as "
-                    f"{'quoted' if quoted else 'text'} where a closing fence carries nothing "
-                    f"else on its line (#250) — a fence line above it (an opener with text after "
-                    f"it, or a closer with an info string) reads two ways; make each fence open "
-                    f"and close on a line of its own")
     return None
 
 
@@ -492,9 +434,8 @@ def _record_line(line: str) -> bool:
     return bool(records) and not errors
 
 
-# what `splitlines` reads as a line end and Markdown does not (refute #199:
-# U+0085 kept a closed fence open in the render)
-_ODD_LINE_ENDS = re.compile("[\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+# what `splitlines` reads as a line end and Markdown does not — markdown_read owns it
+_ODD_LINE_ENDS = ODD_LINE_ENDS
 _QUESTION = re.compile(r"[*_]*DECISION NEEDED\b")
 
 
@@ -603,30 +544,13 @@ def open_questions(text: str) -> list[re.Match]:
             and not ANSWERED_MARK.match(m.group(3))]
 
 
-# HTML comments as CommonMark renders them. A line starting with `<!--` (at
-# most three spaces in) opens an HTML block that ends at the line carrying
-# `-->`; unclosed, it hides the rest of the file. In running text a comment is
-# hidden only when it closes within its paragraph — an unclosed `<!--` there
-# is literal text (downstream: "write `<!--` to start a comment" in prose
-# swallowed a real record below it). Scanned left to right, the way the
-# renderer does: a code span (`<!--` in backticks) is code, a comment opened
-# first hides the backticks inside it, `\`` and `\<` are escaped characters.
-# Linear time: once no `-->` (or no closing backtick run of a length) follows,
-# none is searched again.
-# Known limits (a record may be read where a renderer hides it, or the other
-# way round): the `<!-->` / `<!--->` forms, comments inside container blocks
-# (block quotes, list items indented past three spaces), HTML blocks of other
-# kinds (`<div>`, `<pre>`, `<script>`), indented code blocks, entity-escaped
-# markers, and setext/table edge cases are not modelled.
-_BLOCK_COMMENT = re.compile(r"^ {0,3}<!--")
-_ASCII_PUNCT = set("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
-
-
 # a plan's transition table (design-template.md, Transitions): an ATX heading of level 2 or
 # deeper (`## Transitions`, `### Transitions (…)`) — one rule for the bundle's note and the
 # plan-structure gate. `# Transitions` is the plan's title level, not read; a setext heading
 # ends a section but opens none. Up to three spaces in is still an ATX heading; four is code.
-TRANSITIONS_HEADING = re.compile(r"^ {0,3}##+[ \t]+Transitions\b", re.MULTILINE)
+# Read by `markdown_read` (#443): `.search(text)` sees what renders — no heading in a code
+# block or an HTML comment — and `.match(line)` reads one line.
+TRANSITIONS_HEADING = HeadingRule(r"Transitions\b", range(2, 7))
 
 
 # a design doc next to the plans (`design-<x>.md`) is not a plan: no tier, no review
@@ -645,87 +569,6 @@ def review_waived(text: str) -> bool:
     """Does the plan waive its review (`review-waived: <reason>`) — read as
     the presence gate reads it."""
     return WAIVED.search(_unfenced(text or "")) is not None
-
-def _closing_run(para: str, run: int, pos: int) -> int:
-    """Start of the next backtick run of exactly `run` from `pos`, or -1."""
-    ticks = "`" * run
-    while True:
-        k = para.find(ticks, pos)
-        if k < 0:
-            return -1
-        end = k + run
-        while end < len(para) and para[end] == "`":
-            end += 1
-        if end - k == run:
-            return k
-        pos = end
-
-
-def _inline_uncommented(para: str) -> str:
-    out: list[str] = []
-    start = i = 0
-    n = len(para)
-    no_comment_close = False
-    no_tick_close: set[int] = set()
-    while i < n:
-        c = para[i]
-        if c == "\\" and i + 1 < n and para[i + 1] in _ASCII_PUNCT:
-            i += 2
-            continue
-        if c == "`":
-            j = i
-            while j < n and para[j] == "`":
-                j += 1
-            run = j - i
-            if run not in no_tick_close:
-                k = _closing_run(para, run, j)
-                if k >= 0:
-                    i = k + run
-                    continue
-                no_tick_close.add(run)
-            i = j
-            continue
-        if c == "<" and not no_comment_close and para.startswith("<!--", i):
-            k = para.find("-->", i + 4)
-            if k < 0:
-                no_comment_close = True
-                i += 4
-                continue
-            out.append(para[start:i])
-            start = i = k + 3
-            continue
-        i += 1
-    out.append(para[start:])
-    return "".join(out)
-
-
-def uncommented(text: str) -> str:
-    """`text` without what an HTML comment hides when rendered."""
-    out: list[str] = []
-    para: list[str] = []
-
-    def flush() -> None:
-        if para:
-            out.append(_inline_uncommented("\n".join(para)))
-            para.clear()
-
-    in_block = False
-    for line in text.splitlines():
-        if in_block:
-            in_block = "-->" not in line
-            continue
-        if _BLOCK_COMMENT.match(line):
-            flush()
-            in_block = "-->" not in line[line.index("<!--") + 4:]
-            continue
-        if not line.strip():
-            flush()
-            out.append("")
-            continue
-        para.append(line)
-    flush()
-    return "\n".join(out)
-
 
 def readable(text: str) -> str:
     """What a reader of the rendered Markdown sees of a record file: fenced
@@ -3229,7 +3072,8 @@ def _plan_work_ids(stem: str, text: str, *, include_dedated: bool) -> set[str]:
 # an open task: `- [ ]`, `* [ ]` or `+ [ ]` (one grammar for the gates and plan-structure)
 OPEN_TASK = re.compile(r"^[ \t]*[-*+][ \t]+\[ \](?:[ \t]+|(?=$))(?P<task>.*)$", re.MULTILINE)  # an empty task too
 UNCHECKED = OPEN_TASK
-DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
+# a plan's decisions ledger: `## Decisions` (levels 2–4), read as rendered (`markdown_read`)
+DECISIONS_HEADING = HeadingRule(r"Decisions\b", range(2, 5), re.IGNORECASE)
 
 
 def waiver_owner_findings(rel: str, text: str, tier: int, rules: dict) -> list[str]:
@@ -3309,7 +3153,8 @@ def speckit_unreviewed(root: Path, passes: list[dict]) -> list[tuple[str, int, s
         if UNCHECKED.search(ttext) or not re.search(r"^\s*- \[[xX]\] ", ttext,
                                                     re.MULTILINE):
             continue  # in flight, or no checkbox grammar at all
-        ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
+        praw = plan.read_text(encoding="utf-8", errors="replace")
+        ptext = _unfenced(praw)
         tier = plan_tier(ptext)
         if tier is None or tier < 2 or review_waived(ptext):
             continue
@@ -3512,8 +3357,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             soft.append(f"{rel}: {problem}")
         elif problem:
             hard.append(f"{rel}: {problem}")
-        # hard in the archive too: the readings must agree everywhere (review v2.75 r5/r6)
-        drift = fence_drift_problem(text)
+        # hard in the archive too: the readings must agree everywhere (review v2.75 r5/r6);
+        # a plan's headings (Decisions, Transitions) are read too: any reading two ways (#443)
+        drift = (ambiguity_problem(text) if record_kind(rel) in ("plan", "spec-plan")
+                 else fence_drift_problem(text))
         if drift:
             hard.append(f"{rel}: {drift}")
     # a spec's other documents feed attest (`spec.md`'s criteria) and dispatch (`tasks.md`)
@@ -3647,7 +3494,8 @@ def check(root: Path) -> tuple[list[str], list[str]]:
 
     # the speckit path's plans: the decisions ledger is a note there too
     for rel, plan in record_files(root, ("spec-plan",)):
-        ptext = _unfenced(plan.read_text(encoding="utf-8", errors="replace"))
+        praw = plan.read_text(encoding="utf-8", errors="replace")
+        ptext = _unfenced(praw)
         tier = plan_tier(ptext)
         if tier is None:
             hard.append(f"{rel}: no 'tier: N' declaration — "
@@ -3655,7 +3503,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
                         f"plan without a tier is off by omission (add the line, "
                         f"`/plan` puts it there)")
             continue
-        if tier >= 2 and not DECISIONS_HEADING.search(ptext):
+        if tier >= 2 and not DECISIONS_HEADING.search(praw):
             soft.append(f"{rel}: no '## Decisions' section "
                         f"— decisions made in dialogue have no home here and do "
                         f"not survive a compaction (journal-state-plans.md, Plans)")
@@ -3697,9 +3545,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if p.name.startswith("design-"):
                 continue
             try:
-                text = _unfenced(p.read_text(encoding="utf-8", errors="replace"))
+                raw = p.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue  # unreadable active plan; the archive path diagnoses
+            text = _unfenced(raw)
             tier = plan_tier(text)
             # a plan that TALKS about its tier but never declares it sits outside
             # every tier-keyed gate (presence, spec-before-plan, issue-before-code)
@@ -3727,7 +3576,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
             if tier == 2:
                 active_tier2 += 1
             rel = f"{PLANS_ACTIVE}/{p.name}"
-            if not DECISIONS_HEADING.search(text):
+            if not DECISIONS_HEADING.search(raw):
                 soft.append(f"{rel}: no '## Decisions' section — decisions made in "
                             f"dialogue have no home in this plan and do not survive a "
                             f"compaction (journal-state-plans.md, Plans); add the "

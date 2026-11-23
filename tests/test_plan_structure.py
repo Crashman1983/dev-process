@@ -968,3 +968,29 @@ def test_an_invariant_in_an_indented_code_block_does_not_count(render, tmp_path)
         assert r.returncode == 1 and "has no `Invariant:` line" in r.stdout, (repr(indent), r.stdout)
     r = _invariant(out, "   " + line)  # three spaces in: still a paragraph
     assert r.returncode == 0, r.stdout
+
+
+# --- v2.102 (#443): a plan's headings are the rendered ones; ambiguity asks -------------
+
+def test_a_required_section_is_one_a_reader_sees(render, tmp_path):
+    """v2.102 named changes: a heading in an HTML comment fills no required section; one
+    up to three spaces in does (`markdown_read.headings`)."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}), {"sections": ["Anchor Delta"]})
+    _plan(out, GOOD + "\n<!--\n## Anchor Delta\n-->\n")
+    r = _run(out)
+    assert r.returncode == 1 and "no `## Anchor Delta` section" in r.stdout, r.stdout
+    _plan(out, GOOD + "\n   ## Anchor delta (none) ##\n\nNone.\n")  # prefix and case, as before
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_plan_that_reads_two_ways_is_hard(render, tmp_path):
+    """#443 AC-3..AC-5, through `markdown_read.ambiguity_problem`: the file's own line."""
+    out = _repo(render(tmp_path, {"project_name": "demo"}))
+    for tail, needle in (("```md\n```suffix\n## Transitions\n```\n", "line 13 reads as text, but as quoted"),
+                         ("<!--\n```\n-->\n\n## Transitions\n",
+                          "line 12: a code fence stands inside the HTML comment opened on line 11"),
+                         ("## Transitions None\n", "line 11 holds a line separator (U+2028)")):
+        _plan(out, GOOD + "\n" + tail)
+        r = _run(out)
+        assert r.returncode == 1 and f"2026-10-21-7-editor.md: {needle}" in r.stdout, r.stdout

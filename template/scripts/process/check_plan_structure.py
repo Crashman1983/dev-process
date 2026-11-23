@@ -39,6 +39,8 @@ at the merge. A plan reviewer re-found them by reading. This gate reads them:
     that is neither `Invariant: <statement> — owner: <owner> — <test>` (the
     test as in a test cell) nor `Invariant: none — <reason>` (#312). Read as
     rendered: what an HTML comment hides is neither section nor table.
+  - a plan whose headings, sections or tables could read two ways
+    (`markdown_read.ambiguity_problem`, #443) — the plan's text names the line.
   NOTE: an `[assumption]` left in a DECISION line.
 
 Bound are only plans the branch ADDS — absent at the integration ref, or below
@@ -53,7 +55,8 @@ every evidence rule (a branch cannot lift its own duty):
   {"sections": ["Anchor Delta"], "shall_words": ["shall"],
    "story_id": "[A-Z]+-US-\\\\d+", "registry": "docs/feature-registry/*/*.json"}
 
-Fenced text is quotation and is not read. Stdlib only.
+Fenced text is quotation and is not read; headings, sections and tables are read as
+rendered (`markdown_read`: no code block, no HTML comment). Stdlib only.
 """
 from __future__ import annotations
 
@@ -82,8 +85,8 @@ from check_review import (  # noqa: E402  (one owner for plan grammar and fences
     integration_ref,
     is_shallow,
     plan_tier,
-    uncommented,
 )
+from markdown_read import _comments_blank, ambiguity_problem, blanked, heading, headings  # noqa: E402,F401
 from process_git import git_environment  # noqa: E402  (one owner for how git is read)
 import registry_config  # noqa: E402  (one owner of the feature registry's layout and ids)
 
@@ -150,6 +153,13 @@ def load_data(root: Path, ref: str) -> tuple[dict, str]:
     return data, ""
 
 
+def _ambiguity(rel: str, raw: str) -> list[str]:
+    """A plan whose headings or tables read two ways (`markdown_read.ambiguity_problem`) —
+    hard: the sections read here could be ones the rendered plan does not show (#443)."""
+    problem = ambiguity_problem(raw)
+    return [f"{rel}: {problem}"] if problem else []
+
+
 def _is_proof(body: str) -> bool:
     return bool(_NAMES_A_TEST.search(body))
 
@@ -188,7 +198,6 @@ def criteria_findings(rel: str, text: str, shall_words: list[str], *, need_tests
     return out
 
 
-_HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]|$)")
 _SETEXT = re.compile(r"^ {0,3}(=+|-+)[ \t]*$")
 _LIST_ITEM = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 _INDENTED = re.compile(r"^(?: {4}| {0,3}\t)")  # indented code: no heading, no table
@@ -196,7 +205,6 @@ _DELIMITER_CELL = re.compile(r"^:?-+:?$")
 _PIPE = re.compile(r"(?<!\\)\|")
 _TEST_HEADER = re.compile(r"^tests?(?:\(s\))?$", re.IGNORECASE)
 _UNFILLED = {"", "…", "..."}
-_LINE_MARK = re.compile(r"\x00(\d+)\x00$")
 # a row's test cell struck on purpose: the criterion strike's own mark and reason rule
 _STRUCK_CELL = re.compile(r"^" + _STRUCK_MARK + r"[ \t]*" + PLACEHOLDER + r"\S*\w")
 # the invariant beside the table (#312), read from the right: the test after the owner,
@@ -223,24 +231,9 @@ def _bare(cell: str) -> str:
     return cell.strip().strip("`*_").strip()
 
 
-def _comments_blank(text: str) -> str:
-    """The text without what an HTML comment hides when rendered (`check_review.uncommented`,
-    the one reader of comments), each kept line at its own line number: a finding names
-    the file's line. Every non-blank line carries its number through the reader; a line a
-    comment ran into keeps its rest at the line the comment closed on."""
-    lines = text.replace("\x00", "").splitlines()
-    marked = "\n".join(f"{line}\x00{n}\x00" if line.strip() else line for n, line in enumerate(lines, 1))
-    kept = [""] * len(lines)
-    for piece in uncommented(marked).splitlines():
-        m = _LINE_MARK.search(piece)
-        if m:
-            kept[int(m.group(1)) - 1] = piece[:m.start()]
-    return "\n".join(kept)
-
-
 def _is_row(line: str) -> bool:
-    """A line a pipe table may hold: an unescaped `|`, not indented code."""
-    return bool(_PIPE.search(line)) and not _INDENTED.match(line) and not _HEADING.match(line)
+    """A line a pipe table may hold: an unescaped `|`, not indented code, no heading."""
+    return bool(_PIPE.search(line)) and not _INDENTED.match(line) and heading(line) is None
 
 
 def _is_delimiter(line: str) -> bool:
@@ -265,37 +258,47 @@ def _tables(lines: list[str]) -> list[list[tuple[int, str]]]:
     return out
 
 
-def _heading_level(lines: list[str], j: int, table_rows: set[int]) -> int | None:
-    """The level of a heading at line index `j`: ATX (`## x`, up to three spaces in) or a
-    setext underline (`===` level 1, `---` level 2) below a paragraph line — below a
-    blank, a heading, a list item or a table row `---` is a thematic break."""
-    h = _HEADING.match(lines[j])
-    if h:
-        return len(h.group(1))
-    s = _SETEXT.match(lines[j])
+def _atx(lines: list[str], j: int, continued: frozenset[int]) -> int | None:
+    """The level of an ATX heading at line index `j` (`markdown_read.heading`); a line whose
+    start a comment hid continues a paragraph and is none."""
+    h = None if j in continued else heading(lines[j])
+    return h[0] if h else None
+
+
+def _heading_level(lines: list[str], j: int, table_rows: set[int],
+                   continued: frozenset[int] = frozenset()) -> int | None:
+    """The level of a heading at line index `j` of a line view (`markdown_read.blanked`):
+    ATX (`## x`, up to three spaces in, `markdown_read.heading`) or a setext underline
+    (`===` level 1, `---` level 2) below a paragraph line — below a blank, a heading, a
+    list item or a table row `---` is a thematic break."""
+    h = _atx(lines, j, continued)
+    if h is not None:
+        return h
+    s = _SETEXT.match(lines[j]) if j not in continued else None
     if not s or j == 0:
         return None
     above = lines[j - 1]
-    if (not above.strip() or _INDENTED.match(above) or _HEADING.match(above) or _LIST_ITEM.match(above)
-            or _SETEXT.match(above) or j - 1 in table_rows):
+    if (not above.strip() or _INDENTED.match(above) or _atx(lines, j - 1, continued) is not None
+            or _LIST_ITEM.match(above) or _SETEXT.match(above) or j - 1 in table_rows):
         return None
     return 1 if s.group(1)[0] == "=" else 2
 
 
-def _sections(lines: list[str], table_rows: set[int]) -> list[tuple[int, str, list[tuple[int, str]]]]:
+def _sections(lines: list[str], table_rows: set[int], continued: frozenset[int] = frozenset()
+              ) -> list[tuple[int, str, list[tuple[int, str]]]]:
     """(line, heading, body lines) of every Transitions section: from its heading to the
     next heading of the same or a higher level, ATX or setext."""
     out: list[tuple[int, str, list[tuple[int, str]]]] = []
     for i, line in enumerate(lines):
-        if not TRANSITIONS_HEADING.match(line):
+        own = None if i in continued else TRANSITIONS_HEADING.match(line)
+        if own is None:
             continue
-        marks = line.lstrip(" ")
-        level = len(marks) - len(marks.lstrip("#"))
+        level = own[0]
         body: list[tuple[int, str]] = []
         for j in range(i + 1, len(lines)):
-            found = _heading_level(lines, j, table_rows)
+            found = _heading_level(lines, j, table_rows, continued)
             if found is not None and found <= level:
-                if not _HEADING.match(lines[j]):
+                if _atx(lines, j, continued) is None:
                     body.pop()  # the setext heading's own text line
                 break
             body.append((j + 1, lines[j]))
@@ -352,8 +355,9 @@ def invariant_findings(rel: str, line: int, heading: str, body: list[tuple[int, 
 
 
 def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
-    """The findings on a plan's Transitions sections (unfenced text, the file's own line
-    numbers), read as rendered — an HTML comment hides a heading and a table alike: a
+    """The findings on a plan's Transitions sections (the plan's text, read line for line
+    as rendered through `markdown_read.blanked` — a code block and an HTML comment hide a
+    heading and a table alike; findings name the file's own line): a
     pipe table below each whose header and delimiter row name the same number of cells,
     with a `Test` column (`Tests`, `Test(s)`) and two others, at
     least one row, every cell of every row filled; once tests are due, each test cell
@@ -364,15 +368,15 @@ def transitions_findings(rel: str, text: str, *, need_tests: bool) -> list[str]:
     column answers for itself, not for a state table below it (v2.77 cross-model review,
     rounds 1 and 2)."""
     out: list[str] = []
-    lines = _comments_blank(text).splitlines()
+    lines, continued = blanked(text)
     tables = _tables(lines)
     table_rows = {n - 1 for table in tables for n, _row in table}
-    for line, heading, body in _sections(lines, table_rows):
-        out += invariant_findings(rel, line, heading, body, table_rows)
+    for line, title, body in _sections(lines, table_rows, continued):
+        out += invariant_findings(rel, line, title, body, table_rows)
         span = {n for n, _line in body}
         mine = [t for t in tables if t[0][0] in span]
         if not mine:
-            out.append(f"{rel}:{line}: `{heading}` has no table below it — state × event → result with a "
+            out.append(f"{rel}:{line}: `{title}` has no table below it — state × event → result with a "
                        f"`Test` column (docs/process/design-template.md, Transitions)")
             continue
         table = mine[0]
@@ -456,13 +460,14 @@ def _spec_plan_findings(root: Path, ref: str, plans: list[Path]) -> list[str]:
     for p in plans:
         rel = p.relative_to(root).as_posix()
         try:
-            text = _quoted_blank(p.read_text(encoding="utf-8", errors="replace"))
+            raw = p.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
             out.append(f"{rel}: could not read: {exc}")
             continue
-        if (plan_tier(text) or 0) < 2 or not _bound(root, ref, rel):
+        if (plan_tier(_quoted_blank(raw)) or 0) < 2 or not _bound(root, ref, rel):
             continue  # stood at the ref at Tier 2+: history, not a new duty
-        out += transitions_findings(rel, text, need_tests=True)
+        out += _ambiguity(rel, raw)
+        out += transitions_findings(rel, raw, need_tests=True)
     return out
 
 
@@ -575,20 +580,24 @@ def check(root: Path, env: dict[str, str] | None = None) -> tuple[list[str], lis
         if p.name.startswith("design-"):
             continue
         try:
-            text = _quoted_blank(p.read_text(encoding="utf-8", errors="replace"))
+            raw = p.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
             hard.append(f"{rel}: could not read: {exc}")
             continue
+        text = _quoted_blank(raw)
         tier = plan_tier(text)
         if tier is None or tier < 2 or not _bound(root, ref, rel):
             continue  # untiered plans are the review gate's finding; old plans are history
         # #327: owed from the first push, not from the first tick or the merge — a branch
         # whose plan owed them only at the merge passed branch push and review and failed at main
         need_tests = True
+        hard += _ambiguity(rel, raw)
         hard += criteria_findings(rel, text, shall_words, need_tests=need_tests)
-        hard += transitions_findings(rel, text, need_tests=need_tests)
+        hard += transitions_findings(rel, raw, need_tests=need_tests)
+        seen = [h.text for h in headings(raw) if h.level in (2, 3)]  # as rendered (#443)
         for name in sections:
-            if not re.search(r"^#{2,3}[ \t]+" + re.escape(name) + r"\b", text, re.MULTILINE | re.IGNORECASE):
+            own = re.compile(re.escape(name) + r"\b", re.IGNORECASE)
+            if not any(own.match(title) for title in seen):
                 hard.append(f"{rel}: no `## {name}` section — {DATA} requires it in every Tier 2+ plan")
         if data.get("story_id") and data.get("registry"):
             if registry is None:

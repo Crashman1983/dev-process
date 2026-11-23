@@ -22,6 +22,10 @@ check exists. An overlay with no anchor cannot be checked and is refused.
     python3 scripts/process/check_overlays.py [root]              # the gate
     python3 scripts/process/check_overlays.py --stamp <overlay>   # after a re-check
 
+A section starts at a heading a reader sees (`markdown_read.headings`: no code block,
+no HTML comment); a template file that could read two ways
+(`markdown_read.ambiguity_problem`, #443) is red instead of hashed.
+
 Honest boundary: the gate sees that the anchored text changed, not whether the
 change contradicts the overlay — that judgment is the re-check. Stdlib only.
 """
@@ -31,6 +35,13 @@ import hashlib
 import re
 import sys
 from pathlib import Path
+
+# its own path entry: tools/release.py loads this file on its own (`_changes_reader`)
+sys.dont_write_bytecode = True  # a gate leaves no __pycache__ in the checkout
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+from markdown_read import ambiguity_problem, headings  # noqa: E402  (#443: one reader of headings)
 
 OVERLAY_GLOB = "docs/process/**/*.local.md"
 HEAD = re.compile(r"^overlay-of:[ \t]*(?P<path>[^\s#]+)[ \t]*$", re.MULTILINE)
@@ -91,14 +102,12 @@ def unfenced(text: str) -> str:
 
 def sections(text: str) -> dict[str, str]:
     """Heading line (normalised) -> the section's text: from the heading to the next
-    heading of the same or a higher level, fenced code ignored. A heading that
-    occurs twice keeps its first section (an anchor names the first)."""
-    lines = text.splitlines()
-    heads: list[tuple[int, int, str]] = []
-    for i, (line, code) in enumerate(zip(lines, fenced(lines))):
-        m = None if code else _HEADING.match(line)
-        if m:
-            heads.append((i, len(m.group(1)), _norm(line)))
+    heading of the same or a higher level. The headings are the ones a reader sees
+    (`markdown_read.headings`, #443): none in a code block or an HTML comment; a heading
+    in a list item, a block quote or a raw HTML block is not read, nor a setext one. A
+    heading that occurs twice keeps its first section (an anchor names the first)."""
+    lines = text.removeprefix("\ufeff").splitlines()
+    heads = [(h.lineno - 1, h.level, f"{'#' * h.level} {h.text}".rstrip()) for h in headings(text)]
     out: dict[str, str] = {}
     for n, (i, level, name) in enumerate(heads):
         end = next((j for j, lv, _ in heads[n + 1:] if lv <= level), len(lines))
@@ -182,9 +191,13 @@ def check_one(root: Path, overlay: Path) -> list[str]:
         return [f"{rel}: the code fence opened on line {opened} is never closed — everything after it would be "
                 f"an example, and an anchor there would go unchecked; close the fence"]
     try:
-        doc = sections(target.read_text(encoding="utf-8"))
+        source = target.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         return [f"{rel}: its template file {head.group('path')} is unreadable ({exc})"]
+    if problem := ambiguity_problem(source):
+        return [(f"{rel}: its template file {head.group('path')} reads two ways, so its sections do too — "
+                 f"{problem}")]
+    doc = sections(source)
     bad = [m.group(0).strip() for m in ANCHOR_INTENT.finditer(text)
            if not ANCHOR.match(text, m.start())]
     if bad:

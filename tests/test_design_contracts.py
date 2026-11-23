@@ -2020,3 +2020,77 @@ def test_the_docs_state_the_coverage(render, tmp_path):
     assert "--coverage <surface>" in doc and "lost its coverage" in doc and "owner <round>/<ID>" in doc
     review = (out / f"{REG}/templates/independent-review.md").read_text(encoding="utf-8")
     assert "--coverage <surface>" in review
+
+
+# --- v2.102 (#443): headings read through markdown_read, ambiguity asks -------------------
+
+@pytest.mark.parametrize("tail,needle", [
+    ("```md\n```suffix\n### C01 Composer again\n```\n", "reads as text, but as quoted"),
+    ("<!--\n```\n-->\n\n### C01 Composer again\n", "a code fence stands inside the HTML comment"),
+    ("### C09 Spare ### C01 Composer again\n", "U+2028"),
+])
+def test_a_contract_that_reads_two_ways_is_hard(render, tmp_path, tail, needle):
+    """#443 AC-3..AC-5: a clause the gate could read as defined, the render not — or the
+    other way round — is asked, not guessed."""
+    out = _render(render, tmp_path)
+    c = _write(out, CONTRACT, CONTRACT_TEXT + "\n" + tail)
+    _entry(out, pin=f"sha256:{_sha(c)}")
+    r = _gate(out)
+    hard = "\n".join(_hard(r))
+    assert r.returncode == 1 and f"contract {CONTRACT}: line" in hard and needle in hard, r.stdout
+
+
+@pytest.mark.parametrize("tail,twice", [
+    ("##\nC01 Composer again\n", False),  # `##` alone is an empty heading (#443 AC-2)
+    ("<!--\n### C01 Composer draft\n-->\n", False),  # a commented heading defines nothing
+    ("   ### C01 Composer again\n", True),  # up to three spaces in is still a heading
+])
+def test_a_duplicate_clause_is_one_a_reader_sees(render, tmp_path, tail, twice):
+    out = _render(render, tmp_path)
+    c = _write(out, CONTRACT, CONTRACT_TEXT + "\n" + tail)
+    _entry(out, pin=f"sha256:{_sha(c)}")
+    r = _gate(out)
+    assert ("ID C01 is defined by 2 headings" in r.stdout) is twice, r.stdout
+    assert (r.returncode == 1) is twice, r.stdout
+
+
+@pytest.mark.parametrize("body", [
+    "design-contract: web\n\n## Design Contract Trace\n\n# Next\n",  # the trace ends at `#` too
+    "design-contract: web\n\n## Design Contract Trace\n\n##\nC01\n",  # `##` ends it, joins nothing
+])
+def test_the_trace_is_what_a_reader_sees(render, tmp_path, body):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, body)
+    r = _gate(out)
+    assert r.returncode == 1 and "`## Design Contract Trace` is missing or empty" in r.stdout, r.stdout
+
+
+def test_an_indented_trace_heading_counts(render, tmp_path):
+    out = _declared_repo(render, tmp_path, {"from": "2026-10-01"})
+    _plan(out, "design-contract: web\n\n   ## Design Contract Trace ##\n\nC01.\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_an_inline_comment_over_a_blank_line_hides_no_surface_section(render, tmp_path):
+    """v2.102 named change: the trace's scope reads `markdown_read`, not `check_ui._readable` —
+    an inline `<!--` closes within its paragraph or is text, as rendered."""
+    out = _repo(render, tmp_path)
+    _ios_contract(out)
+    _plan(out, "design-contract: web\n\n## Design Contract Trace\n\nnote <!-- draft\n\n"
+               "### Surface: ios\n\nC01.\n\n-->\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "names unbound surface `ios`" in "\n".join(_hard(r)), r.stdout
+
+
+@pytest.mark.parametrize("tail,needle", [
+    ("```md\n```suffix\n## Design Contract Trace\n```\n", "reads as text, but as quoted"),
+    ("<!--\n```\n-->\n\n## Implementation\n", "a code fence stands inside the HTML comment"),
+    ("## Design Contract Trace C01\n", "U+2028"),
+])
+def test_a_plan_whose_trace_reads_two_ways_is_hard(render, tmp_path, tail, needle):
+    out = _repo(render, tmp_path)
+    _plan(out, "design-contract: web\n\n## Design Contract Trace\n\nC01.\n\n" + tail)
+    r = _gate(out)
+    hard = "\n".join(_hard(r))
+    assert r.returncode == 1 and f"{PLAN}: line" in hard and needle in hard, r.stdout

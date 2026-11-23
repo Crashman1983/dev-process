@@ -259,3 +259,117 @@ def test_section_changes_names_changed_and_gone_sections_only():
     assert mod.section_changes(old, new) == {"# X": "changed", "## B": "changed", "## C": "gone"}
     assert mod.section_changes(old, old) == {}
     assert mod.section_changes(old, "") == {"# X": "gone", "## A": "gone", "## B": "gone", "## C": "gone"}
+
+
+# --- v2.102 (#443): sections read through markdown_read ----------------------------------
+
+def test_a_heading_in_a_comment_or_a_bare_run_reads_as_rendered(render, tmp_path):
+    """v2.102 named changes: a commented heading opens no section; `##` alone is an empty
+    heading and never takes the next line as its text."""
+    out = render(tmp_path, {"project_name": "d"})
+    co = _mod(out)
+    try:
+        secs = co.sections("## A\na\n<!--\n## B\n-->\nb\n")
+        assert list(secs) == ["## A"] and secs["## A"].endswith("-->\nb")
+        secs = co.sections("## A\na\n##\nRegel\n")
+        assert list(secs) == ["## A", "##"] and "## Regel" not in secs
+    finally:
+        sys.path.remove(str(out / "scripts/process"))
+        sys.modules.pop("check_overlays", None)
+
+
+def test_a_template_file_that_reads_two_ways_is_red(render, tmp_path):
+    """#443 AC-3..AC-5: the sections an anchor hashes could be ones the rendered doc does
+    not show — the gate asks instead of hashing a guess."""
+    out = render(tmp_path, {"project_name": "d"})
+    doc = out / "docs/process/testing.md"
+    clean = doc.read_text()
+    ov = out / "docs/process/testing.local.md"
+    ov.write_text(OVERLAY.format(heading=_heading(out)))
+    assert _run(out, "--stamp", str(ov)).returncode == 0
+    for tail, needle in (("```md\n```suffix\n## Regel\n```\n", "reads as text, but as quoted"),
+                         ("<!--\n```\n-->\n\n## Regel\n", "a code fence stands inside the HTML comment"),
+                         ("## Regel ## Zwei\n", "U+2028")):
+        doc.write_text(clean + "\n" + tail, encoding="utf-8")
+        r = _run(out)
+        assert r.returncode == 1 and "testing.md reads two ways" in r.stdout and needle in r.stdout, r.stdout
+
+
+# the v2.101 reader of sections, frozen: the template's docs must read the same through
+# the new one (AC-4) — compared section by section, never against fixed hashes
+_V2101_HEADING = __import__("re").compile(r"^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
+_V2101_FENCE_OPEN = __import__("re").compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+
+
+def _v2101_norm(heading):
+    m = _V2101_HEADING.match(heading.strip())
+    return f"{m.group(1)} {m.group(2).strip()}" if m else heading.strip()
+
+
+def _v2101_scan(lines):
+    out, fence, opened = [], "", None
+    for i, line in enumerate(lines):
+        if fence:
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence) and indent <= 3:
+                fence = ""
+            out.append(True)
+            continue
+        f = _V2101_FENCE_OPEN.match(line)
+        if f and not (f.group("fence")[0] == "`" and "`" in f.group("info")):
+            fence, opened = f.group("fence"), i
+        out.append(bool(fence))
+    return out, (opened if fence else None)
+
+
+def _v2101_sections(text):
+    lines = text.splitlines()
+    heads = []
+    for i, (line, code) in enumerate(zip(lines, _v2101_scan(lines)[0])):
+        m = None if code else _V2101_HEADING.match(line)
+        if m:
+            heads.append((i, len(m.group(1)), _v2101_norm(line)))
+    out = {}
+    for n, (i, level, name) in enumerate(heads):
+        end = next((j for j, lv, _ in heads[n + 1:] if lv <= level), len(lines))
+        out.setdefault(name, "\n".join(ln.rstrip() for ln in lines[i:end]).strip())
+    return out
+
+
+ALL_MODULES = {m: True for m in ("speckit", "doc_drift_gate", "arch_onboarding", "feature_registry",
+                                 "github_issues", "contracts", "git_hooks", "security_floor", "sbom",
+                                 "telemetry", "arch_docs", "github_master", "design_contracts")}
+
+
+def test_the_template_docs_read_one_way_and_keep_their_sections(render, tmp_path):
+    """v2.102 M3 (AC-4): every rendered `.md`, with the minimal and with the full module and
+    harness set, reads one way (`ambiguity_problem`) and yields the sections the v2.101
+    reader yields — an adopter's overlay anchors keep their hashes."""
+    import importlib
+    found = []
+    checked = 0
+    for name, data in (("minimal", {"project_name": "d", "modules": {}}),
+                       ("full", {"project_name": "d", "modules": ALL_MODULES,
+                                 "harnesses": {"claude": True, "copilot": True, "agents_md": True}})):
+        out = render(tmp_path / name, data)
+        co = _mod(out)
+        try:
+            sys.modules.pop("markdown_read", None)
+            md = importlib.import_module("markdown_read")
+            for p in sorted(out.rglob("*.md")):
+                if ".git" in p.parts:
+                    continue
+                rel = p.relative_to(out).as_posix()
+                text = p.read_text(encoding="utf-8")
+                checked += 1
+                problem = md.ambiguity_problem(text)
+                if problem:
+                    found.append(f"{name}: {rel}: {problem}")
+                if co.sections(text) != _v2101_sections(text):
+                    found.append(f"{name}: {rel}: sections differ from v2.101")
+        finally:
+            sys.path.remove(str(out / "scripts/process"))
+            sys.modules.pop("check_overlays", None)
+            sys.modules.pop("markdown_read", None)
+    assert checked > 100 and not found, "\n".join(found)

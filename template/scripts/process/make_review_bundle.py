@@ -816,7 +816,7 @@ def _transitions_note(text: str, vocabulary: tuple[str, ...]) -> str | None:
     """Advisory: a plan that speaks of states and events (two or more distinct
     vocabulary words outside fenced blocks) but has no `## Transitions` table."""
     body = _review_gate._unfenced(text)
-    if _review_gate.TRANSITIONS_HEADING.search(body):  # the review gate owns the heading rule
+    if _review_gate.TRANSITIONS_HEADING.search(text):  # the review gate owns the heading rule
         return None
     hits = [w for w in vocabulary if re.search(rf"\b{re.escape(w)}\b", body, re.IGNORECASE)]
     if len(hits) < 2:

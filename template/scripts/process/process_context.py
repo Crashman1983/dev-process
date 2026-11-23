@@ -34,7 +34,15 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_review import OPEN_TASK, branch_issue, declared_issue_numbers, open_questions, plan_tier, spec_dir_issue  # noqa: E402
+from check_review import (  # noqa: E402
+    DECISIONS_HEADING,
+    OPEN_TASK,
+    branch_issue,
+    declared_issue_numbers,
+    open_questions,
+    plan_tier,
+    spec_dir_issue,
+)
 from process_git import answers_release  # noqa: E402  (the release grammar's owner)
 
 PLANS = ".process-work/plans"
@@ -52,7 +60,6 @@ MARKER = re.compile(r"\[NEEDS CLARIFICATION", re.IGNORECASE)
 # compaction summary would have dropped.
 DECISION = re.compile(r"^\s*(?:[-*+]\s+)?DECISION\s+(\d{4}-\d{2}-\d{2})\s+([^:]+):\s*(.+?)\s*$",
                       re.MULTILINE)
-DECISIONS_HEADING = re.compile(r"^#{2,4}\s+Decisions\b", re.IGNORECASE | re.MULTILINE)
 # a question still open — `DECISION NEEDED <date> <who>: …` — is not a
 # decision; a re-hydrated session must see that it is waiting, not act as
 # if the plan were settled (check_review.open_questions owns the line)

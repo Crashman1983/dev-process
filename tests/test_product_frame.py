@@ -324,3 +324,32 @@ def test_module_off_reads_no_registry_through_the_core_loader(render, tmp_path):
     r = _run(out)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "not checkable" in r.stdout and "Traceback" not in r.stderr
+
+
+# --- v2.102 (#443): sections read through markdown_read ----------------------------------
+
+def test_a_bare_heading_takes_no_placeholder_with_it(render, tmp_path):
+    """#443 AC-2: `##` alone was a heading whose text was the next line — a placeholder on
+    that line passed an onboarded frame green."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _onboarded(out, "\n##\n> _Placeholder — left over._\n")
+    r = _run(out)
+    assert r.returncode == 1 and "still hold a placeholder" in r.stdout, r.stdout
+
+
+def test_an_indented_section_heading_names_its_placeholder(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    _onboarded(out, "\n   ## Later\n\n> _Placeholder — later._\n")
+    r = _run(out)
+    assert r.returncode == 1 and "placeholder: Later" in r.stdout, r.stdout
+
+
+def test_a_frame_that_reads_two_ways_is_hard(render, tmp_path):
+    """#443 AC-3..AC-5: the frame's sections could be ones the render does not show."""
+    out = render(tmp_path, {"project_name": "demo"})
+    for tail, needle in (("```md\n```suffix\n## Later\n```\n", "reads as text, but as quoted"),
+                         ("<!--\n```\n-->\n\n## Later\n", "a code fence stands inside the HTML comment"),
+                         ("## Later More\n", "U+2028")):
+        _onboarded(out, "\n" + tail)
+        r = _run(out)
+        assert r.returncode == 1 and f"{FRAME}: line" in r.stdout and needle in r.stdout, r.stdout

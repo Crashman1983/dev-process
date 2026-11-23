@@ -10,14 +10,16 @@ gated behind an optional module. This gate owns the *files*.
     an incoherent Status×Intent pair — `Superseded` with `keep`/`change-planned`
     (a superseded decision is historical; endorsing it or planning its migration
     contradicts the supersession); a missing `## Status` section (every decision
-    has a lifecycle); a non-UTF-8 file.
+    has a lifecycle); a non-UTF-8 file; a file whose headings could read two
+    ways (`markdown_read.ambiguity_problem`, #443).
   - SOFT: a field still holding the unedited template menu (`|`-separated, "not
     yet chosen"); a missing `## Type` or `## Intent` section (the process's own
     newer axes — absence reads as the default, never a retroactive false-red);
     `Intent: change-planned` with no linked follow-up (should link, but it may
     legitimately be an issue).
 
-The gate checks presence and enum-membership only. Whether a decision is
+An axis heading is one a reader sees (`markdown_read.headings`: none in a code
+block or an HTML comment). The gate checks presence and enum-membership only. Whether a decision is
 *correct* is the review gate's job, never this one — no false-green.
 
 Pure stdlib.
@@ -27,6 +29,10 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+
+sys.dont_write_bytecode = True  # a gate leaves no __pycache__ in the checkout
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
+from markdown_read import ambiguity_problem, heading, headings  # noqa: E402  (#443: one reader)
 
 ADR_DIR = "docs/process/adr"
 README = "README.md"
@@ -65,22 +71,25 @@ TYPE_OK = {"architecture", "product", "process", "invariant"}
 def _section_value(text: str, name: str) -> tuple[str | None, int | None]:
     """The first non-empty line under a `## <name>` heading (any heading level
     is tolerated), and its 1-based line number. (None, heading-line) if the
-    section is present but empty; (None, None) if the heading is absent."""
-    heading = re.compile(rf"^#{{1,6}}\s+{re.escape(name)}\s*$", re.IGNORECASE)
+    section is present but empty; (None, None) if the heading is absent. The
+    heading is one a reader sees (`markdown_read.headings`, #443: none in a code
+    block or an HTML comment); the value below it is read as before."""
     any_heading = re.compile(r"^#{1,6}\s")
     lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if heading.match(line.strip()):
-            for j in range(i + 1, len(lines)):
-                s = lines[j].strip()
-                # a following heading ends the section — an empty section must
-                # take the documented soft path, never read the next heading's
-                # text as its value (audit false-red)
-                if any_heading.match(s):
-                    break
-                if s:
-                    return s, j + 1
-            return None, i + 1
+    for h in headings(text):
+        if h.text.lower() != name.lower():
+            continue
+        i = h.lineno - 1
+        for j in range(i + 1, len(lines)):
+            s = lines[j].strip()
+            # a following heading ends the section — an empty section must
+            # take the documented soft path, never read the next heading's
+            # text as its value (audit false-red)
+            if any_heading.match(s) or heading(lines[j]) is not None:
+                break
+            if s:
+                return s, j + 1
+        return None, i + 1
     return None, None
 
 
@@ -142,6 +151,10 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         except UnicodeDecodeError:
             hard.append(f"{rel}: not valid UTF-8")
             continue
+
+        problem = ambiguity_problem(text)  # its sections could read two ways (#443)
+        if problem:
+            hard.append(f"{rel}: {problem}")
 
         if num not in listed:
             hard.append(f"{rel}: ADR-{num} not listed in {ADR_DIR}/{README} index "

@@ -272,7 +272,8 @@ def test_a_release_names_the_template_sections_it_changed(tmp_path):
     doc.write_text("# X\n\n## A\n\na\n\n## B\n\nb\n\n## C\n\nc\n", encoding="utf-8")
     gate = root / "template/scripts/process/check_overlays.py"
     gate.parent.mkdir(parents=True)
-    shutil.copy(REPO / "template/scripts/process/check_overlays.py", gate)
+    for name in ("check_overlays.py", "markdown_read.py"):  # the gate and its reader (#443)
+        shutil.copy(REPO / "template/scripts/process" / name, gate.parent / name)
     for args in (["add", "-A"], ["commit", "-q", "-m", "docs"], ["tag", f"v{CURRENT}"]):
         subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
     doc.write_text("# X\n\n## A\n\na\n\n## B\n\nb, sharper\n\n## D\n\nnew\n", encoding="utf-8")
@@ -295,11 +296,38 @@ def test_a_doc_that_became_a_template_keeps_its_sections(tmp_path):
     doc.write_text("# X\n\n## A\n\na\n", encoding="utf-8")
     gate = root / "template/scripts/process/check_overlays.py"
     gate.parent.mkdir(parents=True)
-    shutil.copy(REPO / "template/scripts/process/check_overlays.py", gate)
+    for name in ("check_overlays.py", "markdown_read.py"):  # the gate and its reader (#443)
+        shutil.copy(REPO / "template/scripts/process" / name, gate.parent / name)
     for args in (["add", "-A"], ["commit", "-q", "-m", "docs"], ["tag", f"v{CURRENT}"]):
         subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
     doc.rename(doc.with_name("x.md.jinja"))
     assert rel.changed_sections(root) == []
+
+
+def test_changed_sections_reads_headings_through_the_gates_reader(tmp_path):
+    """v2.102 (#443): the release loads `check_overlays` on its own (`_changes_reader`); the
+    gate finds its reader beside it, in a fresh process too, and reads headings as rendered
+    — a heading in an HTML comment opens no section."""
+    root = _git_repo(tmp_path)
+    doc = root / "template/docs/process/x.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("# X\n\n## A\n\na\n\n<!--\n## B\n-->\n\nb\n", encoding="utf-8")
+    proc = root / "template/scripts/process"
+    proc.mkdir(parents=True)
+    for name in ("check_overlays.py", "markdown_read.py"):
+        shutil.copy(REPO / "template/scripts/process" / name, proc / name)
+    for args in (["add", "-A"], ["commit", "-q", "-m", "docs"], ["tag", f"v{CURRENT}"]):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+    doc.write_text("# X\n\n## A\n\na\n\n<!--\n## B\n-->\n\nb, sharper\n", encoding="utf-8")
+    code = ("import importlib.util, sys; from pathlib import Path\n"
+            "spec = importlib.util.spec_from_file_location('release_tool', sys.argv[1])\n"
+            "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n"
+            "print(mod.changed_sections(Path(sys.argv[2])))\n")
+    run = subprocess.run([sys.executable, "-B", "-c", code, str(REPO / "tools/release.py"), str(root)],
+                         capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.strip() == str(["template/docs/process/x.md: # X — changed",
+                                      "template/docs/process/x.md: ## A — changed"])
 
 
 # --- v2.96 A4: every first-level item under What changes carries its mark ---
