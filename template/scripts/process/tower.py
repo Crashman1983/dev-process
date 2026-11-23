@@ -201,9 +201,10 @@ def plans(root: Path) -> list[dict]:
         if p.name != "plan.md" and not PLAN_NAME.match(p.name):
             continue  # a README or a note in the plans folder is not a plan
         try:
-            text = _review._unfenced(p.read_text(encoding="utf-8", errors="replace"))
+            raw = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        text = _review._unfenced(raw)
         tier = _review.plan_tier(text)
         issues = sorted(_review._plan_issue_numbers(text))
         dc = DESIGN_CONTRACT.search(text)
@@ -213,7 +214,7 @@ def plans(root: Path) -> list[dict]:
             "tier": tier,
             "issue": f"#{issues[0]}" if issues else None,
             "decisions": len(DECISION_LINE.findall(text)),
-            "has_decisions_section": bool(_review.DECISIONS_HEADING.search(text)),
+            "has_decisions_section": bool(_review.DECISIONS_HEADING.search(raw)),
             "design_contract": dc.group(1).strip("`'\"") if dc else None,
             "waived": _review.review_waived(text),
             "age_days": int((time.time() - p.stat().st_mtime) // 86400),

@@ -53,6 +53,14 @@ section's hash covers its subsections, so an anchor on a top-level heading
 turns red on every edit anywhere below it — and a gate that is always red
 gets stamped without reading.
 
+A section starts at a heading a reader of the rendered doc sees: an ATX
+heading (`## X`, up to three spaces in) outside code blocks and HTML comments
+(`scripts/process/markdown_read.py`, the one reader of headings for every
+gate). A heading inside a list item, a block quote or a raw HTML block, and a
+setext heading, starts none. A template file that could read two ways — a
+fence inside a comment, a closing fence with text after it, a line separator
+character — turns the gate red instead of hashing a guess.
+
 ## The check: does a central change still fit?
 
 The `overlays` gate (core, always on) re-reads every anchor:

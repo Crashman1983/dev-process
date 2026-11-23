@@ -1922,3 +1922,33 @@ def test_merged_work_is_no_note_when_git_cannot_run(tmp_path, monkeypatch):
     assert cr.merged_work(root, rel, passes, {"done"}, 2) is True  # Wächter
     _timing_out(monkeypatch, "for-each-ref")
     assert cr.merged_work(root, rel, passes, {"done"}, 2) is False
+
+
+# --- v2.102 (#443): the ledger's heading is a rendered one; a plan reading two ways asks --
+
+def test_the_decisions_ledger_is_a_heading_a_reader_sees(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    d = out / ".process-work/plans"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "2026-09-10-hidden.md").write_text("# Plan\n\ntier: 2\n\n<!--\n## Decisions\n-->\n")
+    (d / "2026-09-10-inset.md").write_text("# Plan\n\ntier: 2\n\n   ## Decisions ##\n")
+    (d / "2026-09-10-bare.md").write_text("# Plan\n\ntier: 2\n\n##\nDecisions\n")
+    r = _run(out)
+    assert r.returncode == 0, r.stdout
+    assert "2026-09-10-hidden.md: no '## Decisions' section" in r.stdout
+    assert "2026-09-10-bare.md: no '## Decisions' section" in r.stdout
+    assert "2026-09-10-inset.md: no '## Decisions'" not in r.stdout
+
+
+@pytest.mark.parametrize("rel", [".process-work/plans/2026-09-10-two.md", "specs/012-widget/plan.md"])
+def test_a_plan_that_reads_two_ways_is_hard(render, tmp_path, rel):
+    """#443 AC-4/AC-5 beyond the fence drift (AC-3) the gate already asked about: a fence
+    inside a comment, a line separator — `markdown_read.ambiguity_problem`."""
+    out = render(tmp_path, {"project_name": "demo"})
+    p = out / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    for tail, needle in (("<!--\n```\n-->\n\n## Decisions\n", "line 6: a code fence stands inside"),
+                         ("## Decisions None\n", "line 5 holds a line separator (U+2028)")):
+        p.write_text("# Plan\n\ntier: 1\n\n" + tail, encoding="utf-8")
+        r = _run(out)
+        assert r.returncode == 1 and f"{rel}: {needle}" in r.stdout, r.stdout

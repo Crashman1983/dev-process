@@ -265,3 +265,41 @@ def test_invariant_is_a_valid_type(render, tmp_path):
     r = _run(out)
     # valid type; missing Test on an accepted invariant is the only new hard
     assert "is not one of" not in r.stdout
+
+
+# --- v2.102 (#443): an axis heading is one a reader sees --------------------------------
+
+def test_a_status_heading_in_code_or_a_comment_is_no_section(render, tmp_path):
+    """v2.102 named change: a quoted or commented `## Status` states no lifecycle."""
+    out = render(tmp_path, {"project_name": "demo"})
+    for n, hidden in enumerate(("```\n## Status\n\nAccepted\n```\n", "<!--\n## Status\n\nAccepted\n-->\n")):
+        _write_adr(out, "0002", status=None, body=hidden, list_it=n == 0)
+        r = _run(out)
+        assert r.returncode == 1 and "no '## Status' section" in r.stdout, (hidden, r.stdout)
+
+
+def test_a_bare_heading_ends_an_axis_and_is_no_value(render, tmp_path):
+    """#443 AC-2: `##` alone is an empty heading — it ends the section, it is not its value."""
+    out = render(tmp_path, {"project_name": "demo"})
+    _write_adr(out, "0002", status="##\nAccepted")
+    r = _run(out)
+    assert "not a valid" not in r.stdout and "'## Status' section is empty" in r.stdout, r.stdout
+
+
+def test_an_indented_axis_heading_counts(render, tmp_path):
+    out = render(tmp_path, {"project_name": "demo"})
+    p = _write_adr(out, "0002")
+    p.write_text(p.read_text().replace("## Status", "   ## Status ##"), encoding="utf-8")
+    r = _run(out)
+    assert r.returncode == 0 and "no '## Status'" not in r.stdout, r.stdout
+
+
+def test_a_record_that_reads_two_ways_is_hard(render, tmp_path):
+    """#443 AC-3..AC-5: the axis headings could be ones the render does not show."""
+    out = render(tmp_path, {"project_name": "demo"})
+    for n, (tail, needle) in enumerate((("```md\n```suffix\n## Status\n```\n", "reads as text, but as quoted"),
+                                        ("<!--\n```\n-->\n\n## Test\n", "a code fence stands inside"),
+                                        ("## Test None\n", "U+2028")), start=2):
+        _write_adr(out, f"000{n}", body=tail)
+        r = _run(out)
+        assert r.returncode == 1 and f"adr-000{n}-example.md: line" in r.stdout and needle in r.stdout, r.stdout

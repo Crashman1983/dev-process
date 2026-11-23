@@ -972,3 +972,50 @@ def test_a_symlinked_skills_directory_is_read_through_its_target(render, tmp_pat
     os.symlink("../.agents/skills", out / ".claude/skills")
     _repo(out)
     assert _skill_notes(_gate(out)) == []
+
+
+# --- v2.102 (#443): phases and the brief are headings a reader sees ------------------------
+
+def _tasks(out, text):
+    d = out / "specs/001-widget"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "tasks.md").write_text(text, encoding="utf-8")
+    return d
+
+
+def test_an_indented_story_phase_is_a_phase(render, tmp_path):
+    """v2.102 named change: up to three spaces in is still a heading — the phase owes its test."""
+    out = _render(render, tmp_path)
+    _tasks(out, "# Tasks\n\n   ## Phase 3: User Story 1 — widget (P1)\n\n- [ ] T001 [US1] Implement widget\n")
+    r = _gate(out)
+    assert r.returncode == 1 and "User Story 1" in r.stdout and "no task that references a test" in r.stdout
+
+
+def test_a_commented_story_phase_is_no_phase(render, tmp_path):
+    out = _render(render, tmp_path)
+    _tasks(out, "# Tasks\n\n## Phase 3: User Story 1 — widget (P1)\n\n- [x] T001 [US1] test in tests/t.py\n\n"
+                "<!--\n## Phase 4: User Story 2 — later (P2)\n-->\n")
+    r = _gate(out)
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_commented_owner_brief_is_no_brief(render, tmp_path):
+    out = _render(render, tmp_path)
+    d = _tasks(out, "# Tasks\n")
+    (d / "spec.md").write_text("# Spec\n\n<!--\n## Owner brief\n\nFive sentences.\n-->\n", encoding="utf-8")
+    assert "spec.md: no 'Owner brief' section" in _gate(out).stdout
+    (d / "spec.md").write_text("# Spec\n\n  ## Owner brief\n\nFive sentences.\n", encoding="utf-8")
+    assert "no 'Owner brief'" not in _gate(out).stdout
+
+
+@pytest.mark.parametrize("name", ["tasks.md", "spec.md"])
+def test_a_spec_document_that_reads_two_ways_is_hard(render, tmp_path, name):
+    """#443 AC-3..AC-5: its phases or brief could be ones the render does not show."""
+    out = _render(render, tmp_path)
+    d = _tasks(out, "# Tasks\n")
+    for tail, needle in (("```md\n```suffix\n## Phase 3: User Story 1\n```\n", "reads as text, but as quoted"),
+                         ("<!--\n```\n-->\n\n## Phase 3: User Story 1\n", "a code fence stands inside"),
+                         ("## Owner brief Five\n", "U+2028")):
+        (d / name).write_text("# Doc\n\n## Owner brief\n\nok\n\n" + tail, encoding="utf-8")
+        r = _gate(out)
+        assert r.returncode == 1 and f"{name}: line" in r.stdout and needle in r.stdout, r.stdout

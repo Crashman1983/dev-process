@@ -34,7 +34,9 @@ line a duty (docs/process/design-contract-declaration.local.json): from its day 
 every active Tier 2+ plan states `design-contract: <surface> | n/a — <reason>`
 and a declared contract carries a non-empty `## Design Contract Trace`; naming
 the path alone no longer suffices there. A trace's `### Surface: <surface>`
-sections restrict their citations to the named, bound contract. Judging the design itself is never
+sections restrict their citations to the named, bound contract. Headings — clause IDs, the
+trace and its sections — are read as rendered (`markdown_read`); a contract or an active
+plan that could read two ways (`markdown_read.ambiguity_problem`, #443) is hard. Judging the design itself is never
 machine work — that is what the sealed boards and the reviewer are for.
 Python stdlib only."""
 from __future__ import annotations
@@ -52,6 +54,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling imports
 import seal as _seal  # noqa: E402
+from markdown_read import ambiguity_problem, blanked, heading, headings  # noqa: E402  (#443: one reader)
 
 REGISTRY_DIR = "docs/process/design-contracts"
 PLANS_ACTIVE = ".process-work/plans"
@@ -70,7 +73,9 @@ _SEAL_LINE = re.compile(r"(?:manifest\.sha256|seal(?:\s+reviewed)?)\s*[:=]\s*`?(
 _GO = re.compile(r"^\s*[*_#\s]*(?:decision|entscheidung)[*_]*\s*:\s*[*_]*\s*(GO|NO[- ]GO|KEIN GO)\b(?![-/])"
                  r"(?![ \t]*(?:\||/|,|\bor\b|\boder\b)[ \t]*[*_]*(?:GO|NO[- ]GO|KEIN GO)\b)",
                  re.IGNORECASE | re.MULTILINE)
-_HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.MULTILINE)
+# kept for callers that `findall` raw text: one line, at most three spaces in, never across a
+# line end — the gate itself reads headings through `markdown_read.headings()` (#443)
+_HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*)$", re.MULTILINE)
 _FENCE = re.compile(r"^(`{3,}|~{3,}).*?^\1[ \t]*$", re.MULTILINE | re.DOTALL)
 TRACE_HEADING = "## Design Contract Trace"
 _TRACE_SURFACE = re.compile(r"^ {0,3}###[ \t]+Surface[ \t]*:[ \t]*(.*)$", re.IGNORECASE)
@@ -172,23 +177,23 @@ def _trace_sections(text: str) -> tuple[str, dict[str | None, list[str]]]:
         return text, {None: lines}
 
     from check_plan_structure import _heading_level, _tables  # noqa: PLC0415
-    from check_ui import _readable as readable_plan  # noqa: PLC0415
 
     in_trace = False
     surface = None
-    # Only visible headings change scope. Keep the original text for ID matching,
-    # including in legacy plans where a citation could be inside a quoted example.
-    readable = readable_plan(text).split("\n")
+    # Only visible headings change scope (`markdown_read.blanked`, #443). Keep the original
+    # text for ID matching, including in legacy plans where a citation could be inside a
+    # quoted example.
+    readable, continued = blanked(text)
     table_rows = {row - 1 for table in _tables(readable) for row, _ in table}
-    levels = [_heading_level(readable, index, table_rows) for index in range(len(readable))]
+    levels = [_heading_level(readable, index, table_rows, continued) for index in range(len(readable))]
     for index, line in enumerate(lines):
-        heading = readable[index].rstrip()
+        title = readable[index].rstrip()
         level = levels[index]
         if level in (1, 2):
-            in_trace = level == 2 and heading.lstrip() == TRACE_HEADING
+            in_trace = level == 2 and _is_trace_heading(readable[index]) and index not in continued
             surface = None
         elif in_trace and level == 3:
-            match = _TRACE_SURFACE.match(heading)
+            match = _TRACE_SURFACE.match(title)
             surface = re.sub(r"[ \t]+#+$", "", match.group(1)).strip().strip("`") if match else None
             if match:
                 sections.setdefault(surface, [])
@@ -216,6 +221,9 @@ def plan_citations(plans: dict[str, str], entries: list[dict]) -> PlanCitations:
     patterns = {s: id_pattern(e["id_prefixes"]) for s, e in registry.items()}
     result = PlanCitations({s: {} for s in registry})
     for rel, text in plans.items():
+        problem = ambiguity_problem(text)  # the trace's headings could read two ways (#443)
+        if problem:
+            result.problems.append(f"{rel}: {problem}")
         bound = [s for s, e in registry.items() if bound_to(text, s, e["contract"].strip(), known)]
         visible, sections = _trace_sections(text)
         unscoped = sections.pop(None)
@@ -379,7 +387,11 @@ def _check_one(root: Path, path: Path, data: dict, citations: dict[str, set[str]
         return [f"{rel}: contract path escapes the repo root"], []
     if not cpath.is_file():
         return [f"{rel}: contract not committed / does not exist: {data['contract'].strip()}"], []
-    text = _unfenced(_read(cpath))
+    raw = _read(cpath)
+    text = _unfenced(raw)
+    problem = ambiguity_problem(raw)  # a clause heading could read two ways (#443)
+    if problem:
+        hard.append(f"{rel}: contract {data['contract'].strip()}: {problem}")
 
     # --- the pin: the drift ratchet ---------------------------------------
     m = _HASH_PIN.match(data["pin"].strip())
@@ -401,8 +413,8 @@ def _check_one(root: Path, path: Path, data: dict, citations: dict[str, set[str]
         if status != "legacy":
             soft.append(f"{rel}: contract defines no ID of the families {data['id_prefixes']} yet")
     seen: dict[str, list[str]] = {}
-    for h in _HEADING.findall(text):
-        lead = ids.match(h.strip().lstrip("*_`").strip())  # the ID *leads* the heading: a definition
+    for h in headings(raw):  # as rendered: none in a code block or a comment (#443)
+        lead = ids.match(h.text.strip().lstrip("*_`").strip())  # the ID *leads* the heading: a definition
         if lead:
             i = lead.group(0)
             seen.setdefault(canonical(i, ids), []).append(i)
@@ -1672,17 +1684,30 @@ def _on_integration(root: Path, rel: str) -> bool | None:
     return None
 
 
+def _is_trace_heading(line: str) -> bool:
+    found = heading(line)
+    return found is not None and found == (2, TRACE_HEADING[3:])
+
+
 def _trace_body(text: str) -> str | None:
-    """What stands under the trace heading up to the next `## ` heading; None without one."""
-    lines = text.splitlines()
+    """What a reader sees under the trace heading (`## Design Contract Trace`, level 2) up
+    to the next heading of level 1 or 2, ATX or setext; None without one. Read as rendered
+    (`markdown_read.blanked`, #443): a heading in a code block or a comment is none."""
+    from check_plan_structure import _heading_level, _tables  # noqa: PLC0415
+    lines, continued = blanked(text)
+    table_rows = {row - 1 for table in _tables(lines) for row, _ in table}
     for i, line in enumerate(lines):
-        if line.strip() == TRACE_HEADING:
-            body = []
-            for nxt in lines[i + 1:]:
-                if nxt.startswith("## "):
-                    break
-                body.append(nxt)
-            return "\n".join(body).strip()
+        if i in continued or not _is_trace_heading(line):
+            continue
+        body: list[str] = []
+        for j in range(i + 1, len(lines)):
+            level = _heading_level(lines, j, table_rows, continued)
+            if level is not None and level <= 2:
+                if body and heading(lines[j]) is None:
+                    body.pop()  # a setext heading's own text line
+                break
+            body.append(lines[j])
+        return "\n".join(body).strip()
     return None
 
 
@@ -1711,7 +1736,7 @@ def declaration_problems(text: str, contracts: set[str]) -> list[str]:
             problems.append(f"unknown design contract `{surface}` — expected one of {named} or `n/a — <reason>`")
     if surfaces and has_na:
         problems.append("mixes `design-contract: n/a` with a surface declaration — state which applies")
-    if surfaces and not _trace_body(plain):
+    if surfaces and not _trace_body(text):
         problems.append(f"declares `{surfaces[0]}` but its `{TRACE_HEADING}` is missing or empty — name the "
                         f"contract sections, screen IDs and briefs the work follows, and every deviation")
     return problems

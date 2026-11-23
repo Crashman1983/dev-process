@@ -25,8 +25,11 @@ Product frame). What this gate checks:
     form the strict pattern refuses is a SOFT note. SOFT note when the registry
     is absent — not checkable, honest degradation.
 
+  - HARD: a frame whose sections could read two ways
+    (`markdown_read.ambiguity_problem`, #443).
+
 Fenced code blocks are quotations, not claims — ignored for refs and
-placeholders. Pure stdlib.
+placeholders; sections are read as rendered (`markdown_read.headings`). Pure stdlib.
 """
 from __future__ import annotations
 
@@ -39,17 +42,18 @@ FRAME = "PRODUCT.md"
 # the decision-records gate (core, co-rendered) owns ADR file identity; the
 # review gate owns fence stripping; registry_config (core) owns where the
 # registry lives — import, don't copy (one owner per behavior)
+sys.dont_write_bytecode = True  # a gate leaves no __pycache__ in the checkout
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import
 import registry_config  # noqa: E402
 from check_decisions import ADR_DIR, adr_exists  # noqa: E402
 from check_review import _unfenced as _strip_fences  # noqa: E402
+from markdown_read import ambiguity_problem, headings, visible_lines  # noqa: E402  (#443)
 
 STATUS = re.compile(r"^\s*(?:[-*+]\s+)?[*_]*status[*_]*:\s*(.+?)\s*$", re.MULTILINE)
 STATES = {"not-onboarded", "onboarded"}
 ADR_REF = re.compile(r"\bADR-(\d+)\b")
 STORY_REF = re.compile(r"\bSTORY-(\d+)\b")  # any width; normalized like ADR refs
 PLACEHOLDER = re.compile(r"^\s*>\s*_Placeholder", re.MULTILINE)
-HEADING = re.compile(r"^##\s+(.*)$", re.MULTILINE)
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
@@ -67,21 +71,20 @@ def _story_ids(stories: list[registry_config.Story]) -> set[str]:
     return registry_config.story_ids(stories) | {s.path.stem for s in stories}
 
 
-def _leftover_placeholders(text: str) -> list[str]:
-    """Where placeholder lines survive: section headings when a heading
-    encloses the hit, '(before the first section)' otherwise. Scans the WHOLE
-    text — a placeholder above the first heading must not pass green."""
-    out: list[str] = []
-    heads = list(HEADING.finditer(text))
-    first = heads[0].start() if heads else len(text)
-    if PLACEHOLDER.search(text[:first]):
-        out.append("(before the first section)")
-    for i, m in enumerate(heads):
-        start = m.end()
-        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
-        if PLACEHOLDER.search(text[start:end]):
-            out.append(m.group(1).strip())
-    return out
+def _leftover_placeholders(raw: str) -> list[str]:
+    """Where placeholder lines survive: the `## ` section when one encloses the hit,
+    '(before the first section)' otherwise. Scans the WHOLE text as rendered
+    (`markdown_read`, #443: no code block, no HTML comment) — a placeholder above
+    the first heading must not pass green."""
+    sections = {h.lineno: h.text for h in headings(raw) if h.level == 2}
+    found: dict[int, str] = {}  # the section's line (0: before the first) -> its name
+    current = (0, "(before the first section)")
+    for n, line in visible_lines(raw):
+        if n in sections:
+            current = (n, sections[n])
+        elif PLACEHOLDER.match(line):
+            found.setdefault(*current)
+    return list(found.values())
 
 
 def check(root: Path) -> tuple[list[str], list[str]]:
@@ -92,9 +95,13 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         return ([f"{FRAME} missing — the product frame is a core artifact; "
                  f"restore it (the template ships a scaffold)"], [])
     try:
-        text = _unfenced(f.read_text(encoding="utf-8"))
+        raw = f.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         return ([f"{FRAME}: not valid UTF-8"], [])
+    text = _unfenced(raw)
+    problem = ambiguity_problem(raw)  # its sections could read two ways (#443)
+    if problem:
+        hard.append(f"{FRAME}: {problem}")
 
     m = STATUS.search(text)
     if not m:
@@ -107,7 +114,7 @@ def check(root: Path) -> tuple[list[str], list[str]]:
         soft.append("product frame not onboarded yet — fill it in the start-here "
                     "onboarding dialogue and flip 'status:' to 'onboarded'")
     else:  # onboarded — placeholders now claim direction that is not there
-        left = _leftover_placeholders(text)
+        left = _leftover_placeholders(raw)
         if left:
             hard.append(f"{FRAME}: status is 'onboarded' but "
                         f"{len(left)} place(s) still hold a placeholder: "
