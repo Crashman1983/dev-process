@@ -226,7 +226,7 @@ def parse(data) -> dict:
     if "preboard_timeout" in data and data.get("preboard") is None:
         raise ConfigError("preboard_timeout without a preboard times nothing")
     return {
-        "lane_dir": lane_dir,
+        "lane_dir": lane_dir,  # a relative one is the project root's (`lane.config`)
         "lanes": _lanes(data.get("lanes")),
         "certificate_env": _strings(data.get("certificate_env", []), "certificate_env"),
         "merge_suite": suite.strip() if suite else None,

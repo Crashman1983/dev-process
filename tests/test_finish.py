@@ -1460,20 +1460,28 @@ def test_two_finish_runs_serialise_on_full(render, tmp_path):
     assert started >= released, (started, released)
 
 
-def test_finish_on_a_held_full_lane_exits_75_and_merges_nothing(render, tmp_path):
+def test_finish_on_a_held_full_lane_exits_75_and_merges_nothing(render, tmp_path, monkeypatch):
     """B7: past the lane's wait budget, exit 75 naming the holder; the suite never ran,
-    origin's main is where it was, the branch stays."""
+    origin's main is where it was, the branch stays. #448: inside a train's run it gave up —
+    one `lane-busy full dir=<its lane directory> …` line."""
+    import urllib.parse
     out, bare = _repo_with_origin(render, tmp_path)
     _lane_config(out, full_wait=1)
     main_before = _git(bare, "rev-parse", "main").stdout
     cmd, seen = _suite_script(tmp_path)
     holder = _hold_full(out, 30.0)
+    marker = tmp_path / "marker"
+    marker.write_text("")
     try:
+        monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
         r = _run_args(out, "--apply", "--tests", cmd)
     finally:
         holder.kill()
         holder.wait()
     assert r.returncode == 75, r.stdout + r.stderr
+    named = urllib.parse.quote(str(Path(os.environ["PROCESS_LANE_DIR"]).resolve()), safe="/")
+    (line,) = marker.read_text().splitlines()
+    assert line.startswith(f"lane-busy full dir={named} held by pid ") and "other-holder" in line, line
     said = r.stdout + r.stderr
     assert "other-holder" in said and "nothing merged" in said, said
     assert not seen.exists()

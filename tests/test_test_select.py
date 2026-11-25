@@ -201,9 +201,16 @@ def test_a_busy_lane_runs_nothing_and_exits_75(repo, tmp_path):
             if (tmp_path / "lanes/test-lane-scoped.status").exists():
                 break
             time.sleep(0.05)
-        r = _sel(repo, "run", env=env)
+        marker = tmp_path / "marker"
+        marker.write_text("")
+        r = _sel(repo, "run", env={**env, "PROCESS_SUITE_ABORT": str(marker)})
         assert r.returncode == 75 and "nothing ran" in r.stderr, r.stderr
         assert not (repo / "backend/ran-backend").exists()
+        # #448: it gave up — one line naming its lane directory
+        import urllib.parse
+        named = urllib.parse.quote(str((tmp_path / "lanes").resolve()), safe="/")
+        (line,) = marker.read_text().splitlines()
+        assert line.startswith(f"lane-busy scoped dir={named} held by pid "), line
     finally:
         holder.kill()
         holder.wait()

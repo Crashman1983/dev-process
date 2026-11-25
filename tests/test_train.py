@@ -5022,7 +5022,7 @@ def test_marked_runs_read_only_their_own_path(render, tmp_path, monkeypatch):
     lane = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(lane)
     monkeypatch.setenv("PROCESS_SUITE_ABORT", str(gone))
-    lane._note_suite_abort("full", "held by pid 1")
+    lane.give_up("full", "held by pid 1", where=tmp_path)
     assert not gone.exists() and first.parent == gone.parent == _marker_dir(out)
     assert first != gone and first.name.startswith(f"x-{os.getpid()}.")
     # green wins: exit 0 with a marker
@@ -5385,6 +5385,168 @@ def test_train_phases_counts_lane_held_apart_from_the_preflight(render, tmp_path
     out = _train_phases(render, tmp_path, rows)
     assert ("0/4 runs ended red, 1 stopped by the preflight (the host, not a passenger), "
             "2 held at the lane full (another run held it), nobody blamed") in out, out
+
+
+# --- #448: only a real give-up writes `lane-busy`, and only the train's lane directory counts --
+
+def _quoted(where: Path) -> str:
+    import urllib.parse
+    return urllib.parse.quote(str(where.resolve()), safe="/")
+
+
+def test_abort_lines_count_lane_busy_only_in_the_trains_lane_dir_or_without_dir(render, tmp_path):
+    """#448 (r3 P4-4, P4-5): a `lane-busy` line counts when its `dir=` names the train's lane
+    directory or when it has none (an older template, a project's own script); a foreign
+    `dir=` does not; `disk-full` lines always count; no lane directory known counts all."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    own, foreign = tmp_path / "own lanes", tmp_path / "foreign"
+    marker = tmp_path / "marker"
+    marker.write_text("\n".join([
+        f"lane-busy scoped dir={_quoted(foreign)} held by pid 1 — a test's own",
+        f"lane-busy full dir={_quoted(own)} held by pid 2 — other",
+        "lane-busy full held by pid 3 — an older template",
+        f"disk-full {foreign} 97%",
+        "lane-busy full dir= held by pid 4",
+        f"lane-busy full dir={_quoted(tmp_path)}/x/../own%20lanes held by pid 5",
+        "watchdog t::a 10 9.0"]) + "\n")
+    assert train._abort_lines(marker, own.resolve()) == (
+        f"lane-busy full dir={_quoted(own)} held by pid 2 — other",
+        "lane-busy full held by pid 3 — an older template",
+        f"disk-full {foreign} 97%",
+        f"lane-busy full dir={_quoted(tmp_path)}/x/../own%20lanes held by pid 5",
+        "watchdog t::a 10 9.0")
+    assert len(train._abort_lines(marker)) == 7
+
+
+_TRIES_LANES = """\
+import os, subprocess, sys, time
+sys.path.insert(0, os.path.join(os.getcwd(), "scripts/process"))
+import lane
+# like a project's e2e lane claim: its own lane directory, lanes tried in order, one caught
+foreign = sys.argv[1]
+env = {**os.environ, "PROCESS_LANE_DIR": foreign}
+holder = subprocess.Popen([sys.executable, "scripts/process/lane.py", "run", "--lane", "scoped",
+                           "--no-nice", "--", sys.executable, "-c", "import time; time.sleep(60)"],
+                          env=env)
+try:
+    for _ in range(400):
+        if os.path.exists(os.path.join(foreign, "test-lane-scoped.status")):
+            break
+        time.sleep(0.05)
+    os.environ["PROCESS_LANE_DIR"] = foreign
+    got = None
+    for name in ("scoped", "full"):
+        try:
+            with lane.hold(name, wait=0, quiet=True, settings=lane.config()):
+                got = name
+                break
+        except lane.LaneBusy:
+            continue
+    print("claimed", got)
+finally:
+    holder.kill()
+    holder.wait()
+sys.exit(1)
+"""
+
+
+def test_a_red_run_whose_test_catches_lane_busy_in_its_own_lane_dir_reads_red(render, tmp_path):
+    """#448 R0: a test that tries lanes in order in its own lane directory and catches one
+    LaneBusy, inside a red suite run — red, not aborted (before: `lane-busy scoped …` in the
+    marker made every red run of such a suite `aborted`)."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    script = tmp_path / "tries_lanes.py"
+    script.write_text(_TRIES_LANES)
+    cmd = f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} {shlex.quote(str(tmp_path / 'foreign'))}"
+    assert train._marked_sh(out, "x", out, cmd, lambda _l: None) == ("red", "")
+
+
+def test_a_give_up_counts_only_in_the_trains_own_lane_dir(render, tmp_path):
+    """#448: a real give-up (`lane.py wait`) in a foreign lane directory leaves a red run red;
+    in the train's own lane directory (`PROCESS_LANE_DIR` of the run) the run is aborted."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    own, foreign = Path(os.environ["PROCESS_LANE_DIR"]), tmp_path / "foreign"
+    lane = [sys.executable, str(out / "scripts/process/lane.py")]
+    holders = [subprocess.Popen([*lane, "run", "--lane", "scoped", "--label", "holder", "--no-nice", "--",
+                                 sys.executable, "-c", "import time; time.sleep(60)"], cwd=out,
+                                env={**os.environ, "PROCESS_LANE_DIR": str(where), "PYTHONDONTWRITEBYTECODE": "1"})
+               for where in (own, foreign)]
+    try:
+        for where in (own, foreign):
+            for _ in range(200):
+                if (where / "test-lane-scoped.status").exists():
+                    break
+                time.sleep(0.05)
+        wait = f"{shlex.quote(sys.executable)} scripts/process/lane.py wait --lane scoped --wait 0 --quiet"
+        log = lambda _l: None  # noqa: E731
+        assert train._marked_sh(out, "x", out, f"PROCESS_LANE_DIR={shlex.quote(str(foreign))} {wait}; exit 1",
+                                log) == ("red", "")
+        state, reason = train._marked_sh(out, "x", out, f"{wait}; exit 1", log)
+        assert state == "aborted" and reason.startswith(f"lane-busy scoped dir={_quoted(own)} held by pid "), \
+            reason
+    finally:
+        for h in holders:
+            h.kill()
+            h.wait()
+
+
+def test_without_the_variable_the_train_counts_its_checkouts_lane_dir(render, tmp_path, monkeypatch):
+    """#448 (r3 P4-1): no `PROCESS_LANE_DIR` (a preboard, a train without `full`) — the lane
+    configuration of the train's checkout decides, a relative `lane_dir` at its root; the
+    same relative directory under another tree does not count."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"lane_dir": "lanes-rel"}))
+    _repo(out)
+    train = _load_train(out)
+    monkeypatch.delenv("PROCESS_LANE_DIR", raising=False)
+    assert train._train_lane_dir(out) == (out / "lanes-rel").resolve()
+    elsewhere = tmp_path / "wt"
+    elsewhere.mkdir()
+    marker = tmp_path / "marker"
+    marker.write_text(f"lane-busy full dir={_quoted(out / 'lanes-rel')} held by pid 1\n"
+                      f"lane-busy full dir={_quoted(elsewhere / 'lanes-rel')} held by pid 2\n")
+    assert train._abort_lines(marker, train._train_lane_dir(out)) == (
+        f"lane-busy full dir={_quoted(out / 'lanes-rel')} held by pid 1",)
+
+
+def test_the_train_sets_its_lane_dir_absolute_for_the_suite(render, tmp_path, monkeypatch):
+    """#448 (r3 P4-1): a relative `lane_dir` reaches the suite as an absolute
+    `PROCESS_LANE_DIR`, anchored at the train's checkout, not at the staging worktree."""
+    monkeypatch.delenv("PROCESS_LANE_DIR", raising=False)
+    out, seen = _lane_train(render, tmp_path, lane_dir=Path("lanes-rel"))
+    r = _train(out, "run", "--force")
+    assert r.returncode == 0, r.stdout + r.stderr
+    (run,) = _lane_runs(seen)
+    assert run["nested"] == 0, run
+    assert (out / "lanes-rel/test-lane-full.lock").exists()
+    log = "".join(f.read_text() for f in (out / ".git/process-train").glob("*.log"))
+    assert f"lane full held by this train ({(out / 'lanes-rel').resolve()})" in log, log
+
+
+def test_a_red_train_run_with_a_caught_lane_busy_reads_red_not_aborted(render, tmp_path):
+    """#448 R0, a real train run: the suite's test catches LaneBusy in its own lane directory
+    and the suite is red on every tree — no round reads `suite-aborted`, and no run is
+    repeated as an abort."""
+    script = tmp_path / "tries_lanes.py"
+    script.write_text(_TRIES_LANES)
+    suite = f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} {shlex.quote(str(tmp_path / 'foreign'))}"
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps(
+        {"merge_suite": suite, "lanes": {"scoped": {"wait": 5}, "full": {"wait": 60}}}))
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    r = _train(out, "run", "--force")
+    row = _phases(out)[-1]
+    paths = [x["red_path"] for x in row["rounds"]]
+    assert "suite-aborted" not in paths and not any(x.get("aborts") for x in row["rounds"]), \
+        (paths, row, r.stdout + r.stderr)
+    assert not any("retry_abort" in x.get("runs", {}) for x in row["rounds"]), row
 
 
 # --- v2.98 B1: train-phases counts a full disk apart -----------------------------------

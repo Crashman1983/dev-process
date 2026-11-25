@@ -654,6 +654,7 @@ def apply(root: Path, *, tests: str | None, tests_passed: bool) -> int:
                     print(f"finish: --tests cannot run ({exc}) — not merging")
                     return 1
         except lane.LaneBusy as busy:
+            lane.give_up(FULL_LANE, str(busy), settings=lane.config(root))  # finish stops here
             print(f"finish: lane {busy} — its wait ran out; the suite did not run, nothing merged. "
                   f"Not a red suite: re-run once it is free (`scripts/process/lane.py status`)",
                   file=sys.stderr)

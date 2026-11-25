@@ -522,10 +522,26 @@ The merge train reads it the same way (v2.95, `train.md`, "Red, undefined,
 aborted"): a suite command that exits 75 itself is an **aborted** run, not a
 red one. Under make a recipe's 75 becomes make's own exit 2, so a tool deep
 inside the suite says it explicitly: it appends one line to the file named
-in `PROCESS_SUITE_ABORT` (append only, never creating it); `lane.py` does so
-when its wait runs out. An aborted run is repeated after the load falls;
-it never blames a passenger by itself. Nested runs, and tests that provoke
-an abort on purpose, run without that variable.
+in `PROCESS_SUITE_ABORT` (append only, never creating it). For a lane the
+line is `lane-busy <lane> dir=<lane directory> <holder>` — the directory
+resolved and percent-encoded, so a space cannot split the line; the first
+two words name the series (`train.md`). Only who really gives up writes it,
+through `lane.give_up(lane, holder, settings=…)` (or `where=` the
+directory): `lane.py run` and `wait` on their own wait running out (not when
+their command exits 75), `test_select.py run` and `finish --tests`.
+`lane.hold` raises `LaneBusy` and writes nothing, so a caller that catches
+it and takes another lane gave nothing up (#448: a test that tried lanes in
+order made every red train `aborted`). A library caller that stops after
+`LaneBusy` — a lane claim that found no free lane — calls `give_up` before it
+exits. A relative `lane_dir` is anchored at the project root. An aborted run
+is repeated after the load falls; it never blames a passenger by itself.
+Nested runs, and tests that provoke an abort on purpose, run without that
+variable: **a project's test harness removes `PROCESS_SUITE_ABORT`, and the
+run's other variables its tests must not inherit (`PROCESS_WORKER`,
+`PROCESS_TRACK`, …), from its tests' environment**, as the template's own
+`tests/conftest.py` does with `monkeypatch.delenv` in an autouse fixture,
+and gives them a lane directory of their own (`PROCESS_LANE_DIR`); a test
+about the marker sets it itself.
 
 A full disk is unmeasurable too (v2.98, `train.md`, "A full disk"): the
 train halts `disk-full` before a build, a judge or a suite run on a disk
