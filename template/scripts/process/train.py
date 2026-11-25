@@ -120,6 +120,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Callable, NamedTuple
 
@@ -1293,10 +1294,15 @@ def wait_for_load(log, *, budget: float | None = None, clock: Callable[[], float
         sleep(min(ABORT_POLL_S, budget - waited))
 
 
-def _abort_lines(path: Path) -> tuple[str, ...]:
+def _abort_lines(path: Path, lane_dir: Path | None = None) -> tuple[str, ...]:
     """The non-empty lines of a run's abort marker, at most ABORT_LINES of its first
     ABORT_BYTES — a regular file opened without following a link (`_lastfailed_ids`).
-    () when it cannot be read: an unreadable marker marks nothing."""
+    () when it cannot be read: an unreadable marker marks nothing.
+    A `lane-busy` line counts only where it names `lane_dir`, the train's own lane
+    directory (`_train_lane_dir`), in its `dir=`, or names none (an older template, a
+    project's own script): a lane given up in another directory — a test's own — says
+    nothing about this host's load (#448). `lane_dir` None counts every line; other
+    kinds (`disk-full …`) always count."""
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     except (OSError, ValueError):
@@ -1310,10 +1316,41 @@ def _abort_lines(path: Path) -> tuple[str, ...]:
     finally:
         os.close(fd)
     # a line becomes a reason (the log, `aborts`, a stop's message): no control
-    # characters, at most ABORT_LINE_CHARS
-    lines = (_ABORT_CONTROL.sub(" ", ln).strip()[:ABORT_LINE_CHARS]
+    # characters, at most ABORT_LINE_CHARS — cut after the filter, which reads the whole `dir=`
+    lines = (_ABORT_CONTROL.sub(" ", ln).strip()
              for ln in raw.decode("utf-8", "replace").splitlines())
-    return tuple(ln for ln in lines if ln)[:ABORT_LINES]
+    return tuple(ln[:ABORT_LINE_CHARS] for ln in lines
+                 if ln and _own_lane_line(ln, lane_dir))[:ABORT_LINES]
+
+
+def _own_lane_line(line: str, lane_dir: Path | None) -> bool:
+    """False only for `lane-busy <lane> dir=<path> …` whose percent-encoded path is not
+    `lane_dir` (resolved): a give-up in a foreign lane directory."""
+    words = line.split(maxsplit=3)
+    if lane_dir is None or words[:1] != ["lane-busy"] or len(words) < 3 \
+            or not words[2].startswith("dir="):
+        return True
+    named = urllib.parse.unquote(words[2].removeprefix("dir="))
+    try:
+        return bool(named) and Path(named).resolve() == lane_dir
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def _train_lane_dir(root: Path) -> Path | None:
+    """The lane directory whose `lane-busy` lines count for the train (`_abort_lines`):
+    `PROCESS_LANE_DIR` of the run (`_hold_full` sets it, absolute), else the lane
+    configuration of the train's checkout `root` — never the staging worktree's, which a
+    passenger could change — resolved. None when it cannot be read: every line counts."""
+    try:
+        import lane as _lane  # noqa: PLC0415
+        import testing_config  # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        return Path(_lane.config(root)["dir"]).expanduser().resolve()
+    except (testing_config.ConfigError, OSError, RuntimeError):
+        return None
 
 
 def _abort_marker(root: Path, stamp: str) -> Path | None:
@@ -1509,9 +1546,10 @@ def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) ->
         log(f"abort marker not made in {TRAIN_DIR}/{ABORT_DIR} — `{cmd}` runs without {SUITE_ABORT_ENV}")
         state = _sh(cwd, cmd, log, *args, disk_watch=watch, **kw)
     else:
+        lane_dir = _train_lane_dir(root)
         try:
-            state = _sh(cwd, cmd, log, *args, abort=path, disk_watch=watch, **kw)
-            lines = _abort_lines(path) if state == "aborted" else ()
+            state = _sh(cwd, cmd, log, *args, abort=path, abort_lane_dir=lane_dir, disk_watch=watch, **kw)
+            lines = _abort_lines(path, lane_dir) if state == "aborted" else ()
         finally:
             with contextlib.suppress(OSError):
                 path.unlink()
@@ -1542,7 +1580,7 @@ def _echo(text: str, end: str = "\n") -> None:
 
 def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state: str = "red",
         env: dict[str, str] | None = None, abort: Path | None = None,
-        disk_watch: _DiskWatch | None = None) -> str:
+        disk_watch: _DiskWatch | None = None, abort_lane_dir: Path | None = None) -> str:
     """Run cmd, streaming its output; "green", "red", "undefined" (the
     command or make target does not exist on this tree) or "aborted" (only
     with `abort`, or on exit 75) — `decide`'s verdict.
@@ -1551,9 +1589,9 @@ def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state
     for "undefined" (a slow check says nothing about the candidate, #386).
     `env` extends the inherited environment, never replaces it — except for
     SUITE_ABORT_ENV, which no command inherits: it is `abort`, the marker of a
-    suite run (`_marked_sh`), and only there. `disk_watch` (only `_marked_sh` passes it:
-    a suite run) samples the free space while the command runs, until it returns — also
-    when the timeout kills it."""
+    suite run (`_marked_sh`), and only there; `abort_lane_dir` is its lane directory
+    (`_abort_lines`). `disk_watch` (only `_marked_sh` passes it: a suite run) samples the
+    free space while the command runs, until it returns — also when the timeout kills it."""
     _echo(f"train: $ {cmd}")
     # the lines that can carry a fact, over the whole run: those that make a
     # run red whatever follows without a cap, the others the last 400
@@ -1599,7 +1637,7 @@ def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state
             return timeout_state
         state, why = decide(read_facts(cmd, rc, [*red, *kept], os.environ.get("MAKELEVEL", "0"),
                                        lambda p: (cwd / p).exists(),
-                                       abort=_abort_lines(abort) if abort is not None else ()))
+                                       abort=_abort_lines(abort, abort_lane_dir) if abort is not None else ()))
         log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ' — ' + why + ', ' + _load()})")
         return state
     finally:
@@ -2006,7 +2044,8 @@ def _hold_full(root: Path, stamp: str, log) -> contextlib.ExitStack:
     except _lane.LaneBusy as busy:
         log(f"lane {busy} — the train waited {wait:g} s; nothing ran")
         raise LaneHeld(f"the lane {busy} — waited {wait:g} s") from None
-    where = str(settings["dir"])
+    # absolute: a child in the staging worktree must name the same directory (`_abort_lines`)
+    where = str(Path(settings["dir"]).expanduser().resolve())
     held.callback(_restore_env, _lane.DIR_ENV, os.environ.get(_lane.DIR_ENV))
     os.environ[_lane.DIR_ENV] = where
     log(f"lane {TRAIN_LANE} held by this train ({where}) until before the push")

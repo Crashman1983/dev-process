@@ -137,6 +137,20 @@ def test_the_lane_dir_follows_env_then_config_then_state_dir(tmp_path, monkeypat
     assert mod.config(root)["dir"] == tmp_path / "env"
 
 
+def test_a_relative_lane_dir_is_anchored_at_the_project_root(tmp_path, monkeypatch):
+    """#448 (r3 P4-1): `lane_dir` relative to the root, as testing_config reads it — never to
+    the cwd, or a give-up in a worktree names another directory than the train's."""
+    mod = _load()
+    root = tmp_path / "repo"
+    (root / "docs/process").mkdir(parents=True)
+    (root / "docs/process/testing.local.json").write_text(json.dumps({"lane_dir": "state/lanes"}))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.delenv("PROCESS_LANE_DIR", raising=False)
+    monkeypatch.chdir(elsewhere)
+    assert mod.config(root)["dir"] == root / "state/lanes"
+
+
 def test_a_malformed_configuration_queues_nothing(tmp_path):
     root = tmp_path / "repo"
     (root / "docs/process").mkdir(parents=True)
@@ -178,31 +192,45 @@ def test_lane_readers_use_the_projects_own_script_then_the_template_one(tmp_path
     assert cfg.lane_status(root, env) == ["scoped: held by pid 1 — own (b) since 09:00 (1 min)"]
 
 
-def test_a_busy_lane_appends_its_line_to_the_suite_marker(tmp_path, monkeypatch):
-    """v2.95 (plan test 12): with PROCESS_SUITE_ABORT set, a lane that stays held appends one
-    line `lane-busy <lane> <holder>` before LaneBusy; without it nothing is written."""
+def _encoded(where: Path) -> str:
+    import urllib.parse
+    return urllib.parse.quote(str(where.resolve()), safe="/")
+
+
+def test_a_caught_lane_busy_writes_no_line_and_a_real_give_up_writes_its_dir(tmp_path, monkeypatch):
+    """#448: `hold` raises LaneBusy and writes nothing — a caller that takes another lane gave
+    nothing up. `give_up` writes `lane-busy <lane> dir=<resolved, percent-encoded> <holder>`
+    inside the train's run only; `lane.py run` and `wait` call it on their own give-up."""
     mod = _load()
     marker = tmp_path / "marker"
     marker.write_text("")
-    monkeypatch.setenv("PROCESS_LANE_DIR", str(tmp_path / "lanes"))
+    lanes = tmp_path / "lanes"
+    monkeypatch.setenv("PROCESS_LANE_DIR", str(lanes))
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
     proc = _holder(tmp_path)
     try:
-        monkeypatch.delenv("PROCESS_SUITE_ABORT", raising=False)
-        with pytest.raises(mod.LaneBusy):
+        with pytest.raises(mod.LaneBusy) as busy:
             with mod.hold("scoped", wait=0, settings=_settings(tmp_path), quiet=True):
                 pass
-        assert marker.read_text() == ""
-        monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
-        with pytest.raises(mod.LaneBusy):
-            with mod.hold("scoped", wait=0, settings=_settings(tmp_path), quiet=True):
-                pass
-        lines = marker.read_text().splitlines()
-        assert len(lines) == 1 and lines[0].startswith("lane-busy scoped held by pid ") and "— holder" in lines[0]
-        # the command line keeps its exit 75 — and writes the line
-        r = subprocess.run([sys.executable, str(LANE), "wait", "--lane", "scoped", "--wait", "0", "--quiet"],
-                           cwd=tmp_path, env={**_env(tmp_path), "PROCESS_SUITE_ABORT": str(marker)},
-                           capture_output=True, text=True)
-        assert r.returncode == 75 and len(marker.read_text().splitlines()) == 2, r.stderr
+        assert marker.read_text() == ""  # caught: no line (today `lane-busy scoped held by …`)
+        mod.give_up("scoped", str(busy.value), settings=_settings(tmp_path))
+        (line,) = marker.read_text().splitlines()
+        assert line.startswith(f"lane-busy scoped dir={_encoded(lanes)} held by pid ") \
+            and "— holder" in line, line
+        # without the variable nothing is written
+        monkeypatch.delenv("PROCESS_SUITE_ABORT")
+        mod.give_up("scoped", str(busy.value), settings=_settings(tmp_path))
+        assert len(marker.read_text().splitlines()) == 1
+        # the command lines keep their exit 75 — and write the line with dir=
+        for argv in (["wait", "--lane", "scoped", "--wait", "0", "--quiet"],
+                     ["run", "--lane", "scoped", "--wait", "0", "--", "true"]):
+            r = subprocess.run([sys.executable, str(LANE), *argv], cwd=tmp_path,
+                               env={**_env(tmp_path), "PROCESS_SUITE_ABORT": str(marker)},
+                               capture_output=True, text=True)
+            assert r.returncode == 75, r.stderr
+            assert marker.read_text().splitlines()[-1].startswith(
+                f"lane-busy scoped dir={_encoded(lanes)} held by pid "), marker.read_text()
+        assert len(marker.read_text().splitlines()) == 3
         # a missing path is never created, a path that is a directory is no error: exit 75 either way
         for where in (tmp_path / "missing", tmp_path):
             r = subprocess.run([sys.executable, str(LANE), "run", "--lane", "scoped", "--wait", "0", "--", "true"],
@@ -213,6 +241,30 @@ def test_a_busy_lane_appends_its_line_to_the_suite_marker(tmp_path, monkeypatch)
     finally:
         proc.kill()
         proc.wait()
+
+
+def test_a_child_that_exits_75_under_lane_run_writes_no_line(tmp_path):
+    """#448: `cmd_run` writes only on its own LaneBusy; its command's exit 75 is the command's."""
+    marker = tmp_path / "marker"
+    marker.write_text("")
+    r = subprocess.run([sys.executable, str(LANE), "run", "--lane", "scoped", "--wait", "0", "--",
+                        sys.executable, "-c", "raise SystemExit(75)"], cwd=tmp_path,
+                       env={**_env(tmp_path), "PROCESS_SUITE_ABORT": str(marker)}, capture_output=True, text=True)
+    assert r.returncode == 75 and marker.read_text() == "", (r.stderr, marker.read_text())
+
+
+def test_a_give_up_percent_encodes_a_lane_dir_with_a_space(tmp_path, monkeypatch):
+    """#448 (r3 P4-3): a space in the path would split the line — it is encoded, and the
+    first two words stay `lane-busy <lane>` (train.md counts series by them)."""
+    mod = _load()
+    marker = tmp_path / "marker"
+    marker.write_text("")
+    monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
+    where = tmp_path / "my lanes%x"
+    mod.give_up("full", "full: held by pid 1 — x", where=where)
+    line = marker.read_text().rstrip("\n")
+    assert line == f"lane-busy full dir={_encoded(where)} held by pid 1 — x", line
+    assert " " not in line.split()[2] and "%20" in line.split()[2] and "%25x" in line.split()[2]
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on this platform")
@@ -238,5 +290,5 @@ def test_the_marker_line_carries_no_line_break_of_the_holder(tmp_path, monkeypat
     marker = tmp_path / "marker"
     marker.write_text("")
     monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
-    mod._note_suite_abort("full", "held by pid 1 — a\nlabel\r\nwith breaks")
-    assert marker.read_text() == "lane-busy full held by pid 1 — a label with breaks\n"
+    mod.give_up("full", "held by pid 1 — a\nlabel\r\nwith breaks", where=tmp_path)
+    assert marker.read_text() == f"lane-busy full dir={_encoded(tmp_path)} held by pid 1 — a label with breaks\n"

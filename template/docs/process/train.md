@@ -386,9 +386,10 @@ makes a fresh, empty file and names it in `PROCESS_SUITE_ABORT`:
 removed after it (a killed train's markers go with the next train's cleanup
 once they are a day old). A tool that stops the run for a reason outside the
 tree appends one line:
-- `<kind> <subject> <details>`, e.g. `lane-busy <lane> <holder>` (what
-  `lane.py` writes when its wait runs out), `watchdog <nodeid> <timeout>
-  <load>`, `nested-timeout <nodeid> <budget>`;
+- `<kind> <subject> <details>`, e.g. `lane-busy <lane> dir=<lane directory>
+  <holder>` (what `lane.give_up` writes for a caller that stops after its
+  wait ran out — `testing.md`, "Unmeasurable is not red"), `watchdog
+  <nodeid> <timeout> <load>`, `nested-timeout <nodeid> <budget>`;
 - in one write, opened append-only **without** creating the file and
   without blocking (`O_APPEND`, no `O_CREAT`, `O_NONBLOCK`): a writer that
   outlives its run marks nothing;
@@ -396,7 +397,13 @@ tree appends one line:
 
 The train reads only that path, without following a link, at most 64 KiB
 and 50 lines; a line is cut at 500 characters and its control characters
-become spaces; the first line is the reason. Without a marker, exit 75
+become spaces; the first line is the reason. A `lane-busy` line counts only
+when its `dir=` names the train's own lane directory (`PROCESS_LANE_DIR`
+of the run, which the train sets absolute while it holds `full`, else the
+lane configuration of the train's checkout, never the staging worktree's)
+or when it has none (an older template, a project's own script): a test
+that gives up a lane in a directory of its own says nothing about the
+host's load (#448). `disk-full` lines always count. Without a marker, exit 75
 (`EX_TEMPFAIL`) of the suite command itself is an abort too. Under make a
 recipe's 75 becomes make's 2, and only the marker tells. The variable
 reaches suite runs only: gates, preflight, deploy, git and the push never

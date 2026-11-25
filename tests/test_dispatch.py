@@ -1555,14 +1555,15 @@ def test_lane_and_dispatch_write_the_abort_marker_through_one_writer(render, tmp
     marker.write_text("")
     again.write_text("")
     monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
-    lane._note_suite_abort("full", "held by pid 1 — a\nlabel")
+    lane.give_up("full", "held by pid 1 — a\nlabel", where=tmp_path)
     assert d.disk_refusal(tmp_path)
-    assert calls == ["lane-busy full held by pid 1 — a\nlabel", f"disk-full {tmp_path} 99% 1.0 GiB free"], calls
+    busy = f"lane-busy full dir={tmp_path.resolve()} held by pid 1 — a"
+    assert calls == [f"{busy}\nlabel", f"disk-full {tmp_path} 99% 1.0 GiB free"], calls
     monkeypatch.setenv("PROCESS_SUITE_ABORT", str(again))
     for line in calls[:]:
         real(line)
     assert marker.read_bytes() == again.read_bytes() == \
-        f"lane-busy full held by pid 1 — a label\ndisk-full {tmp_path} 99% 1.0 GiB free\n".encode()
+        f"{busy} label\ndisk-full {tmp_path} 99% 1.0 GiB free\n".encode()
 
 
 def test_a_full_disk_refusal_never_creates_the_marker(render, tmp_path, monkeypatch):

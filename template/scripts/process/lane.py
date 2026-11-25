@@ -12,7 +12,8 @@ for short runs, `full` for the train's suite, which yields CPU with `nice`).
 Runs within one lane are serialised by an exclusive `fcntl.flock` on
 `<dir>/test-lane-<lane>.lock`; the holder is named in `<lane>.status` next to
 it. The lock is the truth — a killed holder frees the lane with its process.
-The directory is `PROCESS_LANE_DIR`, else the config's `lane_dir`, else
+The directory is `PROCESS_LANE_DIR`, else the config's `lane_dir` (a relative
+one at the project root), else
 `$XDG_STATE_HOME/process-lanes` (`~/.local/state/process-lanes`): one queue per
 host, across clones. A project that kept its own lane script uses the same
 file names and status record, so both share one lock on a host.
@@ -20,10 +21,14 @@ file names and status record, so both share one lock on a host.
 The wait is bounded: past it, nothing runs and the exit is 75 (EX_TEMPFAIL)
 with the holder named — a hook inside an agent's tool call must not sit out
 its own timeout (downstream: a hook queued 40 minutes behind a full run, the
-tool call died at 96 %, the retry started from zero, five times). Inside the
-train's suite run (`PROCESS_SUITE_ABORT` set) it first appends `lane-busy
-<lane> <holder>` to that marker: the train reads the run as aborted, not red
-(`docs/process/train.md`). A hold
+tool call died at 96 %, the retry started from zero, five times). `hold`
+raises LaneBusy and writes nothing; whoever then really gives up — `run` and
+`wait` here, `test_select.py run`, `finish --tests`, a library caller that
+stops — calls `give_up`, which, inside the train's suite run
+(`PROCESS_SUITE_ABORT` set), appends `lane-busy <lane> dir=<lane directory>
+<holder>` to that marker: the train reads the run as aborted, not red
+(`docs/process/train.md`). A caller that catches LaneBusy and takes another
+lane gave nothing up and writes nothing (#448). A hold
 inside a hold of the same lane is a pass-through (`PROCESS_LANE_HELD`): a
 hook run from a lane-held command would otherwise wait for itself.
 
@@ -41,6 +46,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -83,7 +89,9 @@ def config(root: Path | None = None) -> dict:
     if os.environ.get(DIR_ENV):
         where = Path(os.environ[DIR_ENV]).expanduser()
     elif cfg and cfg.get("lane_dir"):
-        where = Path(cfg["lane_dir"]).expanduser()
+        # relative to the project root, as testing_config reads it — never to the
+        # cwd: a worktree's give-up would name another directory than the train's
+        where = root / Path(cfg["lane_dir"]).expanduser()
     else:
         state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
         where = Path(state).expanduser() / "process-lanes"
@@ -161,13 +169,26 @@ def _mark(where: Path, lane: str) -> str:
     return f"{where.resolve()}\n{lane}"
 
 
-def _note_suite_abort(lane: str, who: str) -> None:
-    """Append `lane-busy <lane> <holder>` to the train's abort marker (train.py,
-    `docs/process/train.md`): a lane that stays held there marks the run aborted, not red —
-    also under `make -k`, which turns this exit 75 into its own 2. Only when the variable
-    is set — through the one writer, `process_git.note_suite_abort` (append only, never
-    creating, never blocking). A failure to write changes nothing — the exit stays 75."""
-    process_git.note_suite_abort(f"lane-busy {lane} {who}")
+def give_up(lane: str, holder: str, *, settings: dict | None = None,
+            where: Path | None = None) -> None:
+    """Say that a hold of `lane` was given up for good: append `lane-busy <lane>
+    dir=<lane directory> <holder>` to the train's abort marker (train.py,
+    `docs/process/train.md`) — the run then reads aborted, not red, also under `make -k`,
+    which turns the exit 75 into its own 2. Only the caller that stops after LaneBusy
+    calls it; one that takes another lane gave nothing up (#448). `holder` is the
+    LaneBusy's text (its `<lane>: ` is dropped) or the holder's description. The directory
+    is `where`, else `settings["dir"]`, else `config()`'s, resolved and percent-encoded
+    (a space would split the line); the train counts only lines of its own lane
+    directory and lines without `dir=`. Only when the variable is set — through the one
+    writer, `process_git.note_suite_abort` (append only, never creating, never blocking).
+    A failure to write changes nothing."""
+    if not os.environ.get(process_git.SUITE_ABORT_ENV):
+        return
+    if where is None:
+        where = (settings or config())["dir"]
+    named = urllib.parse.quote(str(Path(where).expanduser().resolve()), safe="/")
+    who = holder.removeprefix(f"{lane}: ")
+    process_git.note_suite_abort(f"lane-busy {lane} dir={named} {who}")
 
 
 def _write_status(where: Path, lane: str, label: str) -> None:
@@ -183,7 +204,8 @@ def _write_status(where: Path, lane: str, label: str) -> None:
 def hold(lane: str, *, wait: float | None = None, label: str = "", quiet: bool = False,
          settings: dict | None = None):
     """Hold `lane` for the body: wait up to `wait` seconds (the lane's own
-    budget by default), raise LaneBusy past it. A hold of a lane this process
+    budget by default), raise LaneBusy past it — and write nothing: a caller that
+    stops then calls `give_up`. A hold of a lane this process
     tree already holds passes through. Children inherit the mark."""
     settings = settings or config()
     if lane not in settings["lanes"]:
@@ -215,9 +237,7 @@ def hold(lane: str, *, wait: float | None = None, label: str = "", quiet: bool =
                 pass
             now = time.monotonic()
             if now >= deadline:
-                busy = describe(where, lane)
-                _note_suite_abort(lane, busy.removeprefix(f"{lane}: "))
-                raise LaneBusy(busy)
+                raise LaneBusy(describe(where, lane))  # the caller decides whether it gives up
             if not quiet and now - last_note >= NOTE_EVERY_S:
                 print(f"… lane {describe(where, lane)} — waiting, "
                       f"{int(deadline - now) // 60} min budget left", file=sys.stderr, flush=True)
@@ -275,6 +295,7 @@ def cmd_run(args, settings: dict) -> int:
             proc = subprocess.Popen(argv)
             return proc.wait()
     except LaneBusy as busy:
+        give_up(args.lane, str(busy), settings=settings)
         print(tempfail_message(busy, wait), file=sys.stderr)
         return EX_TEMPFAIL
 
@@ -285,6 +306,7 @@ def cmd_wait(args, settings: dict) -> int:
         with hold(args.lane, wait=wait, label="lane wait", quiet=args.quiet, settings=settings):
             return 0
     except LaneBusy as busy:
+        give_up(args.lane, str(busy), settings=settings)
         print(tempfail_message(busy, wait), file=sys.stderr)
         return EX_TEMPFAIL
 

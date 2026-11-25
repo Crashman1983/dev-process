@@ -476,6 +476,7 @@ def run(root: Path, cfg: dict, changed: set[str], klass: str, *, certify: bool,
                     print(f"test_select: red — {label}", file=sys.stderr)
                     return 1
     except lane.LaneBusy as busy:
+        lane.give_up(name, str(busy), settings=settings)  # this run stops: it gave up the lane
         print(lane.tempfail_message(busy, settings["lanes"][name]["wait"]), file=sys.stderr)
         return EX_TEMPFAIL
     print(f"test_select: green in {int(time.monotonic() - started)} s"
