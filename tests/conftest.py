@@ -122,8 +122,10 @@ def _outside_ci(monkeypatch):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     # dispatch refuses to start on a nearly full filesystem; a parallel suite fills
     # the host's /tmp towards that limit, and a test about something else then fails
-    # on the host's disk. The disk-guard tests set or drop the variable themselves.
+    # on the host's disk. The disk-guard tests set or drop the variables themselves; the
+    # floor (#446: dispatch refuses and the train halts below it) is off alike.
     monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "100")
+    monkeypatch.setenv("PROCESS_DISK_FLOOR_GB", "0")
     # this repository's own train runs this suite with its abort marker set (v2.95): a dispatch
     # test that refuses a start appends `disk-full …` to it (v2.98 B1), and a lane test its
     # `lane-busy …` — every train would abort on its own tests. A test about the marker sets it.

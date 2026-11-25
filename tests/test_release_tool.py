@@ -479,6 +479,23 @@ def test_a_disk_over_the_percent_limit_refuses_too(tmp_path, monkeypatch):
     assert _bytes(root) == before
 
 
+@pytest.mark.parametrize("use, free_gb, need, short", [
+    (95.0, 500, "0", "at or over the 90% limit"),  # the percent check stays here (#446)
+    (50.0, 3, "12", "needs 12 GB"),                # and the release's own floor
+    (50.0, 1.5, "1", None),                        # the train's 2 GiB floor is no check of the release's
+])
+def test_release_keeps_its_percent_and_its_own_floor(tmp_path, monkeypatch, use, free_gb, need, short):
+    """v2.103 (#446): the train warns at the percentage and halts below its floor; the release
+    keeps both of its checks — `over_pct` and RELEASE_MIN_FREE_GB — and counts GiB as the
+    train does (one constant)."""
+    assert GB == rel.GB == rel.process_git.GIB
+    monkeypatch.setenv("RELEASE_MIN_FREE_GB", need)
+    monkeypatch.setattr(rel.process_git, "disk_use", lambda path, fallback=False:
+                        rel.process_git.DiskUse(use, None, 90.0, int(free_gb * GB), 2.0))
+    got = rel._disk_short(tmp_path)
+    assert (got == []) if short is None else (len(got) == 2 and all(short in x for x in got)), got
+
+
 def test_a_missing_tmpdir_does_not_crash(tmp_path, monkeypatch):
     """Unset, the platform default is read; set to a folder that is not there, the check
     measures its nearest existing parent and the suite's folder goes there."""

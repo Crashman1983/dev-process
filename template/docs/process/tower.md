@@ -158,11 +158,13 @@ stopped finished review still boards the train. `max_workers` caps live
 sessions per host (one whose phase is over by its own final report — a
 plan's `planned`, a review's verdict — holds no slot; one that cannot be
 told does); a held `full` or `scoped` lane blocks no start (a session's own test runs queue on the lane, the session does not), an unknown held lane counts as no free CPU and blocks every phase, and a remote phase sees neither cap nor lane. A local start
-also refuses while the filesystem holding the worktrees is at or above
-90% use (`PROCESS_DISK_LIMIT_PCT`), naming the usage and
+also refuses while the filesystem holding the worktrees has less than
+2 GiB free (`PROCESS_DISK_FLOOR_GB`), naming the free space and
 `python3 scripts/process/tidy.py --apply` — each worktree carries its own
-environments, and merged ones are removed by the train and by tidy. The
-train halts at the same limit, blaming nobody (`train.md`, "A full disk"). Both runners strip
+environments, and merged ones are removed by the train and by tidy; at or
+above 90% use (`PROCESS_DISK_LIMIT_PCT`) with room it starts and warns. The
+train halts below the same floor, blaming nobody, and warns at the same
+limit (`train.md`, "A full disk"). Both runners strip
 the steward's own `CLAUDECODE`/`CLAUDE_CODE_*` variables from the
 worker's environment: a worker is a session of its own. Local workers
 start under `nice` (policy `worker_nice`, default 10, 0 = off): the merge

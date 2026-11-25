@@ -71,9 +71,11 @@ project's: another heavy run of the host waits for the whole loop, the
 suite's own `lane.py run --lane full` passes through, and the push's hook
 takes the lane itself. A lane still held after at most 60 s ends the run
 in a round `lane-held`: nothing ran, nobody is blamed.
-A disk the train writes to over `PROCESS_DISK_LIMIT_PCT` (90) before a build,
-a judge or a suite run halts it in a round `disk-full`, nobody blamed; a red
-run that left a disk over the limit is an abort, repeated at once (v2.98 B1).
+A disk the train writes to with less than `PROCESS_DISK_FLOOR_GB` (2 GiB) free
+before a build, a judge or a suite run halts it in a round `disk-full`, nobody
+blamed; over `PROCESS_DISK_LIMIT_PCT` (90) with room it warns once per disk and
+run (#446); a red run whose disk was under the floor after it or at its lowest
+during it is an abort, repeated at once (v2.98 B1).
 Every tree of a run — first, retry, base, probe, rebuild, preboard — is
 the SHAs boarding judged on the base's SHA, from one snapshot (#391): a
 commit after boarding rides a later train, a fetch moves no run. After
@@ -1348,8 +1350,15 @@ def _clear_aborts(root: Path, stamp: str) -> None:
 # --- a full disk (v2.98 B1) -----------------------------------------------------------------
 # The train checks the disks it writes to — the one under its worktrees, the temp dir's —
 # before every build (after the old tree is gone), before every judge and around every suite
-# run. Over the limit (`process_git.disk_use`) nobody of this run filled it: `DiskFull`.
-_DISK_NOTES: set[str] = set()  # a misconfigured limit is said once per process, logged per check
+# run. Under the floor (`process_git.disk_use`, `low_free`: less than PROCESS_DISK_FLOOR_GB
+# free) nobody of this run filled it: `DiskFull`. Over the percentage limit with room it only
+# warns, once per disk and run (#446).
+# What is said once per run: a misconfigured bound (its problem) and a disk over the limit
+# (`warn <disk>`); `_run_batch` empties it as a run starts, the log still gets every note.
+_DISK_NOTES: set[str] = set()
+# a suite run's free space is sampled this often (r3 P2-1), by a thread of this name
+DISK_SAMPLE_S = 10.0
+DISK_WATCH_THREAD = "train-disk-watch"
 
 
 # the readers live in process_git (v2.102 M5: tools/release.py checks the same disks)
@@ -1357,29 +1366,51 @@ _nearest_dir = process_git.nearest_dir
 _temp_root = process_git.temp_root
 
 
+def _disk_paths(where: Path) -> tuple[Path, ...]:
+    """The disks the train writes to from `where`: its own (the nearest directory that
+    exists), then the temp dir's — once each."""
+    return tuple(dict.fromkeys((_nearest_dir(Path(where)), _nearest_dir(_temp_root()))))
+
+
 def _disk_full(where: Path, log) -> str | None:
-    """`disk-full <path> <use>%` for the first disk over the limit — the one holding `where`
-    (measured at the nearest directory that exists), then the temp dir's — or None. A use
-    that cannot be read is a note, never full; a misconfigured limit is a note, and the
-    default limit holds (dispatch refuses on it; a train that stopped checking would read
-    a full disk as red passengers again)."""
+    """`disk-full <path> <use>% <free> GiB free` for the first disk under the floor — the one
+    holding `where` (measured at the nearest directory that exists), then the temp dir's — or
+    None. A use that cannot be read is a note, never full; a misconfigured bound is a note,
+    and its default holds (dispatch refuses on it; a train that stopped checking would read
+    a full disk as red passengers again). A disk over the limit with room is a warning."""
     over = _disk_over(where, log)
     return over[1] if over else None
 
 
+def _disk_key(path: Path) -> str:
+    """One disk, however many of the train's paths lie on it: its device, else the path."""
+    try:
+        return f"warn dev:{os.stat(path).st_dev}"
+    except OSError:
+        return f"warn {path}"
+
+
 def _disk_over(where: Path, log) -> tuple[Path, str] | None:
     """`_disk_full` with the directory it measured: `(path, line)`, or None."""
-    for path in (_nearest_dir(Path(where)), _nearest_dir(_temp_root())):
+    for path in _disk_paths(where):
         use = process_git.disk_use(path, fallback=True)
         if use.problem:
             log(f"disk: note — {use.problem}")
             if use.problem not in _DISK_NOTES:
                 _DISK_NOTES.add(use.problem)
                 checked = "not checked" if use.use_pct is None else \
-                    f"checked against the default {process_git.DISK_LIMIT_PCT}%"
+                    f"checked against the default {process_git.DISK_LIMIT_PCT}% and {process_git.DISK_FLOOR_GB} GiB free"
                 print(f"train: note — {use.problem}; the disk is {checked}", file=sys.stderr)
-        if use.full and use.use_pct is not None:
-            return path, process_git.disk_full_line(path, use.use_pct)
+        if use.low_free:
+            return path, process_git.disk_full_line(path, use.use_pct, use.free)
+        if use.over_pct and use.use_pct is not None and _disk_key(path) not in _DISK_NOTES:
+            _DISK_NOTES.add(_disk_key(path))
+            warning = (f"warning — {path} is {use.use_pct:.0f}% full (limit {use.limit:g}%, "
+                       f"{process_git.DISK_LIMIT_ENV}), {(use.free or 0) / process_git.GIB:.1f} GiB free; "
+                       f"the train goes on and halts below {use.floor:g} GiB free "
+                       f"({process_git.DISK_FLOOR_ENV}) — {_clear_hint(path, Path(where))}")
+            log(f"disk: {warning}")
+            print(f"train: {warning}", file=sys.stderr)
     return None
 
 
@@ -1405,7 +1436,7 @@ def _clear_hint(disk: Path, where: Path) -> str:
 
 
 def _halt_if_disk_full(where: Path, log) -> None:
-    """A check point: `DiskFull` when a disk the train writes to is over the limit."""
+    """A check point: `DiskFull` when a disk the train writes to is under the floor."""
     over = _disk_over(where, log)
     if over:
         disk, why = over
@@ -1414,24 +1445,72 @@ def _halt_if_disk_full(where: Path, log) -> None:
         raise DiskFull(why, hint)
 
 
+class _DiskWatch:
+    """The free space of a suite run's disks, sampled every DISK_SAMPLE_S seconds by a daemon
+    thread while the run lasts (r3 P2-1): the lowest reading per disk. It reads
+    `process_git.disk_use` itself — never `_disk_over`, which logs and fills `_DISK_NOTES` —
+    and stops nothing: a suite that fills the disk and cleans up before it ends is seen
+    here, not after the run. `_sh` starts and stops it; `_marked_sh` asks it."""
+
+    def __init__(self, paths: tuple[Path, ...]) -> None:
+        self.paths = paths
+        self.lowest: dict[Path, process_git.DiskUse] = {}
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _sample(self) -> None:
+        for path in self.paths:
+            use = process_git.disk_use(path, fallback=True)
+            seen = self.lowest.get(path)
+            if use.free is not None and (seen is None or seen.free is None or use.free < seen.free):
+                self.lowest[path] = use
+
+    def _loop(self) -> None:
+        while True:
+            with contextlib.suppress(Exception):  # a sample that fails costs a sample, never the run
+                self._sample()
+            if self._stop.wait(DISK_SAMPLE_S):
+                return
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._loop, name=DISK_WATCH_THREAD, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=DISK_SAMPLE_S)
+
+    def low_line(self) -> str | None:
+        """`disk-full …` for the first disk whose lowest sample was under the floor, or None."""
+        for path, use in self.lowest.items():
+            if use.low_free:
+                return process_git.disk_full_line(path, use.use_pct, use.free)
+        return None
+
+
 def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) -> tuple[str, str]:
     """One suite run with its own abort marker: `_sh` with the marker, then
     `(state, reason)` — the reason of an "aborted" run is the marker's first line
     (or exit 75), "" otherwise. The marker is removed afterwards: a writer that keeps
     the contract (append, never create) cannot bring it back. A marker that cannot be
     made runs the suite without one, and says so.
-    The disk (v2.98 B1): over the limit before the run, `DiskFull`; a run that is not
-    green and left a disk over the limit measured nothing — "aborted", the reason
-    `disk-full <path> <use>%` (read here, not from the marker: at 100 % it cannot be made)."""
+    The disk (v2.98 B1, #446): under the floor before the run, `DiskFull`; a run that is
+    not green (red or undefined) whose disk was under the floor after it, or at its lowest
+    during it (`_DiskWatch`, with and without a marker), measured nothing — "aborted", the
+    reason `disk-full <path> <use>% <free> GiB free` (read here, not from the marker: on a
+    full disk it cannot be made). Never a match on the output: a suite that prints
+    `No space left on device` (a test's source line) is no measurement (r2 M3)."""
     _halt_if_disk_full(cwd, log)
+    watch = _DiskWatch(_disk_paths(cwd))
     path = _abort_marker(root, stamp)
     lines: tuple[str, ...] = ()
     if path is None:
         log(f"abort marker not made in {TRAIN_DIR}/{ABORT_DIR} — `{cmd}` runs without {SUITE_ABORT_ENV}")
-        state = _sh(cwd, cmd, log, *args, **kw)
+        state = _sh(cwd, cmd, log, *args, disk_watch=watch, **kw)
     else:
         try:
-            state = _sh(cwd, cmd, log, *args, abort=path, **kw)
+            state = _sh(cwd, cmd, log, *args, abort=path, disk_watch=watch, **kw)
             lines = _abort_lines(path) if state == "aborted" else ()
         finally:
             with contextlib.suppress(OSError):
@@ -1441,6 +1520,10 @@ def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) ->
         if full:
             log(f"$ {cmd} → {state}, and {full} after it — the run measured nothing: aborted")
             return "aborted", full
+        low = watch.low_line()
+        if low:
+            log(f"$ {cmd} → {state}, and {low} at its lowest during the run — the run measured nothing: aborted")
+            return "aborted", low
     if state != "aborted":
         return state, ""
     # no marker line: only an exit 75 at the top aborts a run
@@ -1458,7 +1541,8 @@ def _echo(text: str, end: str = "\n") -> None:
 
 
 def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state: str = "red",
-        env: dict[str, str] | None = None, abort: Path | None = None) -> str:
+        env: dict[str, str] | None = None, abort: Path | None = None,
+        disk_watch: _DiskWatch | None = None) -> str:
     """Run cmd, streaming its output; "green", "red", "undefined" (the
     command or make target does not exist on this tree) or "aborted" (only
     with `abort`, or on exit 75) — `decide`'s verdict.
@@ -1467,7 +1551,9 @@ def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state
     for "undefined" (a slow check says nothing about the candidate, #386).
     `env` extends the inherited environment, never replaces it — except for
     SUITE_ABORT_ENV, which no command inherits: it is `abort`, the marker of a
-    suite run (`_marked_sh`), and only there."""
+    suite run (`_marked_sh`), and only there. `disk_watch` (only `_marked_sh` passes it:
+    a suite run) samples the free space while the command runs, until it returns — also
+    when the timeout kills it."""
     _echo(f"train: $ {cmd}")
     # the lines that can carry a fact, over the whole run: those that make a
     # run red whatever follows without a cap, the others the last 400
@@ -1476,43 +1562,49 @@ def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state
     child = {**{k: v for k, v in os.environ.items() if k != SUITE_ABORT_ENV}, **(env or {})}
     if abort is not None:
         child[SUITE_ABORT_ENV] = str(abort)
-    proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, errors="replace", env=git_environment(child),
-                            start_new_session=timeout is not None)
-    assert proc.stdout is not None
-    expired = threading.Event()
+    if disk_watch is not None:
+        disk_watch.start()
+    try:
+        proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, errors="replace", env=git_environment(child),
+                                start_new_session=timeout is not None)
+        assert proc.stdout is not None
+        expired = threading.Event()
 
-    def _expire() -> None:
-        # the group: a child of `sh` holding stdout open would outlive `sh` alone
-        expired.set()
-        with contextlib.suppress(OSError):
-            if hasattr(os, "killpg"):
-                os.killpg(proc.pid, signal.SIGKILL)
-            else:
-                proc.kill()
+        def _expire() -> None:
+            # the group: a child of `sh` holding stdout open would outlive `sh` alone
+            expired.set()
+            with contextlib.suppress(OSError):
+                if hasattr(os, "killpg"):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                else:
+                    proc.kill()
 
-    timer = threading.Timer(timeout, _expire) if timeout is not None else None
-    if timer:
-        timer.start()
-    for line in proc.stdout:
-        _echo(line, end="")
-        line = line.rstrip("\n")
-        if _RED_LINE.search(line):
-            red[line] = None
-        elif _FACT_LINE.search(line):
-            kept = (kept + [line])[-400:]
-    rc = proc.wait()
-    if timer:
-        timer.cancel()
-    if expired.is_set():
-        log(f"$ {cmd} → killed after {timeout:g} s ({timeout_state})")
-        _echo(f"train: `{cmd}` did not finish in {timeout:g} s — killed")
-        return timeout_state
-    state, why = decide(read_facts(cmd, rc, [*red, *kept], os.environ.get("MAKELEVEL", "0"),
-                                   lambda p: (cwd / p).exists(),
-                                   abort=_abort_lines(abort) if abort is not None else ()))
-    log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ' — ' + why + ', ' + _load()})")
-    return state
+        timer = threading.Timer(timeout, _expire) if timeout is not None else None
+        if timer:
+            timer.start()
+        for line in proc.stdout:
+            _echo(line, end="")
+            line = line.rstrip("\n")
+            if _RED_LINE.search(line):
+                red[line] = None
+            elif _FACT_LINE.search(line):
+                kept = (kept + [line])[-400:]
+        rc = proc.wait()
+        if timer:
+            timer.cancel()
+        if expired.is_set():
+            log(f"$ {cmd} → killed after {timeout:g} s ({timeout_state})")
+            _echo(f"train: `{cmd}` did not finish in {timeout:g} s — killed")
+            return timeout_state
+        state, why = decide(read_facts(cmd, rc, [*red, *kept], os.environ.get("MAKELEVEL", "0"),
+                                       lambda p: (cwd / p).exists(),
+                                       abort=_abort_lines(abort) if abort is not None else ()))
+        log(f"$ {cmd} → exit {rc} ({state}{'' if rc == 0 else ' — ' + why + ', ' + _load()})")
+        return state
+    finally:
+        if disk_watch is not None:
+            disk_watch.stop()
 
 
 GATE_RUNNER_REL = "scripts/process/gate_runner.py"
@@ -1860,10 +1952,11 @@ class LaneHeld(EnvironmentRed):
 
 
 class DiskFull(EnvironmentRed):
-    """A disk the train writes to is over the limit before a build, a judge or a suite run
-    (v2.98 B1): no passenger of this run filled it — nobody is blamed, nothing merges
-    (`red_path` "disk-full"). The message is the line `disk-full <path> <use>%`; `hint`
-    names what lies on that disk and what to clear there."""
+    """A disk the train writes to is under the floor (less than PROCESS_DISK_FLOOR_GB free)
+    before a build, a judge or a suite run (v2.98 B1, #446): no passenger of this run filled
+    it — nobody is blamed, nothing merges (`red_path` "disk-full"). The message is the line
+    `disk-full <path> <use>% <free> GiB free`; `hint` names what lies on that disk and what
+    to clear there."""
 
     def __init__(self, line: str, hint: str = "") -> None:
         super().__init__(line)
@@ -2460,8 +2553,8 @@ def run(root: Path, *, suite: str | None, deploy: str | None, push: bool, min_ca
         _end_round(measure, "disk-full")
         if measure.get("rounds"):
             measure["rounds"][-1]["disk_full"] = str(full)
-        print(f"train: {full} — a disk the train writes to is over its limit "
-              f"({process_git.DISK_LIMIT_ENV}); nobody is blamed, nothing merged. "
+        print(f"train: {full} — a disk the train writes to has less room than its floor "
+              f"({process_git.DISK_FLOOR_ENV}); nobody is blamed, nothing merged. "
               f"{full.hint or f'Free it (`{process_git.CLEANUP_CMD}`)'} — then the next run departs "
               f"(see {logfile})", file=sys.stderr)
         _cleanup(root, stamp)
@@ -2506,6 +2599,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     def log(line: str) -> None:
         _append_log(logfile, line)
 
+    _DISK_NOTES.clear()  # a note and a disk's warning are said once per run (#446)
     phases = {} if phases is None else phases
     stages = {} if stages is None else stages
     stage_seen: set[tuple[str, int, int]] = set()
@@ -2739,7 +2833,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         aborted, or no base to ask (`subset` is the base, the base has no suite) —
         `SuiteAborted`. A run and its repeat that both filled the disk (`disk-full`) are red
         at once: no wait before the repeat, no fresh base after it (v2.98 B1) — a base with no
-        suite included: the subset filled a disk that was under the limit before each run."""
+        suite included: the subset filled a disk that had room before each run."""
         nonlocal base_state, base_from_memo, retried
         if state != "aborted":
             return state, merged, br
@@ -2753,7 +2847,7 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         if not subset:
             raise SuiteAborted(f"the base's suite run aborted, and so did its repeat ({last_abort})")
         if all(process_git.is_disk_full_line(r) for r in reasons):
-            # every run of the subset ran on a rebuilt tree whose disks were under the limit
+            # every run of the subset ran on a rebuilt tree whose disks had room (over the floor)
             # before it (else `DiskFull`), and filled them: red, no fresh base (v2.98 B1) — also
             # where the base has no suite, it carries no passenger. The repeat was the flake run,
             # and an abort measures no red tests. One `disk-full` beside a load abort is no such
@@ -2762,8 +2856,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 retried = True
                 if red_ids:
                     rounds[-1]["red_tests"] = "suite-aborted"
-            log(f"the disk filled on the run and on its repeat with {', '.join(subset)} aboard, under the "
-                f"limit before each ({'; '.join(reasons)}) — counted red")
+            log(f"the disk filled on the run and on its repeat with {', '.join(subset)} aboard, with room "
+                f"before each ({'; '.join(reasons)}) — counted red")
             return "red", merged, br
         if base_state == "undefined":
             # a passenger brings the suite: nothing tells a hang from the load — nobody is blamed
