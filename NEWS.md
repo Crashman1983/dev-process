@@ -7,6 +7,10 @@ details are in the [CHANGELOG](CHANGELOG.md).
 
 Deutsche Fassung: [NEWS-DE.md](NEWS-DE.md).
 
+## v2.103.0 — The train merges what is on origin; a full disk warns before it halts; a fold carries no work
+
+The merge train no longer reports a merge conflict, or blames a worker, when its own copy of a branch is simply older than the one on the server. It takes the server's copy. A nearly full disk now gets a warning; the train stops only when less than 2 GB is left. Tidying the journal no longer makes the review check red for work merged long ago. A test that tries several lanes and finds one busy no longer turns every failed run into an "aborted" one, so a broken main line is recognised as broken again.
+
 ## v2.102.0 — One reader for Markdown headings; a release run that spares the disk
 
 The checks now read Markdown headings the way a reader sees them, all with one rule. A line with only `##`, a code block closed by a line that carries extra text, or a code fence inside a comment no longer makes a check see a heading the document does not show. Where a file can be read two ways, the check says so and names the line, instead of guessing. The template's own release tool no longer fills the disk or loses half-written release notes when a run fails.

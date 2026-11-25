@@ -7,6 +7,10 @@ technischen Einzelheiten stehen im [CHANGELOG](CHANGELOG-DE.md).
 
 English version: [NEWS.md](NEWS.md).
 
+## v2.103.0 — Der Zug mergt, was auf origin liegt; eine volle Platte warnt, bevor sie hält; eine Faltung trägt keine Arbeit
+
+Der Merge-Zug meldet keinen Merge-Konflikt mehr und gibt keinem Worker die Schuld, wenn seine eigene Kopie eines Branches nur älter ist als die auf dem Server. Er nimmt dann die Kopie des Servers. Eine fast volle Platte bekommt jetzt eine Warnung; der Zug hält erst, wenn weniger als 2 GB frei sind. Das Aufräumen des Journals macht die Review-Prüfung nicht mehr rot für Arbeit, die längst gemergt ist. Ein Test, der mehrere Lanes ausprobiert und eine besetzt findet, macht nicht mehr jeden gescheiterten Lauf zum „Abbruch“, so dass eine kaputte Hauptlinie wieder als kaputt erkannt wird.
+
 ## v2.102.0 — Ein Leser für Markdown-Überschriften; ein Release-Lauf, der die Platte schont
 
 Die Prüfungen lesen Markdown-Überschriften jetzt so, wie ein Leser sie sieht, alle mit einer Regel. Eine Zeile nur aus `##`, ein Code-Block, den eine Zeile mit zusätzlichem Text schließt, oder eine Code-Marke in einem Kommentar lassen keine Prüfung mehr eine Überschrift sehen, die das Dokument nicht zeigt. Lässt sich eine Datei zweifach lesen, sagt die Prüfung das und nennt die Zeile, statt zu raten. Das Release-Werkzeug des Templates füllt die Platte nicht mehr und verliert bei einem gescheiterten Lauf keine halb geschriebenen Release-Notizen.

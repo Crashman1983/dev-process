@@ -9,6 +9,48 @@ ein Eintrag ohne Plan oder Issue hat keine Details-Zeile. In wenigen Sätzen je 
 English version: [CHANGELOG.md](CHANGELOG.md). Die Releases vor v2.28.2:
 [docs/changelog-archive-DE.md](docs/changelog-archive-DE.md).
 
+## v2.103.0 — Der Zug mergt, was auf origin liegt; eine volle Platte warnt, bevor sie hält; eine Faltung trägt keine Arbeit · 2026-11-25
+
+**Warum.** Kennis Zug verlor am 24. und 25. November Läufe an vier Fehlern im Zug und im Review-Gate (#445–#448):
+- ein lokaler Branch, der hinter origin lag, wurde als Merge-Konflikt gemeldet, und sein Worker bekam die Schuld;
+- die Platten-Grenze von 90 % hielt den Zug dreimal an;
+- das Falten alter Journal-Dateien machte das Review-Gate für längst gemergte Arbeit rot;
+- ein Test, der mehrere Lanes probierte und eine besetzte abfing, machte jeden roten Lauf zum Abbruch, auch den auf der roten Basis.
+
+**Was sich ändert.**
+- [required] **Der Zug holt die Branches und mergt den Stand von origin, wenn der lokale Branch nur zurückliegt** (#445).
+  - Er holt die Branches vor dem Plan von origin (`--prune`, ausdrücklicher Refspec).
+  - Ist der lokale Kopf ein Vorfahr von `origin/<branch>`, fährt der Stand von origin mit, und der Zug sagt das.
+  - Ein auseinandergelaufener Branch wird ohne Schuld gehalten; die Meldung nennt den Befehl für jede Richtung.
+  - Löschen und `done` arbeiten mit dem gesehenen und dem gemergten Stand.
+  - Ein gescheiterter Fetch wird genannt.
+- [required] **Die Platten-Grenze warnt; erst unter 2 GiB frei hält der Zug** (#446).
+  - An `PROCESS_DISK_LIMIT_PCT` (Vorgabe 90) warnen Zug und `dispatch` einmal je Datenträger und Lauf.
+  - Unter `PROCESS_DISK_FLOOR_GB` (Vorgabe 2) halten sie als `disk-full`.
+  - Während einer Suite misst der Zug den freien Platz. Ein roter oder unentschiedener Lauf, dessen tiefster Wert unter der Untergrenze lag, ist ein Abbruch, und niemand bekommt die Schuld.
+  - `DiskUse.full` wird durch `over_pct` und `low_free` ersetzt.
+- [required] **Eine gelöschte Journal-Datei trägt keine Arbeit in einen Push** (#447). Das Review-Gate zählt nur die `journal/issue-<W>/`-Dateien, die der gepushte Stand noch hat. Eine Faltung durch `compact_journal` oder ein Aufräumen holt keinen Block mehr hervor, der auf main schon steht.
+- [required] **Nur wer wirklich aufgibt, schreibt einen `lane-busy`-Abbruch** (#448).
+  - `lane.hold` schreibt keine Abbruch-Zeile mehr. `lane.give_up` tut es, aufgerufen von `lane.py run` und `wait`, von `test_select` und von `finish`, wenn sie aufgeben.
+  - Die Zeile trägt `dir=<Lane-Verzeichnis>`. Der Zug zählt nur sein eigenes Lane-Verzeichnis und Zeilen ohne `dir=`.
+  - Ein relatives `lane_dir` wird am Projekt-Wurzelverzeichnis verankert.
+- [recommended] **Der Test-Harness eines Projekts entfernt `PROCESS_SUITE_ABORT`** und die übrigen Lauf-Variablen aus der Umgebung seiner Tests (`testing.md`). Ein Bibliotheksaufrufer, der nach `LaneBusy` aufhört, ruft `lane.give_up`.
+
+**Wirkung.**
+- Ein veralteter lokaler Branch, eine volle, aber nutzbare Platte, eine Journal-Faltung oder ein Test, der Lanes ausprobiert, kostet keinen Zuglauf mehr und gibt keinem Worker mehr die Schuld.
+
+**Geänderte Abschnitte.**
+- `testing.md` (Unmeasurable is not red)
+- `tower.md` (Dispatch and the model policy)
+- `train.md` (Boarding — computed, never claimed; The run; Red, undefined, aborted)
+
+**Update.**
+- Reines Update. Neue Variable `PROCESS_DISK_FLOOR_GB` (Vorgabe 2).
+- Ein Skript, das `DiskUse.full` gelesen hat, liest `low_free` (der Halt) oder `over_pct` (die Warnung).
+- Ein Test-Harness eines Projekts, der `PROCESS_SUITE_ABORT` an seine Tests weitergibt, sollte die Variable entfernen.
+
+Details: [Plan](docs/analysis/2026-11-25-v2.103.md) #445 #446 #447 #448
+
 ## v2.102.0 — Ein Leser für Markdown-Überschriften; ein Release-Lauf, der die Platte schont · 2026-11-23
 
 **Warum.**
