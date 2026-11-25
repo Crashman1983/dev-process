@@ -58,48 +58,98 @@ def _usage(used: int, free: int):
     return collections.namedtuple("usage", "total used free")(used + free, used, free)
 
 
-@pytest.mark.parametrize("used, free, limit, full", [
+@pytest.mark.parametrize("used, free, limit, over", [
     (95, 5, None, True), (90, 10, None, True), (89, 11, None, False),  # the default: 90 %
     (50, 50, "50", True), (49, 51, "50", False), (99, 1, "100", False), (100, 0, "100", True),
 ])
-def test_disk_use_reads_the_use_and_the_limit(monkeypatch, used, free, limit, full):
+def test_disk_use_reads_the_use_and_the_limit(monkeypatch, used, free, limit, over):
     """v2.98 B1: one reader of the disk for dispatch and the train — use = used / (used +
-    free), as `df` counts it; full at or over the limit (`PROCESS_DISK_LIMIT_PCT`, 90)."""
+    free), as `df` counts it; `over_pct` at or over the limit (`PROCESS_DISK_LIMIT_PCT`, 90).
+    v2.103 (#446): the percentage only warns, so `.full` is gone — every caller chose."""
     pg = _pg()
     if limit is None:
         monkeypatch.delenv(pg.DISK_LIMIT_ENV, raising=False)
     else:
         monkeypatch.setenv(pg.DISK_LIMIT_ENV, limit)
+    monkeypatch.setenv(pg.DISK_FLOOR_ENV, "0")
     monkeypatch.setattr(pg.shutil, "disk_usage", lambda p: _usage(used, free))
     got = pg.disk_use(Path("/x"))
-    assert got.use_pct == pytest.approx(used) and got.problem is None and got.full is full
-    assert got.free == free and got.limit == float(limit or 90)
+    assert got.use_pct == pytest.approx(used) and got.problem is None and got.over_pct is over
+    assert got.free == free and got.limit == float(limit or 90) and not got.low_free
     assert pg.disk_full_line(Path("/x"), got.use_pct) == f"disk-full /x {used}%"
+    assert not hasattr(pg.DiskUse, "full")
+
+
+GIB = 2**30
+
+
+@pytest.mark.parametrize("used_gib, free_gib, floor, low", [
+    (98, 1.9, None, True), (98, 2.0, None, False), (5, 95, None, False),  # the default: 2 GiB
+    (95, 5, "10", True), (95, 5, "4.5", False), (100, 0, "0", False),     # 0 turns the floor off
+])
+def test_disk_use_reads_the_free_space_against_the_floor(monkeypatch, used_gib, free_gib, floor, low):
+    """#446: below `PROCESS_DISK_FLOOR_GB` GiB free (default 2, GiB = 2**30) is `low_free` —
+    whatever the percentage says."""
+    pg = _pg()
+    assert pg.GIB == GIB and pg.DISK_FLOOR_GB == 2
+    if floor is None:
+        monkeypatch.delenv(pg.DISK_FLOOR_ENV, raising=False)
+    else:
+        monkeypatch.setenv(pg.DISK_FLOOR_ENV, floor)
+    monkeypatch.delenv(pg.DISK_LIMIT_ENV, raising=False)
+    monkeypatch.setattr(pg.shutil, "disk_usage", lambda p: _usage(int(used_gib * GIB), int(free_gib * GIB)))
+    got = pg.disk_use(Path("/x"))
+    assert got.problem is None and got.low_free is low and got.floor == float(floor or 2)
+
+
+def test_the_halt_line_names_the_free_space():
+    pg = _pg()
+    line = pg.disk_full_line(Path("/x"), 99.2, GIB + GIB // 2)
+    assert line == "disk-full /x 99% 1.5 GiB free" and pg.is_disk_full_line(line)
 
 
 @pytest.mark.parametrize("value", ["abc", "0", "-5", "150", "nan", "inf"])
 def test_a_misconfigured_disk_limit_is_a_problem_never_full(monkeypatch, value):
     pg = _pg()
     monkeypatch.setenv(pg.DISK_LIMIT_ENV, value)
+    monkeypatch.delenv(pg.DISK_FLOOR_ENV, raising=False)
     monkeypatch.setattr(pg.shutil, "disk_usage", lambda p: _usage(100, 0))
     got = pg.disk_use(Path("/x"))
-    assert not got.full and got.use_pct is None and got.limit is None
+    assert not got.over_pct and not got.low_free and got.use_pct is None and got.limit is None
     assert pg.DISK_LIMIT_ENV in got.problem and repr(value) in got.problem
     # the train's reading (`fallback`): the default limit holds, the problem still named
     fallen = pg.disk_use(Path("/x"), fallback=True)
-    assert fallen.full and fallen.use_pct == pytest.approx(100) and fallen.limit == 90
+    assert fallen.over_pct and fallen.use_pct == pytest.approx(100) and fallen.limit == 90
+    assert fallen.low_free and fallen.floor == 2
     assert fallen.problem == got.problem
+
+
+@pytest.mark.parametrize("value", ["abc", "-1", "nan", "inf", "-inf"])
+def test_a_misconfigured_disk_floor_is_a_problem_and_the_train_takes_the_default(monkeypatch, value):
+    """r2 N4: a floor that is no number >= 0 is a problem — without `fallback` (dispatch) nothing
+    is read and both bounds are None; with it (the train) the default 2 GiB holds."""
+    pg = _pg()
+    monkeypatch.delenv(pg.DISK_LIMIT_ENV, raising=False)
+    monkeypatch.setenv(pg.DISK_FLOOR_ENV, value)
+    monkeypatch.setattr(pg.shutil, "disk_usage", lambda p: _usage(GIB, GIB))
+    got = pg.disk_use(Path("/x"))
+    assert got.use_pct is None and got.limit is None and got.floor is None and not got.low_free
+    assert pg.DISK_FLOOR_ENV in got.problem and repr(value) in got.problem
+    fallen = pg.disk_use(Path("/x"), fallback=True)
+    assert fallen.floor == 2 and fallen.low_free and fallen.limit == 90 and fallen.problem == got.problem
 
 
 def test_an_unreadable_disk_use_is_a_problem_never_full(monkeypatch):
     pg = _pg()
     monkeypatch.delenv(pg.DISK_LIMIT_ENV, raising=False)
+    monkeypatch.delenv(pg.DISK_FLOOR_ENV, raising=False)
 
     def broken(_p):
         raise OSError(5, "I/O error")
     monkeypatch.setattr(pg.shutil, "disk_usage", broken)
     got = pg.disk_use(Path("/x"))
-    assert not got.full and got.use_pct is None and "I/O error" in got.problem and got.limit == 90
+    assert not got.over_pct and not got.low_free and got.use_pct is None and "I/O error" in got.problem
+    assert got.limit == 90 and got.floor == 2
 
 
 def test_a_disk_full_line_is_known_by_its_first_word():

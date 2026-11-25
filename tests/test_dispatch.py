@@ -1441,20 +1441,25 @@ def test_find_branch_reads_the_issue_as_its_owner_does(render, tmp_path, branch,
     assert (got == branch) if found else got is None, got
 
 
-def _usage(pct):
+def _usage(pct, free=None):
+    """`pct` GiB used of 100, the rest free — or `free` GiB free beside them."""
     import collections
     usage = collections.namedtuple("usage", "total used free")
-    return usage(100 * 2**30, pct * 2**30, (100 - pct) * 2**30)
+    free = 100 - pct if free is None else free
+    return usage(int((pct + free) * 2**30), int(pct * 2**30), int(free * 2**30))
 
 
-@pytest.mark.parametrize("pct,refused", [(95, True), (90, True), (89, False), (40, False)])
-def test_a_full_disk_refuses_a_local_start_and_names_the_cleanup(render, tmp_path, monkeypatch, capsys, pct, refused):
-    # #136: 111 merged worktrees, each with its own venv, filled the disk and stalled every session
+@pytest.mark.parametrize("pct,refused", [(99, True), (98.5, True), (95, False), (90, False), (40, False)])
+def test_a_disk_under_the_floor_refuses_a_local_start_and_names_the_cleanup(render, tmp_path, monkeypatch,
+                                                                            capsys, pct, refused):
+    # #136: 111 merged worktrees, each with its own venv, filled the disk and stalled every session.
+    # #446: under 2 GiB free (`PROCESS_DISK_FLOOR_GB`) refuses; over the 90 % limit with room warns
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     _fake_command(out, "sleep 30\n")
     d = _load_dispatch(out)
     monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    monkeypatch.delenv(d.DISK_FLOOR_ENV, raising=False)
     seen = []
     # one reader of the disk (v2.98): process_git.disk_use
     monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: seen.append(Path(p)) or _usage(pct))
@@ -1462,9 +1467,14 @@ def test_a_full_disk_refuses_a_local_start_and_names_the_cleanup(render, tmp_pat
     err = capsys.readouterr().err
     assert seen and seen[0] == out.parent  # the filesystem the worktrees go to
     if refused:
-        assert rc == 3 and f"{pct}% full" in err and "python3 scripts/process/tidy.py --apply" in err
+        assert rc == 3 and f"{100 - pct:.1f} GiB free" in err and "PROCESS_DISK_FLOOR_GB" in err, err
+        assert "python3 scripts/process/tidy.py --apply" in err, err
+    elif pct >= 90:
+        assert rc == 0 and "not starting" not in err, err
+        assert f"dispatch: warning — the filesystem holding {out.parent} is {pct}% full" in err, err
+        assert f"{100 - pct:.1f} GiB free" in err and "python3 scripts/process/tidy.py --apply" in err, err
     else:
-        assert rc == 0 and "full" not in err
+        assert rc == 0 and "full" not in err and "warning" not in err, err
 
 
 @pytest.mark.parametrize("value", ["abc", "0", "-5", "150", "nan", "inf"])
@@ -1476,9 +1486,20 @@ def test_a_misconfigured_disk_limit_refuses_naming_it(render, tmp_path, monkeypa
     assert why and d.DISK_LIMIT_ENV in why and repr(value) in why
 
 
+@pytest.mark.parametrize("value", ["abc", "-1", "nan", "inf"])
+def test_a_misconfigured_disk_floor_refuses_naming_it(render, tmp_path, monkeypatch, value):
+    """r2 N4: a misconfigured floor refuses here, as a misconfigured limit does."""
+    d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(10))
+    monkeypatch.setenv(d.DISK_FLOOR_ENV, value)
+    why = d.disk_refusal(tmp_path)
+    assert why and d.DISK_FLOOR_ENV in why and repr(value) in why
+
+
 def test_an_unreadable_disk_use_lets_the_start_through_with_a_note(render, tmp_path, monkeypatch, capsys):
     d = _load_dispatch(render(tmp_path, {"project_name": "d", "modules": {}}))
     monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    monkeypatch.delenv(d.DISK_FLOOR_ENV, raising=False)
 
     def broken(_p):
         raise OSError(5, "I/O error")
@@ -1489,24 +1510,28 @@ def test_an_unreadable_disk_use_lets_the_start_through_with_a_note(render, tmp_p
     assert "not checked" in err and "I/O error" in err
 
 
-@pytest.mark.parametrize("pct, limit, marked", [(95, None, True), (40, None, False), (95, "abc", False)])
-def test_a_full_disk_refusal_appends_the_abort_line_for_the_train(render, tmp_path, monkeypatch, pct, limit,
-                                                                  marked):
+@pytest.mark.parametrize("pct, var, value, marked", [
+    (99, None, None, True), (95, None, None, False), (40, None, None, False),
+    (99, "PROCESS_DISK_LIMIT_PCT", "abc", False), (99, "PROCESS_DISK_FLOOR_GB", "abc", False),
+])
+def test_a_full_disk_refusal_appends_the_abort_line_for_the_train(render, tmp_path, monkeypatch, pct, var,
+                                                                  value, marked):
     """v2.98 B1: a refusal for a full disk inside a train's suite run (PROCESS_SUITE_ABORT set)
-    appends `disk-full <path> <use>%` to the marker — the run aborts, nobody is blamed. A free
-    disk or a misconfigured limit writes nothing."""
+    appends `disk-full <path> <use>% <free> GiB free` to the marker — the run aborts, nobody is
+    blamed. A disk over the limit with room (#446: a warning), a free disk or a misconfigured
+    bound writes nothing."""
     d = _load_dispatch(render(tmp_path / "repo", {"project_name": "d", "modules": {}}))
     monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(pct))
-    if limit is None:
-        monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
-    else:
-        monkeypatch.setenv(d.DISK_LIMIT_ENV, limit)
+    monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    monkeypatch.delenv(d.DISK_FLOOR_ENV, raising=False)
+    if var:
+        monkeypatch.setenv(var, value)
     marker = tmp_path / "marker"
     marker.write_text("earlier line\n")
     monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
-    assert bool(d.disk_refusal(tmp_path)) is (pct == 95)
+    assert bool(d.disk_refusal(tmp_path)) is (pct == 99)
     added = marker.read_text().splitlines()[1:]
-    assert added == ([f"disk-full {tmp_path} 95%"] if marked else []), added
+    assert added == ([f"disk-full {tmp_path} 99% 1.0 GiB free"] if marked else []), added
 
 
 def test_lane_and_dispatch_write_the_abort_marker_through_one_writer(render, tmp_path, monkeypatch):
@@ -1523,27 +1548,29 @@ def test_lane_and_dispatch_write_the_abort_marker_through_one_writer(render, tmp
     calls: list[str] = []
     for mod in {id(m): m for m in (d.process_git, lane.process_git)}.values():
         monkeypatch.setattr(mod, "note_suite_abort", lambda line: calls.append(line) or real(line))
-    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(95))
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(99))
     monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    monkeypatch.delenv(d.DISK_FLOOR_ENV, raising=False)
     marker, again = tmp_path / "marker", tmp_path / "again"
     marker.write_text("")
     again.write_text("")
     monkeypatch.setenv("PROCESS_SUITE_ABORT", str(marker))
     lane._note_suite_abort("full", "held by pid 1 — a\nlabel")
     assert d.disk_refusal(tmp_path)
-    assert calls == ["lane-busy full held by pid 1 — a\nlabel", f"disk-full {tmp_path} 95%"], calls
+    assert calls == ["lane-busy full held by pid 1 — a\nlabel", f"disk-full {tmp_path} 99% 1.0 GiB free"], calls
     monkeypatch.setenv("PROCESS_SUITE_ABORT", str(again))
     for line in calls[:]:
         real(line)
     assert marker.read_bytes() == again.read_bytes() == \
-        f"lane-busy full held by pid 1 — a label\ndisk-full {tmp_path} 95%\n".encode()
+        f"lane-busy full held by pid 1 — a label\ndisk-full {tmp_path} 99% 1.0 GiB free\n".encode()
 
 
 def test_a_full_disk_refusal_never_creates_the_marker(render, tmp_path, monkeypatch):
     """Append only, never creating it: a marker the train removed stays gone."""
     d = _load_dispatch(render(tmp_path / "repo", {"project_name": "d", "modules": {}}))
-    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(95))
+    monkeypatch.setattr(d.process_git.shutil, "disk_usage", lambda p: _usage(99))
     monkeypatch.delenv(d.DISK_LIMIT_ENV, raising=False)
+    monkeypatch.delenv(d.DISK_FLOOR_ENV, raising=False)
     gone = tmp_path / "gone"
     monkeypatch.setenv("PROCESS_SUITE_ABORT", str(gone))
     assert d.disk_refusal(tmp_path)
@@ -1568,13 +1595,14 @@ def test_conftest_drops_the_suite_abort_marker_of_an_outer_train(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_the_disk_limit_reaches_the_command_line(render, tmp_path):
+def test_the_disk_floor_reaches_the_command_line(render, tmp_path):
     out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
     _repo(out)
     _fake_command(out, "sleep 30\n")
     r = _dispatch(out, "start", "--issue", "4", "--phase", "plan", "--branch", "b4",
-                  env={**os.environ, "PROCESS_DISK_LIMIT_PCT": "0.001"})
-    assert r.returncode == 3 and "% full (limit 0.001%" in r.stderr and "tidy.py --apply" in r.stderr
+                  env={**os.environ, "PROCESS_DISK_FLOOR_GB": "1000000000"})
+    assert r.returncode == 3 and "GiB free, under the floor of 1e+09 GiB" in r.stderr, r.stderr
+    assert "tidy.py --apply" in r.stderr
     assert not (tmp_path / "repo-b4").exists()  # no worktree, no session
 
 

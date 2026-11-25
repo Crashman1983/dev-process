@@ -268,10 +268,12 @@ def _run(root: Path, what: str, *argv: str, env: dict[str, str] | None = None,
 # A release ran its suite on a disk with too little room: the suite filled it, the run
 # failed late, and the bumped files stayed. Before the bump the disks it writes to — the
 # repository's and the temp dir's — need RELEASE_MIN_FREE_GB free and stay under the
-# train's percentage limit (`process_git.disk_use`, PROCESS_DISK_LIMIT_PCT).
+# train's percentage limit (`process_git.disk_use`, PROCESS_DISK_LIMIT_PCT, its `over_pct`).
+# Both stay here (#446): the train only warns at the limit and halts below its own 2 GiB
+# floor, far under what a release's suite needs.
 MIN_FREE_ENV = "RELEASE_MIN_FREE_GB"
 MIN_FREE_GB = 18.0  # a measured run's peak (14.7 GB, MAINTAINING.md) and room to grow
-GB = 2**30  # as `df -h` counts
+GB = process_git.GIB  # as `df -h` counts, one constant with the train
 
 
 def _min_free_gb() -> float:
@@ -296,7 +298,7 @@ def _disk_short(root: Path) -> list[str]:
         use = process_git.disk_use(at, fallback=True)
         if use.problem:
             print(f"release: note — {use.problem}", file=sys.stderr, flush=True)
-        if use.full and use.use_pct is not None:
+        if use.over_pct and use.use_pct is not None:
             short.append(f"{what}: {process_git.disk_full_line(at, use.use_pct)} — at or over the "
                          f"{use.limit:g}% limit ({process_git.DISK_LIMIT_ENV})")
         elif use.free is not None and use.free < need * GB:

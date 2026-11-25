@@ -46,53 +46,76 @@ def regression_refs(body: str) -> list[int]:
 
 
 # --- the disk (v2.98 B1): one reader for dispatch's start and the train -------------------
-DISK_LIMIT_PCT = 90  # a filesystem this full refuses a start (dispatch) and halts the train
+# v2.103 (#446): the percentage only warns; what halts the train and refuses a start is too
+# little room — less than the floor free.
+DISK_LIMIT_PCT = 90  # a filesystem this full is a warning (dispatch, the train)
 DISK_LIMIT_ENV = "PROCESS_DISK_LIMIT_PCT"
+DISK_FLOOR_GB = 2  # less free than this refuses a start (dispatch) and halts the train
+DISK_FLOOR_ENV = "PROCESS_DISK_FLOOR_GB"
+GIB = 2**30  # a GB as `df -h` counts it — one constant for the train, dispatch, tools/release.py
 CLEANUP_CMD = "python3 scripts/process/tidy.py --apply"
-# the abort-marker line of a full disk (train.md, "Red, undefined, aborted"): `disk-full <path> <use>%`
+# the abort-marker line of a full disk (train.md, "Red, undefined, aborted"):
+# `disk-full <path> <use>% <free> GiB free`
 DISK_FULL = "disk-full"
 
 
 class DiskUse(NamedTuple):
     """What `disk_use` read: the use in percent (None: not read), and why not (`problem`: a
-    misconfigured limit — then `limit` is None — or a use that could not be read)."""
+    misconfigured bound — then `limit` and `floor` are None — or a use that could not be
+    read); `free` in bytes, `floor` in GiB. No `.full`: each caller says which bound it
+    stops at (`over_pct` warns in the train and dispatch, `low_free` halts them)."""
     use_pct: float | None
     problem: str | None
     limit: float | None = None
     free: int | None = None
+    floor: float | None = None
 
     @property
-    def full(self) -> bool:
-        """At or over the limit. A problem is never full: a guard that cannot read is a note."""
+    def over_pct(self) -> bool:
+        """At or over the percentage limit. A problem is never over: a guard that cannot read is a note."""
         return self.use_pct is not None and self.limit is not None and self.use_pct >= self.limit
+
+    @property
+    def low_free(self) -> bool:
+        """Less than `floor` GiB free. A floor of 0 is off; a use not read is never low."""
+        return self.free is not None and self.floor is not None and self.free < self.floor * GIB
+
+
+def _bound(env: str, default: float, valid, what: str) -> tuple[float, str | None]:
+    """The value of `env` (unset or empty: `default`), or NaN and the problem naming it."""
+    raw = os.environ.get(env, "").strip()
+    try:
+        value = float(raw) if raw else float(default)
+    except ValueError:
+        value = math.nan
+    if math.isfinite(value) and valid(value):
+        return value, None
+    return math.nan, f"{env}={raw!r} is no {what} — fix or unset it (default {default:g})"
 
 
 def disk_use(path: Path, *, fallback: bool = False) -> DiskUse:
     """The use of the filesystem holding `path` (used / (used + available), as `df` counts
-    it) and the limit (`PROCESS_DISK_LIMIT_PCT`, default 90). A limit that is no percentage
-    in (0, 100] is a problem, neither silently off nor silently the default: without
-    `fallback` (dispatch refuses on it) `limit` is None and nothing is read; with it (the
-    train, which must not stop checking) the use is read against the default, the problem
-    still named."""
-    raw = os.environ.get(DISK_LIMIT_ENV, "").strip()
-    try:
-        limit = float(raw) if raw else float(DISK_LIMIT_PCT)
-    except ValueError:
-        limit = math.nan
-    misconfigured = None
-    if not (math.isfinite(limit) and 0 < limit <= 100):
-        misconfigured = (f"{DISK_LIMIT_ENV}={raw!r} is no percentage in (0, 100] — fix or unset it "
-                         f"(default {DISK_LIMIT_PCT})")
+    it), its free bytes, the limit (`PROCESS_DISK_LIMIT_PCT`, default 90) and the floor
+    (`PROCESS_DISK_FLOOR_GB`, default 2 GiB). A limit that is no percentage in (0, 100] or
+    a floor that is no number >= 0 is a problem, neither silently off nor silently the
+    default: without `fallback` (dispatch refuses on it) `limit` and `floor` are None and
+    nothing is read; with it (the train, which must not stop checking) the use is read
+    against the defaults, the problem still named."""
+    limit, bad_limit = _bound(DISK_LIMIT_ENV, DISK_LIMIT_PCT, lambda v: 0 < v <= 100, "percentage in (0, 100]")
+    floor, bad_floor = _bound(DISK_FLOOR_ENV, DISK_FLOOR_GB, lambda v: v >= 0, "number of GiB >= 0")
+    misconfigured = "; ".join(x for x in (bad_limit, bad_floor) if x) or None
+    if misconfigured:
         if not fallback:
             return DiskUse(None, misconfigured)
-        limit = float(DISK_LIMIT_PCT)
+        limit = float(DISK_LIMIT_PCT) if bad_limit else limit
+        floor = float(DISK_FLOOR_GB) if bad_floor else floor
     try:
         u = shutil.disk_usage(path)
     except OSError as exc:
-        return DiskUse(None, f"disk use of {path} not checked: {exc}", limit)
+        return DiskUse(None, f"disk use of {path} not checked: {exc}", limit, None, floor)
     if u.used + u.free <= 0:
-        return DiskUse(None, misconfigured, limit, u.free)
-    return DiskUse(100.0 * u.used / (u.used + u.free), misconfigured, limit, u.free)
+        return DiskUse(None, misconfigured, limit, u.free, floor)
+    return DiskUse(100.0 * u.used / (u.used + u.free), misconfigured, limit, u.free, floor)
 
 
 def nearest_dir(path: Path) -> Path:
@@ -117,10 +140,12 @@ def temp_root() -> Path:
     return Path("/tmp")
 
 
-def disk_full_line(path: Path, use_pct: float) -> str:
-    """`disk-full <path> <use>%`: the reason of a train that halts and the marker line of a
-    refused start — one grammar, counted by its first two words (`train-phases`)."""
-    return f"{DISK_FULL} {path} {use_pct:.0f}%"
+def disk_full_line(path: Path, use_pct: float | None, free: int | None = None) -> str:
+    """`disk-full <path> <use>% <free> GiB free`: the reason of a train that halts and the
+    marker line of a refused start — one grammar, counted by its first two words
+    (`train-phases`). Without `free` (tools/release.py's percent check) the line ends at the use."""
+    words = [DISK_FULL, str(path)] + ([f"{use_pct:.0f}%"] if use_pct is not None else [])
+    return " ".join(words + ([f"{free / GIB:.1f} GiB free"] if free is not None else []))
 
 
 def is_disk_full_line(line: str) -> bool:

@@ -529,10 +529,12 @@ an abort on purpose, run without that variable.
 
 A full disk is unmeasurable too (v2.98, `train.md`, "A full disk"): the
 train halts `disk-full` before a build, a judge or a suite run on a disk
-over `PROCESS_DISK_LIMIT_PCT`, and a red run that leaves a disk over it is
-an abort, repeated at once, not a finding. A `dispatch.py start` refused
-inside the suite appends `disk-full <path> <use>%` to the marker, so a test
-that starts a session reads as unmeasured, not red.
+with less than `PROCESS_DISK_FLOOR_GB` (2 GiB) free, and a red run whose
+disk was under it after the run or at its lowest during it is an abort,
+repeated at once, not a finding; over `PROCESS_DISK_LIMIT_PCT` with room it
+only warns. A `dispatch.py start` refused inside the suite appends
+`disk-full <path> <use>% <free> GiB free` to the marker, so a test that
+starts a session reads as unmeasured, not red.
 
 ## Suite discipline
 

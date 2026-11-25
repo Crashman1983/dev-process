@@ -332,8 +332,8 @@ per round: the first, and one more after each drop. Each entry has:
   `base-red`, `undefined`, `dropped:<branch>`, `none-survived`, `conflicts`,
   `environment`, `suite-aborted` (a suite run aborted and nobody could be
   blamed), `lane-held` (the train could not take lane `full`; nothing ran,
-  nobody blamed), `disk-full` (a disk the train writes to was over its limit;
-  nobody blamed — the round's `disk_full` names it, see "A full disk"),
+  nobody blamed), `disk-full` (a disk the train writes to had less than its
+  floor free; nobody blamed — the round's `disk_full` names it, see "A full disk"),
   `push-rejected` or `aborted` (the train itself crashed or was interrupted).
 - `runs`, every run of the round by kind (`first`, `retry_gates`,
   `retry_failed`, `retry_full`, `base`, `probe`, `retry_abort`), each with
@@ -450,13 +450,15 @@ the same kind and subject (its first two words: `lane-busy full`,
 `watchdog <nodeid>`, `disk-full <path>`; pids, times, loads and percentages
 vary) — a test, a lane or a disk that stops every train shows there.
 
-**A full disk (v2.98).** The train checks the disks it writes to — the one
+**A full disk (v2.98, v2.103).** The train checks the disks it writes to — the one
 holding its worktrees, measured at the nearest directory that exists (before
 the first train there is no `<root>-train`), and the temp dir's (`TMPDIR`,
 `TEMP`, `TMP`, else `/tmp`: read as the suite's children read it, never
-test-written, so a full one is not swapped for another) — against
-`PROCESS_DISK_LIMIT_PCT` (90 % by default, the limit `dispatch.py start`
-refuses at):
+test-written, so a full one is not swapped for another) — against two
+bounds: the floor `PROCESS_DISK_FLOOR_GB` (2 GiB free by default, GiB =
+2^30 bytes, as `df -h` counts; 0 turns it off) and the limit
+`PROCESS_DISK_LIMIT_PCT` (90 % used by default). `dispatch.py start` refuses
+below the same floor and warns at the same limit:
 - before every build, once the old tree is gone and before `worktree add`
   and the merges, and again where git fails in them;
 - before every judge, ahead of the preflight and the gates;
@@ -465,17 +467,26 @@ refuses at):
   probes and the preflight that confirms the preboard's base;
 - before the push and the final `merge --ff-only`, on the root's disk.
 
-A disk over the limit there was not filled by anyone of this run: the train
-halts, `result="environment"`, `red_path="disk-full"`, the line
-`disk-full <path> <use>%` in the round's `disk_full`. Nobody is blamed,
-nothing merged; passengers dropped for a real red in an earlier round are
-reported. A full disk never reads as a merge conflict, a crash (`aborted`)
-or a red main.
+A disk at or over the limit with room is a warning, nothing more (#446): once
+per disk and run, on stderr and in the train's log, it names the disk, its
+use and free GiB, which of the tree and the temp dir are on it and what to
+clear there; the train goes on. A disk under the floor there was not filled
+by anyone of this run: the train halts, `result="environment"`,
+`red_path="disk-full"`, the line `disk-full <path> <use>% <free> GiB free`
+in the round's `disk_full`. Nobody is blamed, nothing merged; passengers
+dropped for a real red in an earlier round are reported. A full disk never
+reads as a merge conflict, a crash (`aborted`) or a red main.
 
-A suite run that ends red (or undefined) and leaves a disk over the limit
-measured nothing: an abort, its reason `disk-full <path> <use>%`, read by the
-train itself (at 100 % no marker file can be written). A refused
-`dispatch.py start` inside a suite run appends the same line to the marker.
+While a suite run lasts, a thread samples the free space of both disks every
+10 s and keeps the lowest reading; it stops nothing, and it ends with the
+run, a killed one too. A suite run that ends red (or undefined) and whose
+disk was under the floor after it or at its lowest during it measured
+nothing: an abort, its reason `disk-full <path> <use>% <free> GiB free`,
+read by the train itself (on a full disk no marker file can be written).
+The output is never searched for `No space left on device`: a suite prints
+its tests' source lines, and a red run that only quotes the error stays
+red. A refused `dispatch.py start` inside a suite run appends the same line
+to the marker.
 Its repeat waits for no load (a full disk is not emptied by waiting) and
 rebuilds at once; the check before it decides. Still full: `disk-full`. Free:
 the run goes, and a rebuilt tree that fills the disk again counts **red**
@@ -484,16 +495,18 @@ the search finds the passenger whose tests fill it, also where the base has
 no suite. Only a run and its repeat that both end `disk-full` count so; one
 `disk-full` beside a load abort asks the fresh base, as v2.95. The base itself aborting
 that way twice stays `suite-aborted`. A suite that fills the disk and cleans
-up stays red: nothing was measured over the limit.
+up between two samples stays red: nothing was measured under the floor.
 
 The price, chosen: a passenger that leaves files outside its tree (in
 `/tmp`) is not blamed. The train halts `disk-full` and names the disk, which
 of its tree and the temp dir are on it, and what to clear there: old test
 basetemps under the temp dir (`pytest-of-*` and other runs' leftovers —
 `tidy.py` does not touch them) and the merged worktrees with their
-environments (`tidy.py --apply`); `train-phases` shows a series. A limit that is no percentage in (0, 100] is a note in the log and
-on stderr, and the train checks against the default 90 % (`dispatch.py
-start` refuses on it). A project's `--preflight` may still check the disk.
+environments (`tidy.py --apply`); `train-phases` shows a series. A limit
+that is no percentage in (0, 100], or a floor that is no number >= 0, is a
+note in the log and on stderr, once per run, and the train checks against
+the default (90 %, 2 GiB; `dispatch.py start` refuses on it). A project's
+`--preflight` may still check the disk.
 
 ## Who pushes to main — the merge route
 

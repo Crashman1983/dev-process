@@ -77,11 +77,13 @@ caps live children on this host; a held full or scoped lane blocks no
 start (a session's own test runs queue on the lane, the session does
 not), an unknown held lane blocks every phase, and a remote phase sees
 neither cap nor lane. A
-local start also refuses while the filesystem holding the worktrees is
-at or above 90% use (`PROCESS_DISK_LIMIT_PCT`) and names `tidy.py
+local start also refuses while the filesystem holding the worktrees has
+less than 2 GiB free (`PROCESS_DISK_FLOOR_GB`) and names `tidy.py
 --apply`: each worktree carries its own venv/node_modules (downstream:
-111 merged worktrees filled the disk). Inside a train's suite run the refusal
-appends `disk-full <path> <use>%` to its abort marker (v2.98). Whether a merged worktree may be
+111 merged worktrees filled the disk); at or above 90% use
+(`PROCESS_DISK_LIMIT_PCT`) with room it starts and warns (#446). Inside a
+train's suite run the refusal appends `disk-full <path> <use>% <free> GiB
+free` to its abort marker (v2.98). Whether a merged worktree may be
 removed has one owner here (`merged_worktrees`); the train and tidy ask it.
 
 Steering (the mandate's `steering` block, `optimize.steering`): an issue's
@@ -875,10 +877,12 @@ def _worktrees(root: Path) -> dict[str, Path]:
 # every session stalled). The train (after its merge) and tidy (`--apply`) remove
 # them — and both ask this one owner whether a worktree may go, and if not, why.
 
-# `start` refuses while the worktrees' filesystem is this full; the reader and the limit are
-# process_git's, shared with the train (v2.98 B1)
+# `start` refuses while the worktrees' filesystem has less than the floor free, and warns at
+# the limit; the reader and both bounds are process_git's, shared with the train (v2.98 B1, #446)
 DISK_LIMIT_PCT = process_git.DISK_LIMIT_PCT
 DISK_LIMIT_ENV = process_git.DISK_LIMIT_ENV
+DISK_FLOOR_GB = process_git.DISK_FLOOR_GB
+DISK_FLOOR_ENV = process_git.DISK_FLOOR_ENV
 CLEANUP_CMD = process_git.CLEANUP_CMD
 
 
@@ -1100,24 +1104,33 @@ def remove_worktree(root: Path, path: Path, base: str) -> str | None:
 
 
 def disk_refusal(path: Path) -> str | None:
-    """Why no session may start while the filesystem holding `path` is too full
-    (`process_git.disk_use`), or None. A limit that is no percentage in (0, 100] refuses
-    too: a misconfigured guard is neither silently off nor silently the default. A usage
-    that cannot be read lets the start through, with a note. A refusal for a full disk
-    inside a train's suite run marks the run aborted (`disk-full <path> <use>%`): nobody
-    aboard is blamed for the host's disk."""
+    """Why no session may start while the filesystem holding `path` has too little room —
+    less than `PROCESS_DISK_FLOOR_GB` (2 GiB) free (`process_git.disk_use`, #446) — or
+    None. At or over the percentage limit with room the start goes, with a warning. A
+    limit that is no percentage in (0, 100] or a floor that is no number >= 0 refuses too:
+    a misconfigured guard is neither silently off nor silently the default. A usage that
+    cannot be read lets the start through, with a note. A refusal inside a train's suite
+    run marks the run aborted (`disk-full <path> <use>% <free> GiB free`): nobody aboard is
+    blamed for the host's disk."""
     use = process_git.disk_use(path)
-    if use.problem and use.limit is None:
+    if use.problem and (use.limit is None or use.floor is None):
         return use.problem
     if use.problem:
         print(f"dispatch: note — {use.problem}", file=sys.stderr)
         return None
-    if not use.full or use.use_pct is None:
-        return None
-    process_git.note_suite_abort(process_git.disk_full_line(path, use.use_pct))
-    return (f"the filesystem holding {path} is {use.use_pct:.0f}% full (limit {use.limit:g}%, "
-            f"{(use.free or 0) / 2**30:.1f} GiB free) — every worktree carries its own environments; "
-            f"remove the merged ones with `{CLEANUP_CMD}`")
+    free = (use.free or 0) / process_git.GIB
+    if use.low_free:
+        process_git.note_suite_abort(process_git.disk_full_line(path, use.use_pct, use.free))
+        used = "" if use.use_pct is None else f"; {use.use_pct:.0f}% full"
+        return (f"the filesystem holding {path} has {free:.1f} GiB free, under the floor of {use.floor:g} GiB "
+                f"({DISK_FLOOR_ENV}{used}) — every worktree carries its own environments; "
+                f"remove the merged ones with `{CLEANUP_CMD}`")
+    if use.over_pct and use.use_pct is not None:
+        print(f"dispatch: warning — the filesystem holding {path} is {use.use_pct:.0f}% full (limit "
+              f"{use.limit:g}%, {DISK_LIMIT_ENV}), {free:.1f} GiB free; starting — a start is refused "
+              f"below {use.floor:g} GiB free ({DISK_FLOOR_ENV}). Remove the merged worktrees with "
+              f"`{CLEANUP_CMD}`", file=sys.stderr)
+    return None
 
 
 def ensure_worktree(root: Path, branch: str) -> Path:

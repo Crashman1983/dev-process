@@ -1,14 +1,17 @@
 """v2.98 B1 (#425): a full disk is no red passenger on the train.
 
 The train checks the disks it writes to (`process_git.disk_use`: the one under its worktrees,
-the temp dir's) before every rebuild, before every judge and around every suite run. Over the
-limit: `DiskFull`, nobody blamed, nothing merged (`red_path` "disk-full"). A red run that left
-a disk over the limit is an abort (`disk-full <path> <use>%`), repeated without a wait for the
-load and without a fresh base."""
+the temp dir's) before every rebuild, before every judge and around every suite run. Under the
+floor (v2.103, #446: less than `PROCESS_DISK_FLOOR_GB`, 2 GiB, free): `DiskFull`, nobody
+blamed, nothing merged (`red_path` "disk-full"); over the percentage limit with room: one
+warning per disk and run, and the train goes on. A red run whose disk was under the floor after
+it or at its lowest during it is an abort (`disk-full <path> <use>% <free> GiB free`), repeated
+without a wait for the load and without a fresh base."""
 import collections
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -20,14 +23,20 @@ _Usage = collections.namedtuple("usage", "total used free")
 _HIGH_LOAD = (64.0, 64.0, 64.0)  # a wait for the load would run its whole budget
 
 
-def _disk(monkeypatch, full, *, limit: str = "90"):
-    """Every filesystem reads 95 % used while `full()` holds, else 10 % — the train's reader
-    is `process_git.disk_use` (`shutil.disk_usage`, one module for every importer)."""
+GIB = 2**30
+_FULL = "99% 1.0 GiB free"  # the tail of the halt line on a disk `_disk` reads full
+
+
+def _disk(monkeypatch, full, *, limit: str = "90", floor: str = "2", room: int = 90):
+    """Every filesystem reads 99 % used, 1 GiB free — under the 2 GiB floor — while `full()`
+    holds, else `room` GiB free of 100 (90: 10 %; 5: over the 90 % limit with room) — the
+    train's reader is `process_git.disk_use` (`shutil.disk_usage`, one module for every importer)."""
     monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", limit)
+    monkeypatch.setenv("PROCESS_DISK_FLOOR_GB", floor)
 
     def usage(_path):
-        pct = 95 if full() else 10
-        return _Usage(100 * 2**30, pct * 2**30, (100 - pct) * 2**30)
+        free = 1 if full() else room
+        return _Usage(100 * GIB, (100 - free) * GIB, free * GIB)
     monkeypatch.setattr(shutil, "disk_usage", usage)
 
 
@@ -63,7 +72,7 @@ def test_enospc_while_building_halts_disk_full_never_a_conflict(render, tmp_path
     logged: list[str] = []
     with pytest.raises(train.DiskFull) as got:
         train.build_train(out, "main", ["alpha"], "x", logged.append)
-    assert str(got.value).startswith("disk-full ") and str(got.value).endswith("95%"), got.value
+    assert str(got.value).startswith("disk-full ") and str(got.value).endswith(_FULL), got.value
     assert not any("conflict" in line or "dropped" in line for line in logged), logged
 
 
@@ -91,7 +100,7 @@ def test_a_full_disk_before_the_build_touches_no_worktree(render, tmp_path, monk
     with pytest.raises(train.DiskFull) as got:
         train.build_train(out, "main", ["alpha"], "x", lambda line: None)
     # measured at the nearest directory that exists: `<root>-train` is not there yet
-    assert str(got.value) == f"disk-full {out.parent} 95%", got.value
+    assert str(got.value) == f"disk-full {out.parent} {_FULL}", got.value
     assert not (out.parent / f"{out.name}-train").exists()
     assert "train/x" not in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
 
@@ -284,14 +293,14 @@ def test_a_full_disk_before_the_preboards_preflight_halts_disk_full(render, tmp_
     assert "the preflight" not in err and "disk-full" in err, err
 
 
-def test_a_host_over_the_limit_halts_the_real_train(render, tmp_path, monkeypatch):
-    """End to end on the host's real disk, the limit at 0.001 %: every disk is over it — the
+def test_a_host_under_the_floor_halts_the_real_train(render, tmp_path, monkeypatch):
+    """End to end on the host's real disk, the floor at 10^9 GiB: every disk is under it — the
     train halts `disk-full` before its first build, with and without the preboard."""
     out = render(tmp_path, {"project_name": "d", "modules": {}})
     _repo(out)
     _branch(out, "alpha", {"src/a.py": "a\n"})
     head = _git(out, "rev-parse", "main").stdout
-    monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "0.001")
+    monkeypatch.setenv("PROCESS_DISK_FLOOR_GB", "1000000000")
     for extra in ((), ("--preboard", "true")):
         r = _train(out, "run", "--force", "--suite", "true", *extra)
         assert r.returncode == 1 and "disk-full" in r.stderr and "nobody is blamed" in r.stderr, r.stderr
@@ -302,6 +311,56 @@ def test_a_host_over_the_limit_halts_the_real_train(render, tmp_path, monkeypatc
     branches = _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
     assert "alpha" in branches and not [b for b in branches if b.startswith("train/")], branches
     assert not (out.parent / f"{out.name}-train").exists()
+
+
+def test_a_host_over_the_limit_with_room_warns_and_the_real_train_merges(render, tmp_path, monkeypatch):
+    """#446: end to end, the limit at 0.001 % and no floor — every disk is over the limit, none
+    is short of room: one warning (the tree and the temp dir share a disk here) naming the
+    use, the free GiB and what to clear, and the batch merges."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "checkout", "-q", "main")
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "0.001")
+    monkeypatch.setenv("PROCESS_DISK_FLOOR_GB", "0")
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "src/a.py" in _git(out, "ls-tree", "-r", "--name-only", "main").stdout.split()
+    warnings = [x for x in r.stderr.splitlines() if x.startswith("train: warning — ")]
+    assert len(warnings) == 1, r.stderr
+    assert "% full (limit 0.001%" in warnings[0] and "GiB free" in warnings[0], warnings
+    assert "tidy.py --apply" in warnings[0] and f"the temp dir {tmp}" in warnings[0], warnings
+    assert "disk-full" not in r.stderr, r.stderr
+
+
+def test_over_the_limit_with_room_warns_once_per_disk_and_run(render, tmp_path, monkeypatch, capsys):
+    """#446: 95 % used, 5 GiB free — every check point reads it over the limit: one warning per
+    disk on stderr and in the train's log, per run (the memo starts empty each run), and both
+    runs merge."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    train = _load_train(out)
+    _disk(monkeypatch, lambda: False, room=5)
+    for name in ("alpha", "beta"):
+        _branch(out, name, {f"src/{name}.py": "x\n"})
+        _git(out, "checkout", "-q", "main")
+        rc = train.run(out, suite="true", deploy=None, push=False, min_candidates=1, max_wait_hours=0,
+                       force=True, keep_branches=False, dry_run=False)
+        err = capsys.readouterr().err
+        assert rc == 0, err
+        assert f"src/{name}.py" in _git(out, "ls-tree", "-r", "--name-only", "main").stdout.split()
+        warnings = [x for x in err.splitlines() if x.startswith("train: warning — ")]
+        assert len(warnings) == 1, err
+        assert "is 95% full (limit 90%" in warnings[0] and "5.0 GiB free" in warnings[0], warnings
+        assert "PROCESS_DISK_FLOOR_GB" in warnings[0] and "tidy.py --apply" in warnings[0], warnings
+    log = "".join(f.read_text() for f in (out / ".git/process-train").glob("2*.log"))
+    assert "warning — " in log and "is 95% full" in log, log
 
 
 @pytest.mark.parametrize("var", ["TMPDIR", "TEMP", "TMP"])
@@ -320,9 +379,10 @@ def test_the_temp_dir_is_read_from_the_environment_not_from_tempfile(render, tmp
     monkeypatch.setenv(var, str(full_tmp))
     monkeypatch.setattr(tempfile, "tempdir", str(free))  # what a fallback left in the cache
     monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "90")
-    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(100, 95, 5) if Path(p) == full_tmp
-                        else _Usage(100, 10, 90))
-    assert train._disk_full(free, lambda line: None) == f"disk-full {full_tmp} 95%"
+    monkeypatch.setenv("PROCESS_DISK_FLOOR_GB", "2")
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(100 * GIB, 99 * GIB, GIB) if Path(p) == full_tmp
+                        else _Usage(100 * GIB, 10 * GIB, 90 * GIB))
+    assert train._disk_full(free, lambda line: None) == f"disk-full {full_tmp} {_FULL}"
     assert sorted(p.name for p in full_tmp.iterdir()) == []  # nothing written to test it
 
 
@@ -450,13 +510,13 @@ def test_a_passenger_that_fills_the_disk_twice_is_found_where_the_base_has_no_su
 
 def test_a_disk_filled_from_outside_with_a_dispatch_test_aboard_blames_nobody(render, tmp_path, monkeypatch):
     """r2 M1: the disk fills from outside during the run; a passenger's test calls dispatch,
-    which refuses and appends `disk-full <path> <use>%` to the marker. The repeat finds the disk
+    which refuses (under its floor) and appends `disk-full <path> …` to the marker. The repeat finds the disk
     still full before it runs: `DiskFull`, nobody blamed, no wait for the load."""
     full = [False]
     _disk(monkeypatch, lambda: full[0])
     probe = ("import sys; from pathlib import Path; sys.path.insert(0, 'scripts/process'); import dispatch; "
              "sys.exit(0 if dispatch.disk_refusal(Path('.')) is None else 1)")
-    dispatch_test = f"PROCESS_DISK_LIMIT_PCT=0.001 {sys.executable} -B -c \"{probe}\""
+    dispatch_test = f"PROCESS_DISK_FLOOR_GB=1000000000 {sys.executable} -B -c \"{probe}\""
 
     def sh(sub, cmd, nth):
         if "b2" in sub:
@@ -471,13 +531,16 @@ def test_a_disk_filled_from_outside_with_a_dispatch_test_aboard_blames_nobody(re
     assert not r.phases.get("abort_wait"), r.phases
 
 
-@pytest.mark.parametrize("pct", ["below", "filled-and-cleaned"])
-def test_a_disk_never_seen_over_the_limit_leaves_the_red_path_as_it_was(render, tmp_path, monkeypatch, pct):
-    """Under the limit — or a suite that fills the disk and cleans up again, so nothing is
-    measured over it: the red run stays red, the search as before."""
+@pytest.mark.parametrize("pct", ["below", "over-with-room", "filled-and-cleaned"])
+def test_a_disk_never_seen_under_the_floor_leaves_the_red_path_as_it_was(render, tmp_path, monkeypatch, pct):
+    """Under the limit, over it with room (#446: a warning) — or a suite that fills the disk and
+    cleans up again between two samples, so nothing is measured under the floor: the red run
+    stays red, the search as before."""
     monkeypatch.setenv("PROCESS_DISK_LIMIT_PCT", "90")
-    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(100, 89, 11))
-    sh = (lambda sub, cmd, nth: "red" if "b2" in sub else "green") if pct == "below" else \
+    monkeypatch.setenv("PROCESS_DISK_FLOOR_GB", "2")
+    free = 5 if pct == "over-with-room" else 11
+    monkeypatch.setattr(shutil, "disk_usage", lambda p: _Usage(100 * GIB, (100 - free) * GIB, free * GIB))
+    sh = (lambda sub, cmd, nth: "red" if "b2" in sub else "green") if pct != "filled-and-cleaned" else \
         (lambda sub, cmd, nth: f"head -c 1 /dev/zero > big.bin; rm -f big.bin; {_OUTCOME_CMD['red']}"
          if "b2" in sub else "green")
     r = _aborting(render, tmp_path, monkeypatch, sh=sh)
@@ -485,22 +548,28 @@ def test_a_disk_never_seen_over_the_limit_leaves_the_red_path_as_it_was(render, 
     assert _shape(r.measure) == [("dropped:b2", {"first": 1, "retry_full": 1, "base": 1, "probe": 1}),
                                  ("green", {"first": 1})], _shape(r.measure)
     assert "aborts" not in r.measure["rounds"][0]
+    if pct == "over-with-room":
+        assert "is 95% full" in r.err and r.err.count("train: warning — ") <= 2, r.err  # per disk
 
 
+@pytest.mark.parametrize("var", ["limit", "floor"])
 @pytest.mark.parametrize("full", [False, True])
-def test_a_misconfigured_limit_is_a_note_and_the_default_holds(render, tmp_path, monkeypatch, full):
+def test_a_misconfigured_bound_is_a_note_and_the_default_holds(render, tmp_path, monkeypatch, full, var):
     """Refute v2.98: a misconfigured limit turned the train's check off. It is a note, said
-    once, and the default 90 % holds: 10 % runs, 95 % halts `disk-full`."""
-    _disk(monkeypatch, lambda: full, limit="abc")
+    once, and the defaults hold (r2 N4: the floor alike): 90 GiB free runs, 1 GiB halts
+    `disk-full`."""
+    _disk(monkeypatch, lambda: full, **{var: "abc"})
     r = _aborting(render, tmp_path, monkeypatch, n=1, sh=lambda sub, cmd, nth: "green")
     assert r.written == [], r.err
     if full:
-        assert isinstance(r.raised, r.train.DiskFull) and str(r.raised).endswith(" 95%"), r.raised
+        assert isinstance(r.raised, r.train.DiskFull) and str(r.raised).endswith(_FULL), r.raised
     else:
         assert r.raised is None and [x["red_path"] for x in r.measure["rounds"]] == ["green"]
-    assert "PROCESS_DISK_LIMIT_PCT='abc' is no percentage" in r.log and "note" in r.log, r.log
-    assert r.err.count("PROCESS_DISK_LIMIT_PCT='abc'") == 1, r.err  # said once, not per check
-    assert "checked against the default 90%" in r.err, r.err
+    env = {"limit": "PROCESS_DISK_LIMIT_PCT='abc' is no percentage",
+           "floor": "PROCESS_DISK_FLOOR_GB='abc' is no number"}[var]
+    assert env in r.log and "note" in r.log, r.log
+    assert r.err.count(env) == 1, r.err  # said once, not per check
+    assert "checked against the default 90% and 2 GiB free" in r.err, r.err
 
 
 def test_the_base_aborting_on_a_full_disk_twice_stays_suite_aborted(render, tmp_path, monkeypatch):
@@ -518,6 +587,76 @@ def test_the_base_aborting_on_a_full_disk_twice_stays_suite_aborted(render, tmp_
     r = _aborting(render, tmp_path, monkeypatch, n=1, on_build=on_build, sh=sh)
     assert isinstance(r.raised, r.train.SuiteAborted) and not isinstance(r.raised, r.train.DiskFull), r.raised
     assert r.written == [] and _subsets(r) == [("b1",), ("b1",), (), ()]
+
+
+# --- during the run: the lowest free space it saw (r3 P2-1..P2-3) ----------------------------
+
+def _suite_tree(render, tmp_path, monkeypatch):
+    """A rendered repo, the train loaded, samples every 20 ms, the temp dir beside it."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    train = _load_train(out)
+    monkeypatch.setattr(train, "DISK_SAMPLE_S", 0.02)
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    return out, train
+
+
+def _watching(train):
+    """True only for a sample of the run's watch thread: the check before the run and the
+    measurement after it read the disk free."""
+    return threading.current_thread().name == train.DISK_WATCH_THREAD
+
+
+@pytest.mark.parametrize("marker", [True, False])
+def test_a_red_run_whose_disk_ran_low_during_it_is_an_abort(render, tmp_path, monkeypatch, marker):
+    """The suite fills the disk under the floor and cleans up before it ends: after the run the
+    disk is free again, but a sample during it saw 1 GiB — the run measured nothing: aborted,
+    the reason `disk-full …`, so `abort_rule` takes its disk branch. Also without a marker:
+    that run is a suite run too."""
+    out, train = _suite_tree(render, tmp_path, monkeypatch)
+    if not marker:
+        monkeypatch.setattr(train, "_abort_marker", lambda root, stamp: None)
+    flag = tmp_path / "low"
+    samples: list[int] = []
+    _disk(monkeypatch, lambda: (samples.append(1) if _watching(train) else None) or flag.exists())
+    logged: list[str] = []
+    state, reason = train._marked_sh(out, "x", out, f"touch {flag}; sleep 0.4; rm -f {flag}; exit 1",
+                                     logged.append)
+    assert (state, reason.split()[0]) == ("aborted", "disk-full") and reason.endswith(_FULL), (state, reason)
+    assert len(samples) >= 3, samples  # sampled again and again, not once
+    assert any("at its lowest during the run" in line for line in logged), logged
+    assert train.DISK_WATCH_THREAD not in {t.name for t in threading.enumerate()}
+
+
+@pytest.mark.parametrize("outcome, want", [("red", "aborted"), ("undefined", "aborted"), ("green", "green")])
+def test_the_lowest_sample_decides_a_red_or_undefined_run_never_a_green_one(render, tmp_path, monkeypatch,
+                                                                             outcome, want):
+    out, train = _suite_tree(render, tmp_path, monkeypatch)
+    _disk(monkeypatch, lambda: _watching(train))
+    state, reason = train._marked_sh(out, "x", out, _OUTCOME_CMD[outcome], lambda line: None)
+    assert state == want, (state, reason)
+    assert reason == ("" if want == "green" else f"disk-full {out} {_FULL}"), reason
+
+
+def test_a_red_run_that_only_quotes_enospc_stays_red(render, tmp_path, monkeypatch):
+    """r2 M3: pytest prints source lines, and both suites hold the string — the output is no
+    measurement. A red run on a disk with room that prints `No space left on device` is red."""
+    out, train = _suite_tree(render, tmp_path, monkeypatch)
+    _disk(monkeypatch, lambda: False)
+    cmd = "echo 'E   OSError: [Errno 28] No space left on device'; echo 'ENOSPC'; exit 1"
+    assert train._marked_sh(out, "x", out, cmd, lambda line: None) == ("red", "")
+
+
+def test_a_run_past_its_timeout_stops_the_watch(render, tmp_path, monkeypatch):
+    """The early return of a killed run ends the watch too (its `finally`); the watch kills nothing."""
+    out, train = _suite_tree(render, tmp_path, monkeypatch)
+    _disk(monkeypatch, lambda: False)
+    watch = train._DiskWatch(train._disk_paths(out))
+    assert train._sh(out, "sleep 5", lambda line: None, 0.3, disk_watch=watch) == "red"
+    assert train.DISK_WATCH_THREAD not in {t.name for t in threading.enumerate()}
+    assert watch.low_line() is None and watch.lowest, watch.lowest
 
 
 def test_a_green_memo_that_cannot_be_written_leaves_no_temp_file(render, tmp_path, monkeypatch):
