@@ -142,7 +142,10 @@ A local branch boards when it is ahead of the integration branch and
   value just read. A branch that boarded at origin's tip has moved, too,
   when origin's copy is no longer that tip (`git ls-remote`, unreadable
   counts as moved): no `done`, its local branch stays, and the train says
-  "origin's <b> moved during the run". Origin's copy is deleted only with a lease on the merged
+  "origin's <b> moved during the run". So has a branch whose local rebase
+  boarded when origin's copy is neither the pre-rebase copy boarding saw
+  nor the merged SHA; otherwise that pre-rebase copy, whose patches all
+  merged, is deleted under a lease on the SHA just read. Origin's copy is deleted only with a lease on the merged
   SHA, or on an older origin SHA that the merged one contains.
 - **Holds before the push.** The train reads the reports again before it
   pushes. A passenger whose worker reported `blocked` during the run, even

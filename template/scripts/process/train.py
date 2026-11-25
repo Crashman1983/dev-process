@@ -353,13 +353,16 @@ class Snapshot(NamedTuple):
     the local head an ancestor of it; `diverged`: {branch: origin's SHA} where
     neither contains the other and both carry patches of their own — held;
     `rebased`: {branch: note} where one side is a rebase of the other's commits —
-    the side with the rebase boards, the note says which and why."""
+    the side with the rebase boards, the note says which and why; `origin_seen`:
+    {branch: origin's SHA} where the local rebase boards — the pre-rebase copy the
+    train deletes after the merge under a lease on this SHA."""
     tips: dict[str, str]
     base_sha: str
     seen: dict[str, str]
     behind: set[str]
     diverged: dict[str, str]
     rebased: dict[str, str]
+    origin_seen: dict[str, str]
 
 
 def _is_ancestor(root: Path, older: str, newer: str) -> bool:
@@ -399,6 +402,7 @@ def _snapshot(root: Path, base: str, local: str | None = None) -> Snapshot:
     behind: set[str] = set()
     diverged: dict[str, str] = {}
     rebased: dict[str, str] = {}
+    origin_seen: dict[str, str] = {}
     for b, head in seen.items():
         theirs = refs.get(f"{ORIGIN_REFS}{b}")
         if not theirs or theirs == head or b == local or b.startswith("train/"):
@@ -410,12 +414,13 @@ def _snapshot(root: Path, base: str, local: str | None = None) -> Snapshot:
             continue
         elif _patches_in(root, head, theirs):
             rebased[b] = REBASED_LOCAL
+            origin_seen[b] = theirs
         elif _patches_in(root, theirs, head):
             tips[b] = theirs
             rebased[b] = REBASED_ORIGIN
         else:
             diverged[b] = theirs
-    return Snapshot(tips, base_sha, seen, behind, diverged, rebased)
+    return Snapshot(tips, base_sha, seen, behind, diverged, rebased, origin_seen)
 
 
 def _diverged_reason(b: str, theirs: str, head: str) -> str:
@@ -611,6 +616,8 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
             continue  # an unreadable count stays unboarded as before, but is no "merged or empty"
         if b in snap.behind or b in snap.rebased:
             c["board_note"] = snap.rebased.get(b, BEHIND_NOTE)
+        if b in snap.origin_seen:
+            c["origin_sha"] = snap.origin_seen[b]  # the pre-rebase copy on origin, as boarding saw it
         hold, rep = holds.get(b), reports.get(b)
         if _cannot_board(added_by[b], rep):
             # nothing below could board it (#426): say why from what is read, read no further
@@ -2779,6 +2786,9 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     # the local head boarding saw (#445): it differs from `shas` where the branch boarded at
     # origin's tip — after the merge, a local branch at either one has not moved
     seen_heads = {c["branch"]: c.get("seen_sha") or c["sha"] for c in p["candidates"] if c.get("sha")}
+    # origin's pre-rebase copy where a local rebase boarded (#445): deleted after the merge
+    # under a lease on this SHA, unless origin moved past it
+    origin_seen = {c["branch"]: c["origin_sha"] for c in p["candidates"] if c.get("origin_sha")}
     # oldest first: boarding order is waiting order, and the bisection below
     # blames by position, so the order must mean something
     waiting = {c["branch"]: c.get("hours_waiting") or 0 for c in p["candidates"]}
@@ -3324,21 +3334,29 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     # A local branch at its boarded head or at the SHA that merged has not moved (#445:
     # a fast-forward to origin's tip during the run is none); `at` keeps the value read,
     # the one the local delete is guarded by. A branch that boarded at origin's tip has moved
-    # too when origin's copy is no longer that tip (`_origin_moved`)
+    # too when origin's copy is no longer that tip, and one whose local rebase boarded when
+    # origin's copy is neither the one boarding saw nor the merged SHA (`_origin_moved`);
+    # `origin_at` keeps origin's value read, the one origin's delete is leased on
     at: dict[str, str] = {}
-    # a branch that boarded at origin's tip (`shas` is not its local head) whose copy on
-    # origin is no longer `shas`: its note — its new commits are on origin only
+    origin_at: dict[str, str] = {}
+    # such a branch whose copy on origin moved: its note — its new commits are on origin only
     origin_moved: dict[str, str] = {}
 
     def moved_since(b: str) -> bool:
         at[b] = _out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}")
         if at[b] not in (seen_heads.get(b, shas[b]), shas[b]):
             return True
-        if seen_heads.get(b, shas[b]) == shas[b]:
+        if seen_heads.get(b, shas[b]) != shas[b]:
+            expected = {shas[b]}
+        elif b in origin_seen:
+            expected = {origin_seen[b], shas[b]}
+        else:
             return False
-        said = _origin_moved(root, b, shas[b])
+        said, theirs = _origin_moved(root, b, shas[b], expected)
         if said:
             origin_moved[b] = said
+        elif theirs:
+            origin_at[b] = theirs
         return said is not None
 
     moved = {b: shas[b] for b in aboard if b in shas and moved_since(b)}
@@ -3396,7 +3414,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
                 print(f"train: worktree {wt['path']} of {b} " + (f"not removed — {failed}" if failed else "removed"))
                 log(f"worktree {wt['path']} of {b}: {failed or 'removed'}")
         if not keep_branches:
-            _delete_branch(root, b, shas.get(b), push=push, log=log, local_sha=at.get(b))
+            _delete_branch(root, b, shas.get(b), push=push, log=log, local_sha=at.get(b),
+                           origin_sha=origin_at.get(b))
     if _report.publish_if_steered(root) is False:
         # the other host counts these issues in progress until a sync carries the `done`
         print("train: the `done` reports are written but not published", file=sys.stderr)
@@ -3412,33 +3431,37 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     return 0
 
 
-def _origin_moved(root: Path, b: str, sha: str) -> str | None:
-    """After the merge, for a branch that boarded at origin's tip (#445): None while origin's
-    `b` is still `sha`, else the note — it moved, is gone, or cannot be read (unknown counts
-    as moved: `done`, the forget and the local delete would strand what a worker pushed
-    during the run). `ls-remote` through `_git`: no prompt, bounded like the fetch."""
+def _origin_moved(root: Path, b: str, sha: str, expected: set[str]) -> tuple[str | None, str | None]:
+    """After the merge, for a branch whose origin copy boarding read (#445) — origin's tip
+    that merged, or the pre-rebase copy of a local rebase that merged: `(None, origin's SHA)`
+    while origin's `b` is one of `expected`, else `(note, None)` — it moved, is gone, or
+    cannot be read (unknown counts as moved: `done`, the forget and the deletes would strand
+    what a worker pushed during the run). `ls-remote` through `_git`: no prompt, bounded
+    like the fetch."""
     r = _git(root, "ls-remote", "origin", f"refs/heads/{b}")
     if r.returncode != 0:
         why = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"exit {r.returncode}"
         return (f"origin's {b} could not be read after the merge ({why}) — merged at {sha[:12]}; "
                 "kept with its records and its local branch: if it moved, its new commits need their own "
-                "review and train")
+                "review and train"), None
     theirs = next((line.split()[0] for line in r.stdout.splitlines()
                    if line.split()[1:] == [f"refs/heads/{b}"]), None)
-    if theirs == sha:
-        return None
+    if theirs in expected:
+        return None, theirs
     return (f"origin's {b} moved during the run — its new commits need their own review and train "
-            f"(merged at {sha[:12]}, origin now {theirs[:12] if theirs else 'without it'})")
+            f"(merged at {sha[:12]}, origin now {theirs[:12] if theirs else 'without it'})"), None
 
 
 def _delete_branch(root: Path, b: str, sha: str | None, *, push: bool, log,
-                   local_sha: str | None = None) -> None:
+                   local_sha: str | None = None, origin_sha: str | None = None) -> None:
     """A merged passenger's branch goes — only as it boarded (#391): locally
     `update-ref -d` with the value the caller's moved check read (`local_sha`;
     without one, the merged SHA) — a commit in the meantime keeps it —, on origin
     a delete under `--force-with-lease` of the merged SHA `sha` (a worker's push
     from elsewhere keeps the copy). A branch that boarded at origin's tip (#445)
-    goes locally at its older head and on origin at that tip. Without a SHA,
+    goes locally at its older head and on origin at that tip. `origin_sha`: origin's copy as
+    the caller just read it (`_origin_moved`) — a local rebase that boarded leaves a
+    pre-rebase copy whose patches all merged, and the lease is on it. Without a SHA,
     `branch -d` as before. A branch checked out in a worktree stays, and so does
     its origin copy."""
     if sha is None:
@@ -3456,7 +3479,7 @@ def _delete_branch(root: Path, b: str, sha: str | None, *, push: bool, log,
     if sha is None:
         _git(root, "push", "origin", "--delete", b)
         return
-    r = _git(root, "push", f"--force-with-lease=refs/heads/{b}:{sha}", "origin", f":refs/heads/{b}")
+    r = _git(root, "push", f"--force-with-lease=refs/heads/{b}:{origin_sha or sha}", "origin", f":refs/heads/{b}")
     if r.returncode != 0 and ("stale info" in r.stderr or "rejected" in r.stderr):
         # origin's copy may only lag: the worker never pushed its last commits — an
         # ancestor of what merged loses nothing (refute v2.90)
