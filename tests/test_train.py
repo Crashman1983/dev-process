@@ -5836,6 +5836,66 @@ def test_a_local_rebase_over_an_older_origin_push_boards_local(render, tmp_path)
     assert "boards local: local is a rebase of origin's commits" in text, text
 
 
+def _locally_rebased(render, tmp_path):
+    """alpha gepusht, main bewegt, alpha lokal auf main rebased — origin hat den früheren Push.
+    Gibt (out, bare, lokaler SHA, origins SHA)."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    old = _git(out, "rev-parse", "alpha").stdout.strip()
+    _main_moves(out)
+    _git(out, "push", "-q", "origin", "main")
+    local = _rebased_onto_main(out, "alpha", "rebased")
+    _git(out, "branch", "-q", "-f", "alpha", local)
+    _git(out, "branch", "-q", "-D", "rebased")
+    return out, bare, local, old
+
+
+def test_a_local_rebase_that_boards_deletes_origins_pre_rebase_copy(render, tmp_path, monkeypatch, capsys):
+    """#445 (Review v2.103): der lokale Rebase fuhr — origins Kopie vor dem Rebase (alle ihre
+    Patches stecken im gemergten Stand) geht mit einer Lease auf den SHA, den der Snapshot sah;
+    keine Meldung „kept — it moved since boarding“."""
+    out, bare, local, _old = _locally_rebased(render, tmp_path)
+    train = _load_train(out)
+    rc = _run_in_process(train, out, push=True)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert _git(bare, "show", "main:src/a.py").stdout == "a\n"
+    assert "moved" not in said.out + said.err, said.out + said.err
+    assert ("alpha", "done") in [(w, s) for w, s, _n in _states_of(train, out)]
+    assert "alpha" not in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert not _git(bare, "branch", "--list", "alpha").stdout.strip()
+
+
+def test_a_local_rebase_whose_origin_copy_moves_during_the_run_keeps_it(render, tmp_path, monkeypatch, capsys):
+    """#445 (Review v2.103): origins Kopie bewegt sich nach dem Snapshot über den gesehenen SHA
+    hinaus — sie bleibt, kein `done`, der lokale Branch bleibt, und die Ausgabe sagt es."""
+    out, bare, local, old = _locally_rebased(render, tmp_path)
+    train = _load_train(out)
+    real_plan = train.plan
+    newer: list[str] = []
+
+    def plan(root, **kw):
+        p = real_plan(root, **kw)
+        _git(out, "branch", "-q", "elsewhere", old)
+        newer.append(_move(out, "elsewhere", files={"src/newer.py": "newer\n"}, msg="feat: alpha newer"))
+        _git(out, "push", "-q", "origin", "elsewhere:alpha")
+        _git(out, "branch", "-q", "-D", "elsewhere")
+        return p
+    monkeypatch.setattr(train, "plan", plan)
+    rc = _run_in_process(train, out, push=True)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert "origin's alpha moved during the run — its new commits need their own review and train" \
+        in said.out, said.out + said.err
+    assert "kept — it moved since boarding" not in said.err, said.err
+    assert ("alpha", "done") not in [(w, s) for w, s, _n in _states_of(train, out)]
+    assert _git(out, "rev-parse", "alpha").stdout.strip() == local
+    assert _git(bare, "rev-parse", "alpha").stdout.strip() == newer[0]
+
+
 def test_an_other_hosts_force_pushed_rebase_with_a_stale_local_copy_boards_origin(render, tmp_path,
                                                                                     monkeypatch, capsys):
     """#445 (Review v2.103): ein anderer Host hat rebased und mit Force gepusht, lokal liegt der
