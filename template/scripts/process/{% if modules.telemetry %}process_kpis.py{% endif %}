@@ -2234,7 +2234,7 @@ def _suite_abort_lines(every: list[dict], window: list[dict]) -> list[str]:
 
 
 def _disk_full_line(row: dict) -> str | None:
-    """v2.98 B1: the disk a train halted on (`disk-full <path> <use>%`, its last round's
+    """v2.98 B1: the disk a train halted on (`disk-full <path> <use>% <free> GiB free`, its last round's
     `disk_full`); None for any other train, "unknown" for one without the field."""
     last = _ending(row)
     if last is None or last.get("red_path") != "disk-full":

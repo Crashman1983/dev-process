@@ -5730,3 +5730,194 @@ def test_without_lead_reads_a_swapped_branch_at_origins_ref(render, tmp_path):
     train = _load_train(out)
     assert train._without_lead(out, base, {"alpha": base}) == {"alpha"}
     assert train._without_lead(out, base, {"alpha": "0" * 40}) == set()
+
+
+def test_a_swapped_branch_whose_origin_moves_during_the_run_keeps_its_records(render, tmp_path, monkeypatch,
+                                                                              capsys):
+    """#445 (Review v2.103): ein Branch, der an origins Stand einstieg, und origin bewegt sich
+    während des Laufs — kein `done`, kein `forget_branch`, der lokale Branch bleibt, origin
+    behält die neuen Commits, und die Ausgabe sagt es (früher: `done`, lokaler Branch weg,
+    dann scheiterte erst die Lease auf origin)."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    seen = _git(out, "rev-parse", "alpha").stdout.strip()
+    tip = _origin_moves(out, "alpha", {"src/later.py": "later\n"})
+    train = _load_train(out)
+    real_plan = train.plan
+    newer: list[str] = []
+
+    def plan(root, **kw):
+        p = real_plan(root, **kw)
+        _git(out, "branch", "-q", "elsewhere", tip)
+        newer.append(_move(out, "elsewhere", files={"src/newer.py": "newer\n"}, msg="feat: alpha newer"))
+        _git(out, "push", "-q", "origin", "elsewhere:alpha")  # a worker's push from another host
+        _git(out, "branch", "-q", "-D", "elsewhere")
+        return p
+    monkeypatch.setattr(train, "plan", plan)
+    import dispatch
+    forgot: list[str] = []
+    monkeypatch.setattr(dispatch, "forget_branch", lambda root, b: forgot.append(b))
+    rc = _run_in_process(train, out, push=True)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert _git(bare, "show", "main:src/later.py").stdout == "later\n"
+    assert "origin's alpha moved during the run — its new commits need their own review and train" \
+        in said.out, said.out + said.err
+    assert forgot == []
+    assert ("alpha", "done") not in [(w, s) for w, s, _n in _states_of(train, out)]
+    assert _git(out, "rev-parse", "alpha").stdout.strip() == seen
+    assert _git(bare, "rev-parse", "alpha").stdout.strip() == newer[0]
+
+
+def test_a_swapped_branch_whose_origin_cannot_be_read_after_the_merge_keeps_everything(render, tmp_path,
+                                                                                       monkeypatch, capsys):
+    """#445 (Review v2.103): origins Stand ist nach dem Merge nicht lesbar — unbekannt zählt
+    als bewegt: kein `done`, der lokale Branch bleibt."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    seen = _git(out, "rev-parse", "alpha").stdout.strip()
+    _origin_moves(out, "alpha", {"src/later.py": "later\n"})
+    train = _load_train(out)
+    real_git = train._git
+
+    def git(root, *args, **kw):
+        if args[:1] == ("ls-remote",):
+            return subprocess.CompletedProcess(args, 128, "", "fatal: could not read from remote")
+        return real_git(root, *args, **kw)
+    monkeypatch.setattr(train, "_git", git)
+    rc = _run_in_process(train, out)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert "origin's alpha could not be read after the merge" in said.out, said.out + said.err
+    assert ("alpha", "done") not in [(w, s) for w, s, _n in _states_of(train, out)]
+    assert _git(out, "rev-parse", "alpha").stdout.strip() == seen
+
+
+def _main_moves(out: Path) -> str:
+    (out / "m.txt").write_text("m\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main moves")
+    return _git(out, "rev-parse", "main").stdout.strip()
+
+
+def _rebased_onto_main(out: Path, branch: str, name: str) -> str:
+    """`branch`, rebased auf main, als neuer Branch `name`; gibt dessen SHA."""
+    _git(out, "branch", "-q", name, branch)
+    _git(out, "rebase", "-q", "main", name)
+    _git(out, "checkout", "-q", "main")
+    return _git(out, "rev-parse", name).stdout.strip()
+
+
+def test_a_local_rebase_over_an_older_origin_push_boards_local(render, tmp_path):
+    """#445 (Review v2.103): auf dem Zug-Host lokal rebased, origin hat noch den früheren Push —
+    jeder Commit von origin hat ein gleiches Patch lokal: der lokale Stand fährt, und die
+    Ausgabe sagt warum."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    _main_moves(out)
+    local = _rebased_onto_main(out, "alpha", "rebased")
+    _git(out, "branch", "-q", "-f", "alpha", local)
+    _git(out, "branch", "-q", "-D", "rebased")
+    train = _load_train(out)
+    p = train.plan(out, min_candidates=1, max_wait_hours=0)
+    c = next(c for c in p["candidates"] if c["branch"] == "alpha")
+    assert c["eligible"] and c["sha"] == local == c["seen_sha"], c
+    assert not c.get("diverged"), c
+    text = train.render_plan(p)
+    assert "boards local: local is a rebase of origin's commits" in text, text
+
+
+def test_an_other_hosts_force_pushed_rebase_with_a_stale_local_copy_boards_origin(render, tmp_path,
+                                                                                    monkeypatch, capsys):
+    """#445 (Review v2.103): ein anderer Host hat rebased und mit Force gepusht, lokal liegt der
+    alte Stand — jeder lokale Commit hat ein gleiches Patch auf origin: origins Stand fährt,
+    `done` wird geschrieben, beide Refs gehen."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    seen = _git(out, "rev-parse", "alpha").stdout.strip()
+    _main_moves(out)
+    _git(out, "push", "-q", "origin", "main")
+    theirs = _rebased_onto_main(out, "alpha", "elsewhere")
+    _git(out, "push", "-q", "-f", "origin", "elsewhere:alpha")
+    _git(out, "branch", "-q", "-D", "elsewhere")
+    _git(out, "update-ref", "refs/remotes/origin/alpha", seen)
+    train = _load_train(out)
+    p = train.plan(out, min_candidates=1, max_wait_hours=0)
+    c = next(c for c in p["candidates"] if c["branch"] == "alpha")
+    assert c["eligible"] and c["sha"] == theirs and c["seen_sha"] == seen, c
+    assert "boards origin's tip: origin is a rebase of local's commits" in train.render_plan(p)
+    capsys.readouterr()
+    rc = _run_in_process(train, out, push=True)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert "alpha boards origin's tip: origin is a rebase of local's commits" in said.out, said.out
+    assert ("alpha", "done") in [(w, s) for w, s, _n in _states_of(train, out)]
+    assert "alpha" not in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert not _git(bare, "branch", "--list", "alpha").stdout.strip()
+
+
+def test_a_local_head_the_base_contains_with_new_work_on_origin_boards_origin(render, tmp_path):
+    """#445 (Review v2.103, Befund ~:502): der lokale Kopf ist schon in der Basis, origins Kopie
+    ist ein Rebase davon mit neuer Arbeit — der Branch fällt nicht stumm als „ohne Vorsprung“
+    heraus, sondern fährt an origins Stand."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    _main_moves(out)
+    _rebased_onto_main(out, "alpha", "elsewhere")
+    theirs = _move(out, "elsewhere", files={"src/new.py": "new\n"}, msg="feat: alpha new work")
+    _git(out, "push", "-q", "-f", "origin", "elsewhere:alpha")
+    _git(out, "branch", "-q", "-D", "elsewhere")
+    _git(out, "merge", "-q", "--no-ff", "-m", "merge alpha", "alpha")  # main contains the local head
+    train = _load_train(out)
+    p = train.plan(out, min_candidates=1, max_wait_hours=0)
+    c = next((c for c in p["candidates"] if c["branch"] == "alpha"), None)
+    assert c is not None and c["sha"] == theirs, (c, train.render_plan(p))
+    assert not c.get("diverged"), c
+    assert "origin is a rebase of local's commits" in train.render_plan(p)
+
+
+def test_a_give_up_in_a_worktree_child_with_a_relative_lane_dir_counts(render, tmp_path, monkeypatch):
+    """#448 (Review v2.103): ohne `PROCESS_LANE_DIR` des Zugs (Preboard, eine Konfiguration ohne
+    `full`) löste ein relatives `lane_dir` im Probe-Worktree auf dessen eigenes Verzeichnis auf —
+    ein echtes Aufgeben dort trug ein fremdes `dir=`. Der Zug setzt das Verzeichnis für jeden
+    Suite-Lauf absolut: das Aufgeben im Worktree zählt."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    (out / "docs/process/testing.local.json").write_text(json.dumps({"lane_dir": "lanes-rel"}))
+    _repo(out)
+    wt = tmp_path / "probe"
+    _git(out, "worktree", "add", "-q", "--detach", str(wt), "main")
+    train = _load_train(out)
+    monkeypatch.delenv("PROCESS_LANE_DIR", raising=False)
+    own = (out / "lanes-rel").resolve()
+    holder = subprocess.Popen([sys.executable, str(out / "scripts/process/lane.py"), "run", "--lane", "scoped",
+                               "--label", "holder", "--no-nice", "--", sys.executable, "-c",
+                               "import time; time.sleep(60)"], cwd=out,
+                              env={**os.environ, "PROCESS_LANE_DIR": str(own), "PYTHONDONTWRITEBYTECODE": "1"})
+    try:
+        for _ in range(200):
+            if (own / "test-lane-scoped.status").exists():
+                break
+            time.sleep(0.05)
+        wait = f"{shlex.quote(sys.executable)} scripts/process/lane.py wait --lane scoped --wait 0 --quiet"
+        state, reason = train._marked_sh(out, "x", wt, f"{wait}; exit 1", lambda _l: None,
+                                         None, timeout_state="undefined")
+        assert state == "aborted" and reason.startswith(f"lane-busy scoped dir={_quoted(own)} held by pid "), \
+            (state, reason)
+    finally:
+        holder.kill()
+        holder.wait()

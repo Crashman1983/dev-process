@@ -679,3 +679,15 @@ def test_a_green_memo_that_cannot_be_written_leaves_no_temp_file(render, tmp_pat
     train._remember_green_suite(out, train._suite_key(out, "s"))
     monkeypatch.setattr(_P, "write_text", real)
     assert not list(train._train_dir(out).glob("*.tmp"))
+
+
+def test_a_watch_thread_that_cannot_start_costs_the_watch_never_the_run(render, tmp_path, monkeypatch):
+    """Review v2.103 (Nit): kann der Mess-Thread nicht starten, läuft die Suite trotzdem und
+    wird entschieden wie ohne Messung."""
+    out, train = _suite_tree(render, tmp_path, monkeypatch)
+    _disk(monkeypatch, lambda: False)
+
+    def refuse(self):
+        raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    assert train._marked_sh(out, "x", out, "exit 1", lambda line: None) == ("red", "")
