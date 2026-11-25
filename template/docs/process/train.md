@@ -119,9 +119,15 @@ A local branch boards when it is ahead of the integration branch and
   behind `origin/<branch>` (a worker pushed from another host) boards at
   origin's tip, and `plan` and `run` say "boards origin's tip: local is
   behind"; origin behind the local branch, or no copy on origin, boards the
-  local head. Where neither contains the other, the branch is held — no
-  `blocked`, nobody blamed — and listed among those left behind, with the
-  command for each direction (`git branch -f <b> origin/<b>`, or `git push
+  local head. Where neither contains the other, patch content decides
+  (`git cherry`): every commit of origin's side has an equivalent locally —
+  the local head boards ("boards local: local is a rebase of origin's
+  commits"); else every local commit has one on origin — origin's tip
+  boards ("boards origin's tip: origin is a rebase of local's commits").
+  Only where both sides carry patches of their own is the branch held — no
+  `blocked`, nobody blamed, also when the base already contains its local
+  head — and listed among those left behind, with the command for each
+  direction (`git branch -f <b> origin/<b>`, or `git push
   --force-with-lease origin <b>`). The integration branch is never swapped.
   Every content read (diffs, plans, review coverage, the template-update
   check) and every build of the run use the SHA that merges; a branch's
@@ -133,7 +139,10 @@ A local branch boards when it is ahead of the integration branch and
   `done` and no cleanup. A local branch at its head as boarding saw it, or
   at the SHA that merged (a fast-forward to origin's tip during the run),
   has not moved: it gets `done`, and its local ref is deleted guarded by the
-  value just read. Origin's copy is deleted only with a lease on the merged
+  value just read. A branch that boarded at origin's tip has moved, too,
+  when origin's copy is no longer that tip (`git ls-remote`, unreadable
+  counts as moved): no `done`, its local branch stays, and the train says
+  "origin's <b> moved during the run". Origin's copy is deleted only with a lease on the merged
   SHA, or on an older origin SHA that the merged one contains.
 - **Holds before the push.** The train reads the reports again before it
   pushes. A passenger whose worker reported `blocked` during the run, even

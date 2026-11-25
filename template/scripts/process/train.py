@@ -351,17 +351,31 @@ class Snapshot(NamedTuple):
     """What boarding reads (#391, #445). `tips`: the SHA each local branch merges at;
     `seen`: its local head; `behind`: the branches whose `tips` is origin's tip,
     the local head an ancestor of it; `diverged`: {branch: origin's SHA} where
-    neither contains the other — held."""
+    neither contains the other and both carry patches of their own — held;
+    `rebased`: {branch: note} where one side is a rebase of the other's commits —
+    the side with the rebase boards, the note says which and why."""
     tips: dict[str, str]
     base_sha: str
     seen: dict[str, str]
     behind: set[str]
     diverged: dict[str, str]
+    rebased: dict[str, str]
 
 
 def _is_ancestor(root: Path, older: str, newer: str) -> bool:
     """git said yes; "no" and an unreadable answer are both no."""
     return _git(root, "merge-base", "--is-ancestor", older, newer).returncode == 0
+
+
+def _patches_in(root: Path, upstream: str, head: str) -> bool:
+    """Has every commit of `head` beyond their merge-base an equivalent patch in `upstream`
+    (`git cherry upstream head` lists no `+`)? An unreadable answer is no."""
+    r = _git(root, "cherry", upstream, head)
+    return r.returncode == 0 and not any(line.startswith("+") for line in r.stdout.splitlines())
+
+
+REBASED_LOCAL = "boards local: local is a rebase of origin's commits"
+REBASED_ORIGIN = "boards origin's tip: origin is a rebase of local's commits"
 
 
 def _snapshot(root: Path, base: str, local: str | None = None) -> Snapshot:
@@ -371,8 +385,12 @@ def _snapshot(root: Path, base: str, local: str | None = None) -> Snapshot:
     listing does not name it. A local branch that only lags behind its copy on
     origin merges at origin's tip (#445): a worker pushed from another host, and this
     clone's branch never followed. Origin an ancestor of it, or no copy: the local
-    head as before. Neither contains the other: the branch is held. The integration
-    branch `local` is never swapped (its tip feeds the archive and the base's passes)."""
+    head as before. Neither contains the other: by patch content (`git cherry`) — every
+    commit of origin's side has an equivalent locally, the local head boards (a rebase on
+    this host over an older push); else every local one has one on origin, origin's tip
+    boards (another host's force-pushed rebase, a stale local copy); only where both
+    carry patches of their own is the branch held. The integration branch `local` is
+    never swapped (its tip feeds the archive and the base's passes)."""
     refs = _listed_refs(root, "refs/heads/", "refs/remotes/")
     seen = {name.removeprefix("refs/heads/"): sha for name, sha in refs.items() if name.startswith("refs/heads/")}
     base_sha = (refs.get(f"refs/heads/{base}") or refs.get(f"refs/remotes/{base}")
@@ -380,6 +398,7 @@ def _snapshot(root: Path, base: str, local: str | None = None) -> Snapshot:
     tips = dict(seen)
     behind: set[str] = set()
     diverged: dict[str, str] = {}
+    rebased: dict[str, str] = {}
     for b, head in seen.items():
         theirs = refs.get(f"{ORIGIN_REFS}{b}")
         if not theirs or theirs == head or b == local or b.startswith("train/"):
@@ -387,16 +406,25 @@ def _snapshot(root: Path, base: str, local: str | None = None) -> Snapshot:
         if _is_ancestor(root, head, theirs):
             tips[b] = theirs
             behind.add(b)
-        elif not _is_ancestor(root, theirs, head):
+        elif _is_ancestor(root, theirs, head):
+            continue
+        elif _patches_in(root, head, theirs):
+            rebased[b] = REBASED_LOCAL
+        elif _patches_in(root, theirs, head):
+            tips[b] = theirs
+            rebased[b] = REBASED_ORIGIN
+        else:
             diverged[b] = theirs
-    return Snapshot(tips, base_sha, seen, behind, diverged)
+    return Snapshot(tips, base_sha, seen, behind, diverged, rebased)
 
 
 def _diverged_reason(b: str, theirs: str, head: str) -> str:
-    """Held, not blamed (#445): neither copy contains the other — the train cannot
-    tell which is the work. The command per direction, run on the train's host."""
+    """Held, not blamed (#445): neither copy contains the other, and each carries patches
+    the other lacks — the train cannot tell which is the work. The command per direction,
+    run on the train's host."""
     return (f"local {b} ({head[:12]}) and origin/{b} ({theirs[:12]}) have diverged — neither contains "
-            f"the other, so the train merges neither. On this host: `git branch -f {b} origin/{b}` "
+            f"the other and each carries commits of its own, so the train merges neither. "
+            f"On this host: `git branch -f {b} origin/{b}` "
             f"when origin's is the work, or `git push --force-with-lease origin {b}` when the local one is")
 
 
@@ -498,8 +526,9 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
     if snapshot is not None:
         snapshot.update(base_sha=base_sha, reports_seen=seen)
     branches = [b for b in tips if b and b not in (local,) and not b.startswith("train/")]
-    # already merged (or empty) — residue for tidy.py, not a candidate: read no further
-    merged = _without_lead(root, base_sha, tips)
+    # already merged (or empty) — residue for tidy.py, not a candidate: read no further.
+    # A held diverged branch is no residue (its origin copy may carry new work): it is said
+    merged = _without_lead(root, base_sha, tips) - set(snap.diverged)
     no_lead = len([b for b in branches if b in merged])
     branches = [b for b in branches if b not in merged]
     # the train's own `blocked` (TRAIN_DROP_NOTE) describes a run: it neither holds nor hides
@@ -568,18 +597,20 @@ def candidates(root: Path, local: str, base: str, snapshot: dict | None = None) 
         behind, ahead = (counts.split() + ["0", "0"])[:2] if counts else ("0", "0")
         c: dict = {"branch": b, "sha": tip, "seen_sha": snap.seen.get(b, tip), "ahead": int(ahead),
                    "behind": int(behind), "eligible": False, "reasons": [], "plans": [], "by": None}
-        if int(ahead) == 0:
-            if counts:  # git read it: contained after all (an unreadable listing, a branch moved since the snapshot)
-                no_lead += 1
-            continue  # an unreadable count stays unboarded as before, but is no "merged or empty"
         if b in snap.diverged:
-            # held, read no further (#445): no `blocked`, nobody blamed — the host's two copies disagree
+            # held, read no further (#445): no `blocked`, nobody blamed — the host's two copies
+            # disagree. Before the lead check: a local head the base contains says nothing of
+            # origin's copy
             c["diverged"] = snap.diverged[b]
             c["reasons"].append(_diverged_reason(b, snap.diverged[b], c["seen_sha"]))
             out.append(c)
             continue
-        if b in snap.behind:
-            c["origin_tip"] = True
+        if int(ahead) == 0:
+            if counts:  # git read it: contained after all (an unreadable listing, a branch moved since the snapshot)
+                no_lead += 1
+            continue  # an unreadable count stays unboarded as before, but is no "merged or empty"
+        if b in snap.behind or b in snap.rebased:
+            c["board_note"] = snap.rebased.get(b, BEHIND_NOTE)
         hold, rep = holds.get(b), reports.get(b)
         if _cannot_board(added_by[b], rep):
             # nothing below could board it (#426): say why from what is read, read no further
@@ -1341,7 +1372,9 @@ def _train_lane_dir(root: Path) -> Path | None:
     """The lane directory whose `lane-busy` lines count for the train (`_abort_lines`):
     `PROCESS_LANE_DIR` of the run (`_hold_full` sets it, absolute), else the lane
     configuration of the train's checkout `root` — never the staging worktree's, which a
-    passenger could change — resolved. None when it cannot be read: every line counts."""
+    passenger could change — resolved. None when it cannot be read: every line counts.
+    `_marked_sh` hands it to every suite run as `PROCESS_LANE_DIR`, so a child in a worktree
+    names this directory too."""
     try:
         import lane as _lane  # noqa: PLC0415
         import testing_config  # noqa: PLC0415
@@ -1492,15 +1525,18 @@ class _DiskWatch:
     def __init__(self, paths: tuple[Path, ...]) -> None:
         self.paths = paths
         self.lowest: dict[Path, process_git.DiskUse] = {}
+        # the thread may still write after `stop()`: a `disk_usage` that hangs past the join
+        self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
     def _sample(self) -> None:
         for path in self.paths:
             use = process_git.disk_use(path, fallback=True)
-            seen = self.lowest.get(path)
-            if use.free is not None and (seen is None or seen.free is None or use.free < seen.free):
-                self.lowest[path] = use
+            with self._lock:
+                seen = self.lowest.get(path)
+                if use.free is not None and (seen is None or seen.free is None or use.free < seen.free):
+                    self.lowest[path] = use
 
     def _loop(self) -> None:
         while True:
@@ -1510,8 +1546,14 @@ class _DiskWatch:
                 return
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._loop, name=DISK_WATCH_THREAD, daemon=True)
-        self._thread.start()
+        """A thread that cannot start costs the watch, never the run: the readings before
+        and after it still decide."""
+        thread = threading.Thread(target=self._loop, name=DISK_WATCH_THREAD, daemon=True)
+        try:
+            thread.start()
+        except RuntimeError:
+            return
+        self._thread = thread
 
     def stop(self) -> None:
         self._stop.set()
@@ -1520,7 +1562,9 @@ class _DiskWatch:
 
     def low_line(self) -> str | None:
         """`disk-full …` for the first disk whose lowest sample was under the floor, or None."""
-        for path, use in self.lowest.items():
+        with self._lock:
+            lowest = dict(self.lowest)
+        for path, use in lowest.items():
             if use.low_free:
                 return process_git.disk_full_line(path, use.use_pct, use.free)
         return None
@@ -1542,11 +1586,17 @@ def _marked_sh(root: Path, stamp: str, cwd: Path, cmd: str, log, *args, **kw) ->
     watch = _DiskWatch(_disk_paths(cwd))
     path = _abort_marker(root, stamp)
     lines: tuple[str, ...] = ()
+    # the train's lane directory, absolute, for every suite run (the preboard too, and a
+    # configuration without `full`): a relative `lane_dir` would resolve per worktree, and a
+    # real give-up in a probe would name a foreign `dir=` (`_abort_lines`)
+    lane_dir = _train_lane_dir(root)
+    if lane_dir is not None:
+        import lane as _lane  # noqa: PLC0415 — `_train_lane_dir` imported it already
+        kw["env"] = {**(kw.get("env") or {}), _lane.DIR_ENV: str(lane_dir)}
     if path is None:
         log(f"abort marker not made in {TRAIN_DIR}/{ABORT_DIR} — `{cmd}` runs without {SUITE_ABORT_ENV}")
         state = _sh(cwd, cmd, log, *args, disk_watch=watch, **kw)
     else:
-        lane_dir = _train_lane_dir(root)
         try:
             state = _sh(cwd, cmd, log, *args, abort=path, abort_lane_dir=lane_dir, disk_watch=watch, **kw)
             lines = _abort_lines(path, lane_dir) if state == "aborted" else ()
@@ -1600,9 +1650,9 @@ def _sh(cwd: Path, cmd: str, log, timeout: float | None = None, *, timeout_state
     child = {**{k: v for k, v in os.environ.items() if k != SUITE_ABORT_ENV}, **(env or {})}
     if abort is not None:
         child[SUITE_ABORT_ENV] = str(abort)
-    if disk_watch is not None:
-        disk_watch.start()
     try:
+        if disk_watch is not None:
+            disk_watch.start()
         proc = subprocess.Popen(["sh", "-c", cmd], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, errors="replace", env=git_environment(child),
                                 start_new_session=timeout is not None)
@@ -3273,12 +3323,23 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
     # commits are unreviewed and unmerged — it stays, with its records and worktree.
     # A local branch at its boarded head or at the SHA that merged has not moved (#445:
     # a fast-forward to origin's tip during the run is none); `at` keeps the value read,
-    # the one the local delete is guarded by
+    # the one the local delete is guarded by. A branch that boarded at origin's tip has moved
+    # too when origin's copy is no longer that tip (`_origin_moved`)
     at: dict[str, str] = {}
+    # a branch that boarded at origin's tip (`shas` is not its local head) whose copy on
+    # origin is no longer `shas`: its note — its new commits are on origin only
+    origin_moved: dict[str, str] = {}
 
     def moved_since(b: str) -> bool:
         at[b] = _out(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{b}")
-        return at[b] not in (seen_heads.get(b, shas[b]), shas[b])
+        if at[b] not in (seen_heads.get(b, shas[b]), shas[b]):
+            return True
+        if seen_heads.get(b, shas[b]) == shas[b]:
+            return False
+        said = _origin_moved(root, b, shas[b])
+        if said:
+            origin_moved[b] = said
+        return said is not None
 
     moved = {b: shas[b] for b in aboard if b in shas and moved_since(b)}
     try:
@@ -3308,8 +3369,8 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
         if b in moved:
             # no `done`, no forget: its worker is still at it, and its issues with it.
             # Known rest: a `Closes #N` of the boarded commits closes N all the same
-            said = (f"{b} moved since boarding — merged at {moved[b][:12]}; its new commits need their own "
-                    "review and train")
+            said = origin_moved.get(b) or (f"{b} moved since boarding — merged at {moved[b][:12]}; its new "
+                                           "commits need their own review and train")
             print(f"train: {said}")
             log(said)
             continue
@@ -3349,6 +3410,25 @@ def _run_batch(root: Path, local: str, p: dict, aboard: list[str], stamp: str, l
             print("train: deploy failed — the merge stands, the deploy does not; see " + str(logfile), file=sys.stderr)
             return 1
     return 0
+
+
+def _origin_moved(root: Path, b: str, sha: str) -> str | None:
+    """After the merge, for a branch that boarded at origin's tip (#445): None while origin's
+    `b` is still `sha`, else the note — it moved, is gone, or cannot be read (unknown counts
+    as moved: `done`, the forget and the local delete would strand what a worker pushed
+    during the run). `ls-remote` through `_git`: no prompt, bounded like the fetch."""
+    r = _git(root, "ls-remote", "origin", f"refs/heads/{b}")
+    if r.returncode != 0:
+        why = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else f"exit {r.returncode}"
+        return (f"origin's {b} could not be read after the merge ({why}) — merged at {sha[:12]}; "
+                "kept with its records and its local branch: if it moved, its new commits need their own "
+                "review and train")
+    theirs = next((line.split()[0] for line in r.stdout.splitlines()
+                   if line.split()[1:] == [f"refs/heads/{b}"]), None)
+    if theirs == sha:
+        return None
+    return (f"origin's {b} moved during the run — its new commits need their own review and train "
+            f"(merged at {sha[:12]}, origin now {theirs[:12] if theirs else 'without it'})")
 
 
 def _delete_branch(root: Path, b: str, sha: str | None, *, push: bool, log,
@@ -3435,10 +3515,18 @@ def conflict_hints(root: Path, cands: list[dict]) -> list[dict]:
     return hints
 
 
+def _board_note(c: dict) -> str:
+    """Which copy boards and why (#445): `board_note`, with the SHAs where origin's tip boards."""
+    if c["sha"] == c["seen_sha"]:
+        return c["board_note"]
+    return f"{c['board_note']} ({c['seen_sha'][:12]} → {c['sha'][:12]})"
+
+
 def _origin_tip_lines(p: dict) -> list[str]:
-    """The passengers aboard at origin's tip (#445), as `run` says them before the first build."""
-    return [f"train: {c['branch']} {BEHIND_NOTE} ({c['seen_sha'][:12]} → {c['sha'][:12]})"
-            for c in p["candidates"] if c["eligible"] and c.get("origin_tip")]
+    """The passengers whose local and origin copies differ (#445) — aboard at origin's tip,
+    or at a local rebase of it — as `run` says them before the first build."""
+    return [f"train: {c['branch']} {_board_note(c)}"
+            for c in p["candidates"] if c["eligible"] and c.get("board_note")]
 
 
 def _candidate_lines(c: dict) -> list[str]:
@@ -3448,8 +3536,8 @@ def _candidate_lines(c: dict) -> list[str]:
     reasons = [f"      - {r}" for r in c["reasons"]]
     if c.get("diverged"):
         return [f"  · {c['branch']} (+{c['ahead']}/-{c['behind']}, held: local and origin diverged)"] + reasons
-    if c.get("origin_tip"):
-        reasons.insert(0, f"      - {BEHIND_NOTE} ({c['seen_sha'][:12]} → {c['sha'][:12]})")
+    if c.get("board_note"):
+        reasons.insert(0, f"      - {_board_note(c)}")
     if c.get("skipped"):
         return [f"  · {c['branch']} (+{c['ahead']}/-{c['behind']}, not read further: it cannot board)"] + reasons
     mark = "✓" if c["eligible"] else "·"
