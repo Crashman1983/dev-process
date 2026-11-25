@@ -10,6 +10,48 @@ A few plain sentences per release: [NEWS.md](NEWS.md). Deutsche Fassung:
 [CHANGELOG-DE.md](CHANGELOG-DE.md). Releases before v2.28.2:
 [docs/changelog-archive.md](docs/changelog-archive.md).
 
+## v2.103.0 — The train merges what is on origin; a full disk warns before it halts; a fold carries no work · 2026-11-25
+
+**Why.** Kenni's train lost runs on 24 and 25 November to four defects in the train and the review gate (#445–#448):
+- a local branch behind origin was reported as a merge conflict, and its worker was blamed;
+- the 90 % disk limit halted the train three times;
+- folding old journal shards made the review gate red for work long merged;
+- a test that tried several lanes and caught a busy one turned every red run, the red base included, into an abort.
+
+**What changes.**
+- [required] **The train fetches the branches and merges origin's tip when the local branch is only behind it** (#445).
+  - It fetches the branches from origin before the plan (`--prune`, explicit refspec).
+  - A branch whose local head is an ancestor of `origin/<branch>` boards origin's tip, and the train says so.
+  - A diverged branch is held without blame; the message gives the command for each direction.
+  - Deleting and `done` work with the tip seen and the tip merged.
+  - A failed fetch is named.
+- [required] **The disk limit warns; only less than 2 GiB free halts** (#446).
+  - At `PROCESS_DISK_LIMIT_PCT` (default 90) the train and `dispatch` warn once per disk and run.
+  - Below `PROCESS_DISK_FLOOR_GB` (default 2) they halt as `disk-full`.
+  - While a suite runs, the train samples free space. A red or undefined run whose lowest reading fell below the floor is an abort, and nobody is blamed.
+  - `DiskUse.full` is replaced by `over_pct` and `low_free`.
+- [required] **A deleted journal shard carries no work into a push** (#447). The review gate counts only the `journal/issue-<W>/` shards the pushed tip still holds. A `compact_journal` fold or a prune no longer surfaces a block that already stands on main.
+- [required] **Only a real give-up writes a `lane-busy` abort** (#448).
+  - `lane.hold` no longer writes the abort line. `lane.give_up` does, called by `lane.py run` and `wait`, by `test_select` and by `finish` when they give up.
+  - The line carries `dir=<lane directory>`. The train counts only its own lane directory and lines without `dir=`.
+  - A relative `lane_dir` is anchored at the project root.
+- [recommended] **A project's test harness removes `PROCESS_SUITE_ABORT`** and the other run variables from its tests' environment (`testing.md`). A library caller that stops after `LaneBusy` calls `lane.give_up`.
+
+**Effect.**
+- A stale local branch, a full-but-usable disk, a journal fold or a test probing lanes no longer costs a train run or blames a worker.
+
+**Changed sections.**
+- `testing.md` (Unmeasurable is not red)
+- `tower.md` (Dispatch and the model policy)
+- `train.md` (Boarding — computed, never claimed; The run; Red, undefined, aborted)
+
+**Update.**
+- Pure update. New variable `PROCESS_DISK_FLOOR_GB` (default 2).
+- A script that read `DiskUse.full` reads `low_free` (the halt) or `over_pct` (the warning).
+- A project test harness that passes `PROCESS_SUITE_ABORT` to its tests should remove it.
+
+Details: [Plan](docs/analysis/2026-11-25-v2.103.md) #445 #446 #447 #448
+
 ## v2.102.0 — One reader for Markdown headings; a release run that spares the disk · 2026-11-23
 
 **Why.**
