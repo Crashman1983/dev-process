@@ -4214,8 +4214,8 @@ def test_a_branch_moved_after_the_snapshot_takes_the_normal_way(render, tmp_path
     train = _load_train(out)
     real = train._snapshot
 
-    def snapshot_then_move(root, base):
-        taken = real(root, base)
+    def snapshot_then_move(root, base, *rest):
+        taken = real(root, base, *rest)
         _git(out, "update-ref", "refs/heads/alpha", "main~1")  # now merged, after the snapshot
         return taken
 
@@ -5406,3 +5406,165 @@ def test_train_phases_counts_disk_full_apart_and_shows_its_series(render, tmp_pa
             "2 suite aborted, nobody blamed, 4 halted on a full disk (disk-full), nobody blamed") in out, out
     assert 'suite aborted on "disk-full /tmp 99%" — 2 trains in a row (not the latest train)' in out, out
     assert 'halted on "disk-full /srv 95%" — 2 trains in a row' in out, out
+
+
+# --- v2.103 P1 (#445): the train merges origin's tip where the local branch only lags -----
+
+def _with_origin(out: Path, tmp: Path) -> Path:
+    """Ein origin als Bare-Repo, `main` darauf verfolgt."""
+    bare = tmp / "origin.git"
+    _git(out, "clone", "-q", "--bare", str(out), str(bare))
+    _git(out, "remote", "add", "origin", str(bare))
+    _git(out, "fetch", "-q", "origin")
+    _git(out, "branch", "-q", "--set-upstream-to=origin/main", "main")
+    return bare
+
+
+def _origin_moves(out: Path, branch: str, files: dict[str, str]) -> str:
+    """Ein Commit, der nur auf origin landet (ein Worker auf einem anderen Host); der lokale
+    Branch und die Tracking-Ref bleiben, wo sie waren — erst der Fetch des Zugs holt ihn.
+    Gibt den SHA auf origin."""
+    tmp = f"elsewhere-{branch}"
+    _git(out, "branch", "-q", tmp, branch)
+    sha = _move(out, tmp, files=files, msg=f"feat: {branch} elsewhere")
+    _git(out, "push", "-q", "origin", f"{tmp}:{branch}")
+    _git(out, "branch", "-q", "-D", tmp)
+    _git(out, "update-ref", f"refs/remotes/origin/{branch}", _git(out, "rev-parse", branch).stdout.strip())
+    return sha
+
+
+def test_a_local_branch_behind_origin_boards_origins_tip_and_both_refs_go(render, tmp_path, monkeypatch, capsys):
+    """#445 AC-1: der lokale Branch hinkt origin hinterher — gemergt wird der Stand von origin,
+    die Ausgabe sagt es, `done` wird geschrieben, und mit `--push` sind beide Refs weg (früher
+    fuhr der alte lokale Stand, oder er las sich als „merge conflict“ mit `blocked`)."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    seen = _git(out, "rev-parse", "alpha").stdout.strip()
+    tip = _origin_moves(out, "alpha", {"src/later.py": "later\n"})
+    train = _load_train(out)
+    p = train.plan(out, min_candidates=1, max_wait_hours=0)
+    c = next(c for c in p["candidates"] if c["branch"] == "alpha")
+    assert c["eligible"] and c["sha"] == tip and c["seen_sha"] == seen, c
+    assert "boards origin's tip: local is behind" in train.render_plan(p)
+    capsys.readouterr()
+    rc = _run_in_process(train, out, push=True)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert "alpha boards origin's tip: local is behind" in said.out, said.out
+    assert _git(bare, "show", "main:src/later.py").stdout == "later\n"
+    assert ("alpha", "done") in [(w, s) for w, s, _n in _states_of(train, out)]
+    assert "alpha" not in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert not _git(bare, "branch", "--list", "alpha").stdout.strip()
+    assert "moved since boarding" not in said.out + said.err
+
+
+@pytest.mark.parametrize("origin_copy", ["behind", "none"])
+def test_a_local_branch_ahead_of_origin_or_without_a_copy_boards_its_local_tip(render, tmp_path, origin_copy):
+    """#445 AC-1: origin ist Vorfahr des lokalen Stands, oder origin hat keinen — der lokale
+    Stand fährt wie bisher."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    if origin_copy == "behind":
+        _git(out, "push", "-q", "origin", "alpha")
+    local = _move(out, "alpha", files={"src/local.py": "local\n"})
+    train = _load_train(out)
+    p = train.plan(out, min_candidates=1, max_wait_hours=0)
+    c = next(c for c in p["candidates"] if c["branch"] == "alpha")
+    assert c["eligible"] and c["sha"] == local == c["seen_sha"], c
+    assert "origin's tip" not in train.render_plan(p)
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (out / "src/local.py").read_text() == "local\n"
+
+
+def test_diverged_local_and_origin_are_held_with_a_command_per_direction(render, tmp_path):
+    """#445 AC-1: lokal und origin sind auseinandergelaufen — der Passagier wird gehalten, ohne
+    `blocked` mit Schuld, mit dem Befehl je Richtung, und steht in `left_behind`."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    _origin_moves(out, "alpha", {"src/there.py": "there\n"})
+    _move(out, "alpha", files={"src/here.py": "here\n"})
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 0 and "nothing to do" in r.stdout, r.stdout + r.stderr
+    for said in (r.stdout, (out / ".git/process-train/last-hold.txt").read_text()):
+        assert "alpha" in said and "diverged" in said, said
+        assert "git branch -f alpha origin/alpha" in said and "git push --force-with-lease origin alpha" in said
+    train = _load_train(out)
+    assert "alpha" not in [w for w, s, _n in _states_of(train, out) if s == "blocked"]
+    assert "merge conflict" not in r.stdout
+    assert not (out / "src/here.py").exists() and not (out / "src/there.py").exists()
+
+
+def test_a_failed_branch_fetch_is_a_note_and_the_conflict_report_names_it(render, tmp_path):
+    """#445 AC-1/AC-3: der Fetch scheitert — die Ausgabe sagt es, der Snapshot nimmt die
+    vorhandenen Tracking-Refs, und der Konfliktbericht nennt den gescheiterten Fetch."""
+    out = render(tmp_path, {"project_name": "d", "modules": {}})
+    _repo(out)
+    _git(out, "remote", "add", "origin", str(tmp_path / "gone.git"))
+    _branch(out, "beta", {"shared.txt": "beta\n"})
+    (out / "shared.txt").write_text("main moved\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main: shared")
+    p = _train(out, "plan")
+    assert p.returncode == 0 and "could not fetch the branches from origin" in p.stderr, p.stdout + p.stderr
+    r = _train(out, "run", "--force", "--suite", "true")
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "could not fetch the branches from origin" in r.stderr
+    line = next(ln for ln in r.stdout.splitlines() if "merge conflict with the batch" in ln)
+    assert "beta" in line and "fetch" in line, line
+
+
+def test_a_local_fast_forward_to_origin_during_the_run_is_no_move(render, tmp_path, monkeypatch, capsys):
+    """#445 (r2 N2, r3 P1-1): zieht der Worker seinen lokalen Branch während des Laufs auf den
+    Stand von origin vor, ist das keine Bewegung — `done`, `forget_branch` und beide Refs weg."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    bare = _with_origin(out, tmp_path)
+    _branch(out, "alpha", {"src/a.py": "a\n"})
+    _git(out, "push", "-q", "origin", "alpha")
+    tip = _origin_moves(out, "alpha", {"src/later.py": "later\n"})
+    train = _load_train(out)
+    real_plan = train.plan
+
+    def plan(root, **kw):
+        p = real_plan(root, **kw)
+        _git(out, "branch", "-q", "-f", "alpha", tip)  # `git pull` in the worker's checkout
+        return p
+    monkeypatch.setattr(train, "plan", plan)
+    import dispatch
+    forgot: list[str] = []
+    monkeypatch.setattr(dispatch, "forget_branch", lambda root, b: forgot.append(b))
+    rc = _run_in_process(train, out, push=True)
+    said = capsys.readouterr()
+    assert rc == 0, said.out + said.err
+    assert "moved since boarding" not in said.out + said.err
+    assert forgot == ["alpha"]
+    assert ("alpha", "done") in [(w, s) for w, s, _n in _states_of(train, out)]
+    assert "alpha" not in _git(out, "branch", "--list", "--format=%(refname:short)").stdout.split()
+    assert not _git(bare, "branch", "--list", "alpha").stdout.strip()
+
+
+def test_without_lead_reads_a_swapped_branch_at_origins_ref(render, tmp_path):
+    """#445 (r3 P1-2): der #398-Schnellweg erkennt einen Branch, dessen Stand von origin kommt,
+    über `refs/remotes/origin/<b>`."""
+    out = render(tmp_path / "repo", {"project_name": "d", "modules": {}})
+    _repo(out)
+    _with_origin(out, tmp_path)
+    old = _git(out, "rev-parse", "main").stdout.strip()
+    (out / "m.txt").write_text("m\n")
+    _git(out, "add", "-A")
+    _git(out, "commit", "-q", "-m", "main moves")
+    base = _git(out, "rev-parse", "main").stdout.strip()
+    _git(out, "branch", "-q", "alpha", old)
+    _git(out, "update-ref", "refs/remotes/origin/alpha", base)
+    train = _load_train(out)
+    assert train._without_lead(out, base, {"alpha": base}) == {"alpha"}
+    assert train._without_lead(out, base, {"alpha": "0" * 40}) == set()

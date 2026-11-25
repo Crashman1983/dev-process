@@ -110,17 +110,31 @@ A local branch boards when it is ahead of the integration branch and
   boards on the reports this clone has;
 
 **What boarding read stays what the train merges (#391, #335).**
-- **One snapshot.** Boarding takes a snapshot of every branch's SHA and
-  the base's in one `for-each-ref`. Every content read (diffs, plans, review
-  coverage, the template-update check) and every build of the run use that
-  snapshot; a branch's identity (its issues, its work ids) is still read by
-  name.
+- **One snapshot.** Before it, the train fetches every branch of origin into
+  its tracking ref (`git fetch --prune origin
+  "+refs/heads/*:refs/remotes/origin/*"`), best effort: a failed fetch is a
+  note, the snapshot reads the tracking refs the clone has, and a conflict
+  report names the failed fetch. Boarding takes a snapshot of every branch's
+  SHA and the base's in one `for-each-ref`. A local branch that only lags
+  behind `origin/<branch>` (a worker pushed from another host) boards at
+  origin's tip, and `plan` and `run` say "boards origin's tip: local is
+  behind"; origin behind the local branch, or no copy on origin, boards the
+  local head. Where neither contains the other, the branch is held — no
+  `blocked`, nobody blamed — and listed among those left behind, with the
+  command for each direction (`git branch -f <b> origin/<b>`, or `git push
+  --force-with-lease origin <b>`). The integration branch is never swapped.
+  Every content read (diffs, plans, review coverage, the template-update
+  check) and every build of the run use the SHA that merges; a branch's
+  identity (its issues, its work ids) is still read by name.
 - **New commits.** A commit that arrives during the run rides a later
   train. Probes and the rebuild after a drop see exactly the trees the red
   run saw.
 - **After the merge.** A branch that moved since boarding is kept, with no
-  `done` and no cleanup. Origin's copy is deleted only with a lease on the
-  boarded SHA, or on an older origin SHA that the boarded one contains.
+  `done` and no cleanup. A local branch at its head as boarding saw it, or
+  at the SHA that merged (a fast-forward to origin's tip during the run),
+  has not moved: it gets `done`, and its local ref is deleted guarded by the
+  value just read. Origin's copy is deleted only with a lease on the merged
+  SHA, or on an older origin SHA that the merged one contains.
 - **Holds before the push.** The train reads the reports again before it
   pushes. A passenger whose worker reported `blocked` during the run, even
   if a release followed, leaves the batch, together with any passenger
