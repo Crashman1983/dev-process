@@ -634,3 +634,38 @@ def test_a_pass_whose_base_is_not_the_fork_point_clears_no_block(tmp_path, off_f
            + f" base={base} head={head} diff={'0' * 64}\n")
     _commit(root, "docs: attest round 2")
     assert _blocked(mod.standing_block_findings(root), "2168") is off_fork
+
+
+def _compact():
+    spec = importlib.util.spec_from_file_location(
+        "compact_journal_r0", _SCRIPT.parent / "compact_journal.py")
+    module = importlib.util.module_from_spec(spec)
+    before = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = before
+    return module
+
+
+@pytest.mark.parametrize("how", ["fold", "rm"])
+def test_folding_an_issue_folder_carries_no_block_main_already_holds(tmp_path, how):
+    # downstream 2099: round 4 holds a block and two passes (equal round: the block
+    # stands on main already); a tidy fold that moves every line verbatim into the
+    # archive must not turn into a push that carries work 2099
+    root = _repo(tmp_path)
+    _write(root, ".process-work/journal/issue-42/2026-09-26.md",
+           "".join(f"reasoning line {i}\n" for i in range(40))  # prose: no rename pairing
+           + _line("42", "block", 4) + "\n" + _line("42", "pass", 4) + "\n")
+    remote_sha = _on_main(root, "docs: history")
+    _git(root, "checkout", "-q", "-b", "tidy")
+    if how == "fold":
+        _compact().compact(root, weeks=1, apply=True)
+        assert (root / ".process-work/journal/archive/2026-09.md").is_file()
+    else:
+        _git(root, "rm", "-rq", ".process-work/journal/issue-42")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "chore: fold old journal")
+    tip = _git(root, "rev-parse", "HEAD")
+    assert mod.standing_block_findings(root, tip, remote_sha=remote_sha) == []

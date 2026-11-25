@@ -1845,7 +1845,11 @@ def pushed_work_ids(root: Path, records: list[dict], in_flight: set[str] | None,
     carried = {str(number) for number in issue_refs_in_range(root, tip, base=base, strict=strict)}
     if base is None:
         return carried
-    for rel in sorted(in_flight or ()):
+    # only a shard the tip still holds travels with the work: a deletion (a
+    # compact_journal fold, a prune) carries no record, and the blocks it held
+    # stand through `range_records` anyway
+    at_tip = {rel for rel, _sha in _journal_blobs(root, tip, strict=strict)}
+    for rel in sorted((in_flight or set()) & at_tip):
         folder = _ISSUE_SHARD.match(rel) if record_kind(rel) == "journal" else None
         if folder:
             carried.add(folder.group(1))

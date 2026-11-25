@@ -538,8 +538,8 @@ is repeated after the load falls; it never blames a passenger by itself.
 Nested runs, and tests that provoke an abort on purpose, run without that
 variable: **a project's test harness removes `PROCESS_SUITE_ABORT`, and the
 run's other variables its tests must not inherit (`PROCESS_WORKER`,
-`PROCESS_TRACK`, …), from its tests' environment**, as the template's own
-`tests/conftest.py` does with `monkeypatch.delenv` in an autouse fixture,
+`PROCESS_TRACK`, …), from its tests' environment**, for example with an autouse
+fixture that calls `monkeypatch.delenv` for each (the template's own suite does so),
 and gives them a lane directory of their own (`PROCESS_LANE_DIR`); a test
 about the marker sets it itself.
 
