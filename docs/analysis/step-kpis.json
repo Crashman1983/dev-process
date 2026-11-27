@@ -1,0 +1,1019 @@
+{
+  "version": 1,
+  "as_of": "2026-11-01",
+  "reference_project": "kenni (Prozess v2.80.1, Stand 2026-11-01)",
+  "legend": {
+    "dimension": {
+      "quality": "Fehlerfreiheit: wie oft etwas falsch, nachgearbeitet oder entwischt ist",
+      "speed": "Geschwindigkeit: Dauer bis zu einem Ergebnis, mit Start- und Endzeitpunkt",
+      "cost": "Aufwand: Tokens, Sekunden, Sitzungen, Owner-Minuten",
+      "guard": "Gegenkontrolle: misst, ob eine Optimierung Qualität auf Kosten von Tempo oder Kosten verschlechtert"
+    },
+    "status": {
+      "measured": "Der Code schreibt den Wert direkt in einen Datensatz (Zeitstempel, Zähler, Zeile).",
+      "estimated": "Der Wert wird aus Zeitstempeln oder Zeilen abgeleitet, aber nicht direkt erfasst.",
+      "proxy": "Stellvertreter, z. B. aus Git-Betreffzeilen oder Trailern; kein direkter Nachweis.",
+      "missing": "Der Prozess erfasst den Wert nicht. Die Lücke steht in `gap`."
+    },
+    "kenni_data": {
+      "vorhanden": "In kenni liegen Datensätze dieser Art vor (Zählung in der Analyse).",
+      "fehlt": "In kenni liegt kein Datensatz dieser Art; der Wert ist dort nicht berechenbar.",
+      "ungeprüft": "Nicht nachgesehen."
+    },
+    "direction": "lower = weniger ist besser; higher = mehr ist besser; none = nur zusammen mit einer Gegen-KPI lesbar"
+  },
+  "steps": [
+    {
+      "id": "S1",
+      "name": "Tier-Routing",
+      "owner": "docs/process/risk-tiers.md",
+      "record": "keiner (manuelle Entscheidung)",
+      "kpis": [
+        {
+          "id": "S1.q1",
+          "dimension": "quality",
+          "name": "Tier-Korrekturquote",
+          "definition": "Anteil der Arbeiten, deren Tier nach dem Routing angehoben wurde (Review- oder Refute-Zeile mit höherem Tier, oder Zwischenfall bei niedrigem Tier).",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "ungeprüft",
+          "source": "keine",
+          "gap": "Das Tier wird als Text im Plan oder Issue notiert, nicht als Feld; eine Anhebung wird nirgends festgehalten.",
+          "instrument": null,
+          "priority": 2
+        },
+        {
+          "id": "S1.s1",
+          "dimension": "speed",
+          "name": "Routing-Dauer",
+          "definition": "Zeit von der Anfrage bis zur Tier-Entscheidung.",
+          "unit": "min",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Kein Startereignis, keine Entscheidungsmarke.",
+          "instrument": null,
+          "priority": 3
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "name": "Spezifikation und Klärung",
+      "owner": "scripts/process/check_clarification.py",
+      "record": "specs/<feature>/spec.md; Gate-Ereignis gate=clarification",
+      "kpis": [
+        {
+          "id": "S2.q1",
+          "dimension": "quality",
+          "name": "Klärungsblocks je Spec",
+          "definition": "Anzahl der Blocks des Klärungs-Gates, bevor eine Spec in den Plan geht.",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "process-gate-events.jsonl (gate=clarification)",
+          "gap": "Kein Gate-Ereignis-Log in kenni (Hooks liefen dort nicht).",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S2.s1",
+          "dimension": "speed",
+          "name": "Spec-Dauer",
+          "definition": "Zeit von Spec-Beginn bis zur bestandenen Klärung.",
+          "unit": "min",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Kein Start- und Endereignis für die Spec-Phase.",
+          "instrument": null,
+          "priority": 3
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "name": "Plan schreiben",
+      "owner": "scripts/process/check_plan_structure.py",
+      "record": ".process-work/plans/*.md; Gate-Ereignisse plan-structure, plan-drift",
+      "kpis": [
+        {
+          "id": "S3.q1",
+          "dimension": "quality",
+          "name": "Strukturfehler je Plan",
+          "definition": "Blocks des Plan-Struktur-Gates je Plan.",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "process-gate-events.jsonl (gate=plan-structure)",
+          "gap": "Kein Gate-Ereignis-Log in kenni.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S3.q2",
+          "dimension": "quality",
+          "name": "Planveraltung beim Start",
+          "definition": "Anteil der Umsetzungsstarts, bei denen der Plan zu viele Commits hinter dem Integrationsstand liegt und Dateien betrifft, die er nennt (warn oder block).",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "process-gate-events.jsonl (gate=plan-drift); Modus shadow",
+          "gap": "Kein Gate-Ereignis-Log in kenni; Modus shadow, Grenzwerte noch nicht kalibriert.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S3.s1",
+          "dimension": "speed",
+          "name": "Planungsdauer",
+          "definition": "Zeit von Planbeginn bis zum bestandenen Plan-Review.",
+          "unit": "min",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Planbeginn wird nicht als Ereignis festgehalten; nur der Review-Zeitpunkt ist bekannt.",
+          "instrument": "scripts/process/attest.py",
+          "priority": 2
+        }
+      ]
+    },
+    {
+      "id": "S4",
+      "name": "Plan-Review",
+      "owner": "scripts/process/attest.py",
+      "record": "REVIEW work=<id>-plan in .process-work/journal/",
+      "kpis": [
+        {
+          "id": "S4.q1",
+          "dimension": "quality",
+          "name": "Blockrate Plan-Review",
+          "definition": "Blockierte Plan-Reviews geteilt durch alle Plan-Reviews.",
+          "unit": "Anteil",
+          "direction": "none",
+          "status": "measured",
+          "kenni_data": "vorhanden",
+          "source": "REVIEW-Zeilen im Journal",
+          "gap": null,
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S4.s1",
+          "dimension": "speed",
+          "name": "Plan-Review-Runden bis Pass",
+          "definition": "Anzahl der Plan-Review-Zeilen je Plan, bis zum ersten bestandenen Review.",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "vorhanden",
+          "source": "REVIEW-Zeilen im Journal",
+          "gap": null,
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S4.c1",
+          "dimension": "cost",
+          "name": "Tokens je Plan-Review",
+          "definition": "Ausgabe-Tokens der Sitzung, die den Plan-Review ausgeführt hat.",
+          "unit": "Tokens",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Der Report einer Review-Sitzung enthält keine usage-Angabe; nur manuell per --usage.",
+          "instrument": "scripts/process/report.py",
+          "priority": 1
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "name": "Refute",
+      "owner": "scripts/process/refute_line.py",
+      "record": "REFUTE-Zeile im Plan und Journal",
+      "kpis": [
+        {
+          "id": "S5.q1",
+          "dimension": "quality",
+          "name": "Refute-Befunde, die den Plan änderten",
+          "definition": "Anteil der Refute-Befunde, die zu einer Planänderung führten.",
+          "unit": "Anteil",
+          "direction": "higher",
+          "status": "proxy",
+          "kenni_data": "vorhanden",
+          "source": "REFUTE-Zeilen; Zuordnung Befund zu Planänderung von Hand",
+          "gap": "Keine maschinelle Verknüpfung zwischen Befund und Planänderung.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S5.c1",
+          "dimension": "cost",
+          "name": "Refute-Runden je Plan",
+          "definition": "Anzahl der REFUTE-Zeilen je Plan.",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "vorhanden",
+          "source": "REFUTE-Zeilen im Journal",
+          "gap": null,
+          "instrument": null,
+          "priority": null
+        }
+      ]
+    },
+    {
+      "id": "S6",
+      "name": "Dispatch der Phasen-Sitzungen",
+      "owner": "scripts/process/dispatch.py",
+      "record": "process-dispatch/<branch>.json; phases/<issue>.json; Sitzungsprotokolle",
+      "kpis": [
+        {
+          "id": "S6.s1",
+          "dimension": "speed",
+          "name": "Phasendauer",
+          "definition": "Zeit von Phasenstart (Zeitstempel im Logdateinamen) bis zum Endbericht der Phase.",
+          "unit": "s",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "Logdateiname (Start) und Worker-Report mit Endzustand (Ende); Sekundengenauigkeit",
+          "gap": "Kein process-dispatch-Verzeichnis in kenni; Start und Ende werden erst beim Abgleich verbunden.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S6.s2",
+          "dimension": "speed",
+          "name": "Queue-Wartezeit",
+          "definition": "Zeit von der Einreihung einer Phase bis zu ihrem Start.",
+          "unit": "s",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Keine Einreihungszeit.",
+          "instrument": "scripts/process/dispatch.py",
+          "priority": 3
+        },
+        {
+          "id": "S6.c1",
+          "dimension": "cost",
+          "name": "Tokens je Phase",
+          "definition": "Ausgabe-Tokens je Phasen-Sitzung, Cache-Anteile getrennt.",
+          "unit": "Tokens",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Die Report-Aufrufe im Dispatch übergeben keine usage-Angabe (dispatch.py:2079, :2356). Der Leser für Transkripte existiert, bekommt aber kein transcripts-Verzeichnis.",
+          "instrument": "scripts/process/report.py",
+          "priority": 1
+        },
+        {
+          "id": "S6.q1",
+          "dimension": "quality",
+          "name": "Modell außerhalb der Policy",
+          "definition": "Anteil der Phasen, deren Modell unbekannt ist oder von der Modellpolicy abweicht.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "proxy",
+          "kenni_data": "fehlt",
+          "source": "Report-Feld model; Fallback UNMEASURED",
+          "gap": "Fehlt ein Modellwert, erscheint nur UNMEASURED; eine Abweichung von der Policy wird nicht geprüft.",
+          "instrument": null,
+          "priority": null
+        }
+      ]
+    },
+    {
+      "id": "S7",
+      "name": "Umsetzung und Fix-Runden",
+      "owner": "scripts/process/red_evidence.py",
+      "record": "ROOT-CAUSE-Block im Journal; REPLAN-Zeile; Commits",
+      "kpis": [
+        {
+          "id": "S7.q1",
+          "dimension": "quality",
+          "name": "Blockierte Review-Runden je Arbeit",
+          "definition": "Zahl der blockierten Review-Runden bis zum Pass einer Arbeit.",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "proxy",
+          "kenni_data": "vorhanden",
+          "source": "Review-Berichte (rounds)",
+          "gap": "Ursprung der Blocks nur, wo er aufgezeichnet ist.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S7.q2",
+          "dimension": "quality",
+          "name": "Root-Cause-Blöcke je Arbeit",
+          "definition": "Anzahl der ROOT-CAUSE-Blöcke je Arbeit (Regel 6: Ursache vor Symptom).",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "vorhanden",
+          "source": "ROOT-CAUSE-Blöcke im Journal",
+          "gap": null,
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S7.c1",
+          "dimension": "cost",
+          "name": "Tokens je Fix-Runde",
+          "definition": "Ausgabe-Tokens der Sitzung, die eine Fix-Runde ausgeführt hat.",
+          "unit": "Tokens",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Gleiche Ursache wie S6.c1.",
+          "instrument": "scripts/process/report.py",
+          "priority": 1
+        }
+      ]
+    },
+    {
+      "id": "S8",
+      "name": "Gate-Runner",
+      "owner": "scripts/process/gate_runner.py",
+      "record": "process-gate-events.jsonl (Gitverzeichnis); .process-work/gate-triage.jsonl",
+      "kpis": [
+        {
+          "id": "S8.q1",
+          "dimension": "quality",
+          "name": "Blockrate je Gate",
+          "definition": "Blocks je Gate geteilt durch Läufe dieses Gates.",
+          "unit": "Anteil",
+          "direction": "none",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "process-gate-events.jsonl",
+          "gap": "Kein Ereignis-Log in kenni. Blocks sind roh; Ursache erst nach Triage.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S8.q2",
+          "dimension": "quality",
+          "name": "Fehlalarmquote je Gate",
+          "definition": "Triagierte Blocks ohne Befund, geteilt durch alle triagierten Blocks.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "estimated",
+          "kenni_data": "ungeprüft",
+          "source": ".process-work/gate-triage.jsonl",
+          "gap": "Triage ist manuell; unklassifizierte Blocks zählen als unbekannt, nicht als Fehlalarm.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S8.s1",
+          "dimension": "speed",
+          "name": "Gate-Laufzeit",
+          "definition": "Laufzeit je Gate (duration_s).",
+          "unit": "s",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "process-gate-events.jsonl (duration_s)",
+          "gap": "Kein Ereignis-Log in kenni.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S8.c1",
+          "dimension": "cost",
+          "name": "Gate-Sekunden je Push",
+          "definition": "Summe der Gate-Laufzeiten je Push.",
+          "unit": "s",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "process-gate-events.jsonl (duration_s)",
+          "gap": "Kein Ereignis-Log in kenni.",
+          "instrument": null,
+          "priority": null
+        }
+      ]
+    },
+    {
+      "id": "S9",
+      "name": "Pre-Push-Rahmen und Merge-Schutz",
+      "owner": "scripts/process/pre_push.py",
+      "record": "Stempel process-push-ok; process-owner-overrides.log; Zertifikate",
+      "kpis": [
+        {
+          "id": "S9.q1",
+          "dimension": "quality",
+          "name": "Override-Quote (umgangene Prüfungen)",
+          "definition": "Anteil der Pushes oder Merges mit Owner-Override oder Überspringen der Prüfung.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "proxy",
+          "kenni_data": "ungeprüft",
+          "source": "process-owner-overrides.log (nur PROCESS_OWNER_OVERRIDE)",
+          "gap": "PROCESS_SKIP und SKIP=process-gates werden nicht protokolliert.",
+          "instrument": "scripts/process/merge_route.py",
+          "priority": 2
+        },
+        {
+          "id": "S9.s1",
+          "dimension": "speed",
+          "name": "Push-Prüfdauer",
+          "definition": "Zeit vom Pre-Push-Start bis zum Stempel process-push-ok.",
+          "unit": "s",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Kein Start- und Endzeitpunkt der Prüfkette.",
+          "instrument": "scripts/process/pre_push.py",
+          "priority": 3
+        }
+      ]
+    },
+    {
+      "id": "S10",
+      "name": "Review-Urteil",
+      "owner": "scripts/process/check_review.py",
+      "record": "REVIEW-Zeile im Journal; Attestierung",
+      "kpis": [
+        {
+          "id": "S10.q1",
+          "dimension": "quality",
+          "name": "Blockrate Review",
+          "definition": "Blockierte Reviews geteilt durch alle Reviews. Nur zusammen mit S14.q1 lesbar.",
+          "unit": "Anteil",
+          "direction": "none",
+          "status": "measured",
+          "kenni_data": "vorhanden",
+          "source": "REVIEW-Zeilen im Journal",
+          "gap": null,
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S10.c1",
+          "dimension": "cost",
+          "name": "Owner-Entscheidungen je Arbeit",
+          "definition": "DECISION-Zeilen je Arbeit (Eingriffe des Owners).",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "proxy",
+          "kenni_data": "vorhanden",
+          "source": "DECISION-Zeilen in Plänen und Journal",
+          "gap": "Zählt Entscheidungen, nicht Minuten.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S10.s1",
+          "dimension": "speed",
+          "name": "Review-Dauer",
+          "definition": "Zeit vom Start des Review-Bündels bis zum Urteil.",
+          "unit": "min",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "REVIEW-Zeilen tragen keinen Zeitstempel; eine Ergänzung ändert das Zeilenformat (Vertrag, Migrationshinweis nötig).",
+          "instrument": "scripts/process/attest.py",
+          "priority": 2
+        }
+      ]
+    },
+    {
+      "id": "S11",
+      "name": "Finish (Einzelzweig-Merge)",
+      "owner": "scripts/process/finish.py",
+      "record": "Merge-Zertifikat; Abschlussbericht",
+      "kpis": [
+        {
+          "id": "S11.q1",
+          "dimension": "quality",
+          "name": "Testfehler beim Finish",
+          "definition": "Anteil der Finish-Läufe, die an Tests scheitern.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "ungeprüft",
+          "source": "keine",
+          "gap": "Das Ergebnis der Testläufe wird nicht gezählt.",
+          "instrument": "scripts/process/finish.py",
+          "priority": 3
+        },
+        {
+          "id": "S11.s1",
+          "dimension": "speed",
+          "name": "Finish-Dauer",
+          "definition": "Zeit von Finish-Start bis Merge-Zertifikat.",
+          "unit": "min",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Kein Start- und Endzeitpunkt.",
+          "instrument": "scripts/process/finish.py",
+          "priority": 3
+        }
+      ]
+    },
+    {
+      "id": "S12",
+      "name": "Merge-Zug",
+      "owner": "scripts/process/train.py",
+      "record": "process-train/phases.jsonl; green-suites; Zertifikat",
+      "kpis": [
+        {
+          "id": "S12.q1",
+          "dimension": "quality",
+          "name": "Rotquote je Zug",
+          "definition": "Anteil der Zugläufe, die rot werden und in eine Wiederholung oder Bisektion gehen.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "phases.jsonl",
+          "gap": "Kein process-train-Verzeichnis in kenni.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S12.q2",
+          "dimension": "quality",
+          "name": "Flake-Quote",
+          "definition": "Anteil der Zugläufe, die als FLAKY markiert und trotzdem gemergt werden.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "vorhanden",
+          "source": "phases.jsonl; FLAKY-Markierungen (in kenni 0 Journal-Fundstellen)",
+          "gap": "Eine Markierung, die nie gesetzt wird, ist kein Nachweis für Stabilität.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S12.s1",
+          "dimension": "speed",
+          "name": "Phasenzeit im Zug",
+          "definition": "Zeit je Zugphase (Bordkarte, Gate, Test, Merge).",
+          "unit": "s",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "phases.jsonl; Auswertung train-phases",
+          "gap": "Kein process-train-Verzeichnis in kenni.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S12.s2",
+          "dimension": "speed",
+          "name": "Lead-Time Boarding bis Merge",
+          "definition": "Zeit von der Einschiffung eines Branches bis zum Merge.",
+          "unit": "min",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "phases.jsonl",
+          "gap": "Kein process-train-Verzeichnis in kenni.",
+          "instrument": null,
+          "priority": null
+        }
+      ]
+    },
+    {
+      "id": "S13",
+      "name": "Worker-Statusberichte",
+      "owner": "scripts/process/report.py",
+      "record": "process-tower/reports.jsonl",
+      "kpis": [
+        {
+          "id": "S13.q1",
+          "dimension": "quality",
+          "name": "Anteil Phasen mit failed oder blocked",
+          "definition": "Anteil der Phasen, die mit failed oder blocked enden.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "process-tower/reports.jsonl",
+          "gap": "process-tower in kenni ohne Berichte.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S13.g1",
+          "dimension": "guard",
+          "name": "Phasen ohne Endbericht",
+          "definition": "Anteil der begonnenen Phasen ohne Endzustand. Macht S6.s1 unvollständig.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "estimated",
+          "kenni_data": "fehlt",
+          "source": "Abgleich Dispatch-Logs mit Berichten",
+          "gap": "Wird im Cockpit als offen markiert, aber nicht gezählt.",
+          "instrument": "scripts/process/process_kpis.py",
+          "priority": 2
+        },
+        {
+          "id": "S13.s1",
+          "dimension": "speed",
+          "name": "Berichtsverzug",
+          "definition": "Zeit vom Phasenende bis zum geschriebenen Endbericht.",
+          "unit": "s",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "Phasenende und Berichtszeitpunkt werden nicht getrennt festgehalten.",
+          "instrument": "scripts/process/report.py",
+          "priority": 3
+        }
+      ]
+    },
+    {
+      "id": "S14",
+      "name": "Deploy und Nachfehler-Fenster",
+      "owner": "scripts/process/train.py",
+      "record": "Trailer Regression-of: #N; deployed-Zeile in phases.jsonl",
+      "kpis": [
+        {
+          "id": "S14.q1",
+          "dimension": "quality",
+          "name": "Nachfehler je gemergter Arbeit (30 Tage)",
+          "definition": "Anzahl der Arbeiten mit Regression-of-Trailer innerhalb von 30 Tagen nach Merge, geteilt durch alle Merges.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "proxy",
+          "kenni_data": "vorhanden",
+          "source": "Trailer Regression-of: #N (kenni: 2 Treffer, 106 Merges)",
+          "gap": "Ein Trailer ist kein Vorfall; Vorfälle und Hotfixes ohne Trailer werden nicht erfasst.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S14.q2",
+          "dimension": "quality",
+          "name": "Deploy-Fehlerquote",
+          "definition": "Anteil der Deploys, die fehlschlagen oder zurückgerollt werden.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "fehlt",
+          "source": "keine",
+          "gap": "kenni hat keine Deploy-Stufe; ein Deploy-Ereignis existiert nur bei train --deploy.",
+          "instrument": "scripts/process/train.py",
+          "priority": 3
+        },
+        {
+          "id": "S14.s1",
+          "dimension": "speed",
+          "name": "Merge bis Deploy",
+          "definition": "Zeit von Merge bis erfolgreichem Deploy.",
+          "unit": "min",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "phases.jsonl (deployed)",
+          "gap": "Nur mit --deploy; in kenni nicht eingerichtet.",
+          "instrument": null,
+          "priority": null
+        }
+      ]
+    },
+    {
+      "id": "S15",
+      "name": "Steward-Housekeeping",
+      "owner": "scripts/process/tidy.py",
+      "record": "keiner",
+      "kpis": [
+        {
+          "id": "S15.q1",
+          "dimension": "quality",
+          "name": "Wiederhergestellte Worktrees",
+          "definition": "Anzahl der Worktrees oder Branches, die nach dem Aufräumen wieder angelegt werden müssen (Fehlentscheidung des Aufräumens).",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "ungeprüft",
+          "source": "keine",
+          "gap": "Aufräumentscheidungen werden nicht protokolliert; eine Wiederherstellung bleibt unsichtbar.",
+          "instrument": "scripts/process/tidy.py",
+          "priority": 3
+        },
+        {
+          "id": "S15.c1",
+          "dimension": "cost",
+          "name": "Offene Worktrees und Branches",
+          "definition": "Anzahl der Worktrees und Branches, die über das Keep-Limit hinaus bestehen.",
+          "unit": "Anzahl",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "ungeprüft",
+          "source": "keine",
+          "gap": "tidy.py nicht gelesen; kein Protokoll.",
+          "instrument": "scripts/process/tidy.py",
+          "priority": 3
+        }
+      ]
+    },
+    {
+      "id": "S16",
+      "name": "Optimierungsschleife",
+      "owner": "scripts/process/optimize.py",
+      "record": ".process-work/optimizations/OPT-NNNN-*.md (Log-Zeilen)",
+      "kpis": [
+        {
+          "id": "S16.q1",
+          "dimension": "quality",
+          "name": "Zurückgenommene Entscheidungen",
+          "definition": "Anteil der adoptierten Änderungen, die später zurückgerollt oder durch einen neuen Record ersetzt wurden.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "Zustandsübergänge im Record (rolled-back, superseded)",
+          "gap": "kenni hat keinen Optimierungsrecord; die Rückholung zählt erst nach einer Wirkungsmessung.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S16.s1",
+          "dimension": "speed",
+          "name": "Befund bis Entscheidung",
+          "definition": "Zeit von der ersten Log-Zeile eines Records bis zur Entscheidung (adopted, rejected, rolled-back).",
+          "unit": "Tage",
+          "direction": "lower",
+          "status": "measured",
+          "kenni_data": "fehlt",
+          "source": "Log-Zeilen im Record",
+          "gap": "kenni hat keinen Optimierungsrecord.",
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S16.c1",
+          "dimension": "cost",
+          "name": "Optimierungsaufwand am Gesamtaufwand",
+          "definition": "spent-tokens und spent-hours der Records geteilt durch den gemessenen Gesamtaufwand; Richtwert etwa 10 %.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "estimated",
+          "kenni_data": "fehlt",
+          "source": "Record-Felder spent-tokens, spent-hours",
+          "gap": "Die spent-Felder werden von Hand gepflegt; der Nenner hängt an S6.c1.",
+          "instrument": null,
+          "priority": null
+        }
+      ]
+    },
+    {
+      "id": "S17",
+      "name": "Messung selbst",
+      "owner": "scripts/process/process_kpis.py",
+      "record": "alle obigen Datensätze",
+      "kpis": [
+        {
+          "id": "S17.q1",
+          "dimension": "quality",
+          "name": "Verlorene Gate-Ereignisse",
+          "definition": "Anteil der Gate-Läufe, deren Ereignis nicht geschrieben wurde.",
+          "unit": "Anteil",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "ungeprüft",
+          "source": "keine",
+          "gap": "gate_events.append verschluckt jede Ausnahme (gate_events.py:46-47); ein verlorenes Ereignis ist unsichtbar.",
+          "instrument": "scripts/process/gate_events.py",
+          "priority": 2
+        },
+        {
+          "id": "S17.g1",
+          "dimension": "guard",
+          "name": "Messabdeckung",
+          "definition": "Anteil der KPIs dieser Registry mit Status measured oder estimated.",
+          "unit": "Anteil",
+          "direction": "higher",
+          "status": "measured",
+          "kenni_data": "n/a",
+          "source": "dieses Dokument (Prüfung durch tests/test_step_kpis.py)",
+          "gap": null,
+          "instrument": null,
+          "priority": null
+        },
+        {
+          "id": "S17.c1",
+          "dimension": "cost",
+          "name": "Cockpit-Laufzeit",
+          "definition": "Laufzeit von process_kpis.py report.",
+          "unit": "s",
+          "direction": "lower",
+          "status": "missing",
+          "kenni_data": "ungeprüft",
+          "source": "keine",
+          "gap": "Nicht gemessen.",
+          "instrument": "scripts/process/process_kpis.py",
+          "priority": 3
+        }
+      ]
+    }
+  ],
+  "goals": [
+    {
+      "name": "Durchlaufzeit je Issue",
+      "dimension": "speed",
+      "kpi_ids": [
+        "S12.s2",
+        "S14.s1"
+      ],
+      "status": "measured",
+      "note": "flow zeigt Teilwerte; Startzeitpunkt ist geschätzt."
+    },
+    {
+      "name": "Tokens je Issue",
+      "dimension": "cost",
+      "kpi_ids": [
+        "S4.c1",
+        "S6.c1",
+        "S7.c1"
+      ],
+      "status": "missing",
+      "note": "Die Quelle fehlt; Blocker ist Priorität 1."
+    },
+    {
+      "name": "Nachfehler",
+      "dimension": "quality",
+      "kpi_ids": [
+        "S14.q1",
+        "S10.q1"
+      ],
+      "status": "proxy",
+      "note": "Nur zusammen lesbar."
+    },
+    {
+      "name": "Owner-Aufwand je Issue",
+      "dimension": "cost",
+      "kpi_ids": [
+        "S10.c1"
+      ],
+      "status": "proxy",
+      "note": "Zählt Entscheidungen, nicht Minuten."
+    }
+  ],
+  "defects": [
+    {
+      "id": "D1",
+      "where": "scripts/process/process_kpis.py (cost, session_output_tokens)",
+      "what": "Summiert jeden Treffer des Token-Musters ohne Deduplizierung. Claude Code schreibt je Inhaltsblock eine Zeile mit derselben Usage; dispatch.py (_transcript_usage) zählt eine Nachricht einmal.",
+      "impact": "Zwei Leser derselben Transkripte liefern verschiedene Zahlen; Budgetentscheidungen auf Basis von cost sind zu hoch.",
+      "evidence": "Gelesen, nicht reproduziert.",
+      "priority": 1
+    },
+    {
+      "id": "D2",
+      "where": "scripts/process/process_kpis.py:2357 (losses)",
+      "what": "Die Konfidenz der Überschrift leitet sich von der Zahl der Issues ab, nicht von den befüllten Werten.",
+      "impact": "Eine Überschrift mit hoher Konfidenz, obwohl Tokens, Belegung und Verzögerung 0 von n Issues befüllt haben.",
+      "evidence": "Gelesen; in kenni sichtbar (n=28, Werte 0).",
+      "priority": 1
+    },
+    {
+      "id": "D3",
+      "where": "scripts/process/gate_events.py:46-47",
+      "what": "append fängt jede Ausnahme ab und schreibt nichts.",
+      "impact": "Verlorene Gate-Ereignisse sind unsichtbar; S8 und S3.q2 wirken vollständiger als sie sind.",
+      "evidence": "Gelesen.",
+      "priority": 2
+    },
+    {
+      "id": "D4",
+      "where": "scripts/process/process_kpis.py (report, Kopf)",
+      "what": "Der Kopf von report lässt models, rounds, outcomes und train-phases aus; cost erhält kein transcripts-Verzeichnis.",
+      "impact": "Der Gesamtbericht zeigt Lücken nicht als Lücken.",
+      "evidence": "Vom Audit gelesen, nicht gegengeprüft.",
+      "priority": 2
+    }
+  ],
+  "instrumentation_backlog": [
+    {
+      "id": "I1",
+      "priority": 1,
+      "placement": "core",
+      "kpi_ids": [
+        "S4.c1",
+        "S6.c1",
+        "S7.c1"
+      ],
+      "change": "Der Phasen-Report übergibt die Usage der Sitzung (Ausgabe- und Cache-Tokens) an scripts/process/report.py; Quelle ist der bestehende Transkript-Leser von dispatch.py.",
+      "why": "Schließt die größte Lücke für die Kostenseite; Tokens je Issue sind sonst nicht berechenbar.",
+      "tier": "2",
+      "size": "klein"
+    },
+    {
+      "id": "I2",
+      "priority": 1,
+      "placement": "core",
+      "kpi_ids": [
+        "S6.c1"
+      ],
+      "change": "cost nutzt den Transkript-Leser von dispatch.py (eine Lesart, dedupliziert) statt eigener Regex-Summe.",
+      "why": "Behebt D1; danach sind beide Zahlen identisch.",
+      "tier": "1",
+      "size": "klein"
+    },
+    {
+      "id": "I3",
+      "priority": 1,
+      "placement": "core",
+      "kpi_ids": [
+        "S2.q1",
+        "S3.q1",
+        "S3.q2",
+        "S8.q1",
+        "S17.q1"
+      ],
+      "change": "Gate-Ereignisse nicht still verwerfen: Fehler zählen und in einen Gegenstand schreiben, der im Cockpit erscheint (D3).",
+      "why": "Ohne sichtbaren Verlust ist jede Gate-KPI nur eine Untergrenze.",
+      "tier": "3",
+      "size": "klein"
+    },
+    {
+      "id": "I4",
+      "priority": 2,
+      "placement": "core",
+      "kpi_ids": [
+        "S1.q1"
+      ],
+      "change": "Das Tier steht als Feld im Plan-Kopf; eine Anhebung wird als Zeile mit Grund notiert.",
+      "why": "Ohne das ist nicht messbar, wie oft das Routing danebenliegt.",
+      "tier": "2",
+      "size": "mittel"
+    },
+    {
+      "id": "I5",
+      "priority": 2,
+      "placement": "core",
+      "kpi_ids": [
+        "S3.s1",
+        "S10.s1"
+      ],
+      "change": "Zeitstempel für Planbeginn und Reviewstart; REVIEW-Zeilen erhalten einen Zeitstempel (Vertragsänderung, Migrationshinweis).",
+      "why": "Macht Plan- und Review-Dauer direkt messbar statt aus Zeilen abgeleitet.",
+      "tier": "2",
+      "size": "mittel"
+    },
+    {
+      "id": "I6",
+      "priority": 2,
+      "placement": "core",
+      "kpi_ids": [
+        "S13.g1",
+        "S13.s1",
+        "S6.s1"
+      ],
+      "change": "Phasenstart und -ende als ein Datensatz mit Dauer statt zwei Quellen, die beim Cockpit verbunden werden.",
+      "why": "Phasendauer wird direkt statt abgeleitet; Phasen ohne Ende werden gezählt.",
+      "tier": "2",
+      "size": "mittel"
+    },
+    {
+      "id": "I7",
+      "priority": 2,
+      "placement": "core",
+      "kpi_ids": [
+        "S9.q1"
+      ],
+      "change": "PROCESS_SKIP und SKIP=process-gates werden wie PROCESS_OWNER_OVERRIDE protokolliert.",
+      "why": "Die Override-Quote ist sonst unvollständig.",
+      "tier": "3",
+      "size": "klein"
+    },
+    {
+      "id": "I8",
+      "priority": 3,
+      "placement": "project",
+      "kpi_ids": [
+        "S14.q2",
+        "S14.s1"
+      ],
+      "change": "Deploy-Ereignisse in phases.jsonl; in kenni nicht vorhanden, weil kenni keine Deploy-Stufe hat.",
+      "why": "Nur sinnvoll, wo ein Deploy existiert.",
+      "tier": "2",
+      "size": "mittel"
+    }
+  ]
+}
